@@ -2,7 +2,10 @@ package sfu
 
 import (
 	"bufio"
+	"math/rand"
 	"strings"
+
+	"github.com/speps/go-hashids"
 )
 
 func GetUfragAndPass(sdp string) (ufrag, pass string) {
@@ -38,4 +41,16 @@ func CountTracks(sdp string) int {
 	}
 
 	return counter
+}
+
+func GenerateID(data []int) string {
+	randInt := rand.Intn(100) //nolint:gosec //it's not a password
+	data = append(data, randInt)
+	hd := hashids.NewData()
+	hd.Salt = "this is my salt"
+	hd.MinLength = 9
+	h, _ := hashids.NewWithData(hd)
+	e, _ := h.Encode(data)
+
+	return e
 }

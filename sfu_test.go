@@ -7,8 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"inlive.dev/hub/pkg/testhelper"
-	"inlive.dev/hub/pkg/util"
+	"github.com/inlivehub/sfu/testhelper"
 
 	"github.com/pion/webrtc/v3"
 	"github.com/stretchr/testify/require"
@@ -242,7 +241,7 @@ func setup(t *testing.T, udpMux *UDPMux, ctx context.Context, peerCount int, tra
 			peer, remoteTrackChan := createPeer(ctx, t, sfu, peerTracks, mediaEngine, connectedChan)
 			testhelper.SetPeerConnectionTracks(peer, peerTracks)
 
-			uid := util.GenerateUID([]int{sfu.Counter})
+			uid := GenerateID([]int{sfu.Counter})
 			peerChan <- PeerClient{
 				PeerConnection: peer,
 				ID:             uid,
