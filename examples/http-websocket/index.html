@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<head>
+    <title>HTTP WebSocket Example</title>
+    <meta charset="utf-8">
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: sans-serif;
+            display: flex;
+            align-items: stretch;
+            flex-direction: column;
+            height: 100vh;
+            width: 100vw;
+            justify-content: space-between;
+        }
+        h1 {
+            margin: 0;
+            padding: 0.5em 0;
+        }
+
+        header{
+           text-align: center;
+        }
+
+        main {
+            display: flex;
+            justify-content: center;
+            align-items: stretch;
+            flex-grow: 1;
+        }
+
+        aside {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 1em;
+        }
+        video {
+            aspect-ratio:4/3;
+            background-color: black;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>HTTP WebSocket Example</h1>
+        <p>Open the console to see the output.</p>
+    </header>
+    <main>
+        <video id="localVideo"></video>
+    </main>
+    <aside><button onclick="start()" disabled>Start</button></aside>
+    <script>
+          const peerConnection = new RTCPeerConnection({
+                    iceServers: [
+                        {
+                            urls: "turn:turn.inlive.app:3478",
+                            username: "inlive",
+                            credential: "inlivesdkturn"
+                        },
+                        {
+                            urls: "stun:turn.inlive.app:3478",
+                        },
+                    ]
+                });
+        const ws = new WebSocket("ws://localhost:3000/ws");
+        ws.onopen = function() {
+            console.log("websocket open");
+            document.querySelector("button").disabled = false;
+        };
+        ws.onmessage = async function(e) {
+
+            const msg = JSON.parse(e.data);
+            try {
+                if (msg.type == 'offer') {
+                    await peerConnection.setRemoteDescription(msg.data);
+                    var answer = await peerConnection.createAnswer();
+                    await peerConnection.setLocalDescription(answer);
+                    ws.send(JSON.stringify({type:'answer',data:answer.sdp}));
+                } else if (msg.type == 'answer') {
+                    await peerConnection.setRemoteDescription(msg.data);
+                } else if (msg.type == 'candidate') {
+                    await peerConnection.addIceCandidate(msg.data);
+                }
+            } catch (error) {
+                console.log(error);
+            }
+        };
+        ws.onclose = function() {
+            console.log("websocket close");
+        };
+
+        async function start() {
+            document.querySelector("button").disabled = true;
+            var localVideo = document.getElementById("localVideo");
+            var constraints = {
+                audio: true,
+                video: true
+            };
+            
+            stream = await navigator.mediaDevices.getUserMedia(constraints)
+            localVideo.srcObject = stream;
+            localVideo.play();
+            
+            peerConnection.ontrack = function(e) {
+                if(e.track.kind != "video") {
+                    return
+                }
+
+                const streamid = e.streams[0].id;
+                console.log("ontrack");
+                let remoteVideo = document.querySelector("video-"+streamid);
+                if (!remoteVideo) {
+                    remoteVideo = document.createElement("video");
+                    remoteVideo.id = "video-"+streamid;
+                    remoteVideo.autoplay = true;
+                    document.querySelector('main').appendChild(remoteVideo);
+                }
+
+                remoteVideo.srcObject = e.streams[0];
+            };
+
+            stream.getTracks().forEach(track => peerConnection.addTrack(track, stream));
+
+            const offer=await peerConnection.createOffer()
+            await peerConnection.setLocalDescription(offer)
+            ws.send(JSON.stringify({type:'offer',data:offer.sdp}));
+
+            peerConnection.onicecandidate = function(e) {
+                if (e.candidate!=null) {
+                    ws.send(JSON.stringify({type:'candidate',data:e.candidate.candidate}));
+                }
+            };
+        }
+        </script>
+</body>
+</html>
