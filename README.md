@@ -2,6 +2,15 @@
 
 This Golang package is an SFU library based on Pion WebRTC. It is designed to be used in the inLive Hub project, but it can also be used in other projects. The goal is to have a Golang SFU library that is portable but easy to extend.
 
+## Features
+- [x] Group call
+- [x] Screen sharing
+- [x] Perfect negotiation
+- [ ] Data channel (WIP)
+- [ ] Simulcast
+- [ ] Events
+- [ ] Room statistic
+
 ## Components:
 This SFU package has 4 components:
 

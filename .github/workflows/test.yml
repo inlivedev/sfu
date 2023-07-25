@@ -6,8 +6,26 @@ name: Test
 on:
   push:
     branches: [ "main" ]
+    paths:
+      - '**.go'
+      - '**.sql'
+      - '.env.example'
+      - '**.yml'
+      - '**.tf'
+      - 'go.mod'
+      - 'go.sum'
+      - 'Dockerfile'
   pull_request:
     branches: [ "main" ]
+    paths:
+      - '**.go'
+      - '**.sql'
+      - '.env.example'
+      - '**.yml'
+      - '**.tf'
+      - 'go.mod'
+      - 'go.sum'
+      - 'Dockerfile'
 
 jobs:
   build:
