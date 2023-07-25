@@ -14,8 +14,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v3
+
+    - name: Update apt
+      run: sudo apt update
+    
     - name: Install dependencies
-      run: apt install libx264-dev libopus-dev
+      run: sudo apt install libx264-dev libopus-dev
 
     - name: Set up Go
       uses: actions/setup-go@v4
