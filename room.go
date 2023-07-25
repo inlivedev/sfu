@@ -28,7 +28,6 @@ var (
 
 type Options struct {
 	WebRTCPort               int
-	MessengerURL             string
 	ConnectRemoteRoomTimeout time.Duration
 	EnableBridging           bool
 }
@@ -36,7 +35,6 @@ type Options struct {
 func DefaultOptions() Options {
 	return Options{
 		WebRTCPort:               50005,
-		MessengerURL:             "127.0.0.1:4222",
 		ConnectRemoteRoomTimeout: 30 * time.Second,
 	}
 }
@@ -132,7 +130,7 @@ func (r *Room) StopAllClients() {
 	}
 }
 
-func (r *Room) AddClient(id string, direction webrtc.RTPTransceiverDirection, clientType string) (*Client, error) {
+func (r *Room) AddClient(id string, opts ClientOptions) (*Client, error) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
@@ -145,7 +143,7 @@ func (r *Room) AddClient(id string, direction webrtc.RTPTransceiverDirection, cl
 		return nil, ErrClientExists
 	}
 
-	client := r.sfu.NewClient(id, direction, clientType)
+	client := r.sfu.NewClient(id, opts)
 
 	offerChan := make(chan webrtc.SessionDescription, 10)
 	answerChan := make(chan webrtc.SessionDescription, 10)
@@ -164,17 +162,17 @@ func (r *Room) AddClient(id string, direction webrtc.RTPTransceiverDirection, cl
 		// send offer to SSE, the client should respond with the answer
 		offerChan <- offer
 
-		ctxTimeout, cancelTimeout := context.WithTimeout(client.Context, 60*time.Second)
+		ctxTimeout, cancelTimeout := context.WithTimeout(client.Context, 30*time.Second)
 
 		defer cancelTimeout()
 
-		// this will wait for answer from client in 60 seconds or timeout
+		// this will wait for answer from client in 30 seconds or timeout
 		select {
 		case <-ctxTimeout.Done():
 			log.Println("timeout on renegotiation")
 			return webrtc.SessionDescription{}
 		case answer := <-answerChan:
-			log.Println("received answer from client ", client.Type, client.ID)
+			log.Println("received answer from client ", client.GetType(), client.ID)
 			return answer
 		}
 	}

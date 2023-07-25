@@ -10,7 +10,8 @@ var (
 	ErrRoomNotFound             = errors.New("room not found")
 	ErrRemoteRoomConnectTimeout = errors.New("timeout connecting to remote room")
 
-	RoomTypeLocal = "local"
+	RoomTypeLocal  = "local"
+	RoomTypeRemote = "remote"
 )
 
 // Manager is a struct that manages all the rooms

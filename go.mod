@@ -1,4 +1,4 @@
-module github.com/inlivehub/sfu
+module github.com/inlivedev/sfu
 
 go 1.20
 

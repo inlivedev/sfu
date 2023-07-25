@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/inlivehub/sfu/testhelper"
+	"github.com/inlivedev/sfu/testhelper"
 
 	"github.com/pion/webrtc/v3"
 	"github.com/stretchr/testify/require"
@@ -246,7 +246,7 @@ func setup(t *testing.T, udpMux *UDPMux, ctx context.Context, peerCount int, tra
 				PeerConnection: peer,
 				ID:             uid,
 			}
-			relay := sfu.NewClient(uid, webrtc.RTPTransceiverDirectionSendrecv, ClientTypePeer)
+			relay := sfu.NewClient(uid, DefaultClientOptions())
 
 			relay.OnRenegotiation = func(ctx context.Context, sdp webrtc.SessionDescription) webrtc.SessionDescription {
 				if peer.SignalingState() != webrtc.SignalingStateClosed {

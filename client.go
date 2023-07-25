@@ -25,17 +25,23 @@ var (
 	ErrNegotiationIsNotRequested = errors.New("client: error negotiation is called before requested")
 )
 
+type ClientOptions struct {
+	Direction   webrtc.RTPTransceiverDirection
+	IdleTimeout time.Duration
+	Type        string
+}
+
 type Client struct {
 	ID                                string
 	Context                           context.Context
 	Cancel                            context.CancelFunc
 	canAddCandidate                   bool
-	Direction                         webrtc.RTPTransceiverDirection
 	intervalStarted                   bool
 	initialTracksCount                int
 	isInRenegotiation                 bool
-	Type                              string
 	InputChan                         chan interface{}
+	idleTimeoutContext                context.Context
+	idleTimeoutCancel                 context.CancelFunc
 	mutex                             sync.RWMutex
 	PeerConnection                    *webrtc.PeerConnection
 	pendingReceivedTracks             map[string]*webrtc.TrackLocalStaticRTP
@@ -52,10 +58,19 @@ type Client struct {
 	OnRenegotiation                   func(context.Context, webrtc.SessionDescription) webrtc.SessionDescription
 	onStopped                         func()
 	onTrack                           func(context.Context, *webrtc.TrackLocalStaticRTP)
+	options                           ClientOptions
 	Tracks                            map[string]*webrtc.TrackLocalStaticRTP
 	NegotiationNeeded                 bool
 	pendingRemoteCandidates           []webrtc.ICECandidateInit
 	pendingLocalCandidates            []*webrtc.ICECandidate
+}
+
+func DefaultClientOptions() ClientOptions {
+	return ClientOptions{
+		Direction:   webrtc.RTPTransceiverDirectionSendrecv,
+		IdleTimeout: 30 * time.Second,
+		Type:        ClientTypePeer,
+	}
 }
 
 // Init and Complete negotiation is used for bridging the room between servers
@@ -137,7 +152,7 @@ func (c *Client) Negotiate(offer webrtc.SessionDescription) (*webrtc.SessionDesc
 // The renegotiation can be in race condition when a client is renegotiating and new track is added to the client because another client is publishing to the room.
 // We can block the renegotiation until the current renegotiation is finish, but it will block the negotiation process for a while.
 func (c *Client) renegotiate() error {
-	if c.Type == ClientTypeUpBridge && c.OnBeforeRenegotiation != nil && !c.OnBeforeRenegotiation(c.Context) {
+	if c.GetType() == ClientTypeUpBridge && c.OnBeforeRenegotiation != nil && !c.OnBeforeRenegotiation(c.Context) {
 		log.Println("sfu: renegotiation is not allowed because the downbridge is doing renegotiation", c.ID)
 
 		return nil
@@ -186,10 +201,6 @@ func (c *Client) renegotiate() error {
 				return err
 			}
 		}
-
-		// if c.NegotiationNeeded {
-		// 	log.Println("need renegotiate ", c.ID)
-		// }
 	}
 
 	c.isInRenegotiation = false
@@ -229,6 +240,8 @@ func (c *Client) setClientTrack(track *webrtc.TrackLocalStaticRTP) bool {
 }
 
 func (c *Client) removeTrack(trackID string) {
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
 	if _, ok := c.Tracks[trackID]; ok {
 		delete(c.Tracks, trackID)
 	}
@@ -384,5 +397,31 @@ func (c *Client) OnConnectionStateChanged(callback func(webrtc.PeerConnectionSta
 }
 
 func (c *Client) IsBridge() bool {
-	return c.Type == ClientTypeUpBridge || c.Type == ClientTypeDownBridge
+	return c.GetType() == ClientTypeUpBridge || c.GetType() == ClientTypeDownBridge
+}
+
+func (c *Client) startIdleTimeout() {
+	c.idleTimeoutContext, c.idleTimeoutCancel = context.WithTimeout(c.Context, 30*time.Second)
+
+	go func() {
+		<-c.idleTimeoutContext.Done()
+		log.Println("client: idle timeout reached ", c.ID)
+		c.Stop()
+	}()
+}
+
+func (c *Client) cancelIdleTimeout() {
+	if c.idleTimeoutCancel != nil {
+		c.idleTimeoutCancel()
+		c.idleTimeoutContext = nil
+		c.idleTimeoutCancel = nil
+	}
+}
+
+func (c *Client) GetType() string {
+	return c.options.Type
+}
+
+func (c *Client) GetDirection() webrtc.RTPTransceiverDirection {
+	return c.options.Direction
 }

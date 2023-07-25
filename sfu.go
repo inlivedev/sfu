@@ -102,7 +102,7 @@ func (s *SFU) addClient(client *Client, direction webrtc.RTPTransceiverDirection
 	s.onClientAdded(client)
 }
 
-func (s *SFU) createClient(id string, direction webrtc.RTPTransceiverDirection, peerConnectionConfig *webrtc.Configuration, clientType string) *Client {
+func (s *SFU) createClient(id string, peerConnectionConfig *webrtc.Configuration, opts ClientOptions) *Client {
 	m := &webrtc.MediaEngine{}
 	if err := m.RegisterCodec(webrtc.RTPCodecParameters{
 		RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264, ClockRate: 90000, Channels: 0, SDPFmtpLine: "", RTCPFeedback: nil},
@@ -176,9 +176,8 @@ func (s *SFU) createClient(id string, direction webrtc.RTPTransceiverDirection, 
 		mutex:                  sync.RWMutex{},
 		PeerConnection:         peerConnection,
 		State:                  ClientStateNew,
-		Direction:              direction,
-		Type:                   clientType,
 		Tracks:                 make(map[string]*webrtc.TrackLocalStaticRTP),
+		options:                opts,
 		pendingReceivedTracks:  make(map[string]*webrtc.TrackLocalStaticRTP),
 		pendingPublishedTracks: make(map[string]*webrtc.TrackLocalStaticRTP),
 		publishedTracks:        make(map[string]*webrtc.TrackLocalStaticRTP),
@@ -229,7 +228,6 @@ func (s *SFU) createClient(id string, direction webrtc.RTPTransceiverDirection, 
 				default:
 					i, _, readErr := remoteTrack.Read(rtpBuf)
 					if readErr == io.EOF {
-						log.Println("client: remote track read EOF ", remoteTrack.ID(), remoteTrack.StreamID(), remoteTrack.Kind())
 						client.removeTrack(localTrack.ID())
 						s.removeTrack(localTrack.StreamID(), localTrack.ID())
 						return
@@ -267,7 +265,7 @@ func (s *SFU) createClient(id string, direction webrtc.RTPTransceiverDirection, 
 	return client
 }
 
-func (s *SFU) NewClient(id string, direction webrtc.RTPTransceiverDirection, clientType string) *Client {
+func (s *SFU) NewClient(id string, opts ClientOptions) *Client {
 	s.Counter++
 
 	// iceServers := []webrtc.ICEServer{{URLs: []string{
@@ -293,7 +291,7 @@ func (s *SFU) NewClient(id string, direction webrtc.RTPTransceiverDirection, cli
 		ICEServers: iceServers,
 	}
 
-	client := s.createClient(id, direction, &peerConnectionConfig, clientType)
+	client := s.createClient(id, &peerConnectionConfig, opts)
 
 	client.onConnectionStateChanged = func(connectionState webrtc.PeerConnectionState) {
 		switch connectionState {
@@ -306,7 +304,7 @@ func (s *SFU) NewClient(id string, direction webrtc.RTPTransceiverDirection, cli
 				needRenegotiation = true
 			}
 
-			if direction == webrtc.RTPTransceiverDirectionRecvonly || direction == webrtc.RTPTransceiverDirectionSendrecv {
+			if opts.Direction == webrtc.RTPTransceiverDirectionRecvonly || opts.Direction == webrtc.RTPTransceiverDirectionSendrecv {
 				// get the tracks from other clients if the direction is receiving track
 				isNeedRenegotiation := s.SyncTrack(client)
 				if !needRenegotiation && isNeedRenegotiation {
@@ -326,6 +324,10 @@ func (s *SFU) NewClient(id string, direction webrtc.RTPTransceiverDirection, cli
 			}
 
 			client.afterClosed()
+		case webrtc.PeerConnectionStateFailed:
+			client.startIdleTimeout()
+		case webrtc.PeerConnectionStateConnecting:
+			client.cancelIdleTimeout()
 		}
 	}
 
@@ -334,7 +336,7 @@ func (s *SFU) NewClient(id string, direction webrtc.RTPTransceiverDirection, cli
 		client.pendingPublishedTracks[localTrack.StreamID()+"-"+localTrack.ID()] = localTrack
 
 		// don't publish track when not all the tracks are received
-		if client.Type == ClientTypePeer && client.initialTracksCount > len(client.pendingPublishedTracks) {
+		if client.GetType() == ClientTypePeer && client.initialTracksCount > len(client.pendingPublishedTracks) {
 			return
 		}
 
@@ -344,7 +346,7 @@ func (s *SFU) NewClient(id string, direction webrtc.RTPTransceiverDirection, cli
 	// request keyframe from new client for existing clients
 	client.requestKeyFrame()
 
-	s.addClient(client, direction)
+	s.addClient(client, client.GetDirection())
 
 	return client
 }

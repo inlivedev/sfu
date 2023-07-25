@@ -6,7 +6,7 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/inlivehub/room"
+	"github.com/inlivedev/sfu"
 	"github.com/pion/webrtc/v3"
 	"golang.org/x/net/websocket"
 )
@@ -34,14 +34,14 @@ func main() {
 	defer cancel()
 
 	// create room manager first before create new room
-	roomManager := room.NewManager(ctx, "server-name-here", room.Options{})
+	roomManager := sfu.NewManager(ctx, "server-name-here", sfu.Options{})
 
 	// generate a new room id. You can extend this example into a multiple room by use this in it's own API endpoint
 	roomID := roomManager.CreateRoomID()
 	roomName := "test-room"
 
 	// create new room
-	defaultRoom := roomManager.NewRoom(roomID, roomName, room.RoomTypeLocal)
+	defaultRoom := roomManager.NewRoom(roomID, roomName, sfu.RoomTypeLocal)
 
 	fs := http.FileServer(http.Dir("./"))
 	http.Handle("/", fs)
@@ -89,7 +89,7 @@ MessageLoop:
 
 }
 
-func clientHandler(conn *websocket.Conn, messageChan chan Request, r *room.Room) {
+func clientHandler(conn *websocket.Conn, messageChan chan Request, r *sfu.Room) {
 	ctx, cancel := context.WithCancel(conn.Request().Context())
 	defer cancel()
 
@@ -99,7 +99,7 @@ func clientHandler(conn *websocket.Conn, messageChan chan Request, r *room.Room)
 
 	// add a new client to room
 	// you can also get the client by using r.GetClient(clientID)
-	client, err := r.AddClient(clientID, webrtc.RTPTransceiverDirectionSendrecv, room.RoomTypeLocal)
+	client, err := r.AddClient(clientID, sfu.DefaultClientOptions())
 	if err != nil {
 		log.Panic(err)
 		return
