@@ -15,7 +15,7 @@ import (
 )
 
 type SFU struct {
-	Clients                   map[string]*Client
+	clients                   map[string]*Client
 	context                   context.Context
 	cancel                    context.CancelFunc
 	callbacksOnTrackPublished []func(map[string]*webrtc.TrackLocalStaticRTP)
@@ -58,7 +58,7 @@ func New(ctx context.Context, turnServer TurnServer, mux *UDPMux) *SFU {
 	localCtx, cancel := context.WithCancel(ctx)
 
 	sfu := &SFU{
-		Clients:             make(map[string]*Client),
+		clients:             make(map[string]*Client),
 		Counter:             0,
 		context:             localCtx,
 		cancel:              cancel,
@@ -93,11 +93,11 @@ func (s *SFU) addClient(client *Client, direction webrtc.RTPTransceiverDirection
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	if _, ok := s.Clients[client.ID]; ok {
+	if _, ok := s.clients[client.ID]; ok {
 		panic("client already exists")
 	}
 
-	s.Clients[client.ID] = client
+	s.clients[client.ID] = client
 
 	s.onClientAdded(client)
 }
@@ -148,6 +148,7 @@ func (s *SFU) createClient(id string, peerConnectionConfig *webrtc.Configuration
 	if err != nil {
 		panic(err)
 	}
+
 	i.Add(intervalPliFactory)
 
 	settingEngine := webrtc.SettingEngine{}
@@ -176,7 +177,7 @@ func (s *SFU) createClient(id string, peerConnectionConfig *webrtc.Configuration
 		mutex:                  sync.RWMutex{},
 		PeerConnection:         peerConnection,
 		State:                  ClientStateNew,
-		Tracks:                 make(map[string]*webrtc.TrackLocalStaticRTP),
+		tracks:                 make(map[string]*webrtc.TrackLocalStaticRTP),
 		options:                opts,
 		pendingReceivedTracks:  make(map[string]*webrtc.TrackLocalStaticRTP),
 		pendingPublishedTracks: make(map[string]*webrtc.TrackLocalStaticRTP),
@@ -212,7 +213,7 @@ func (s *SFU) createClient(id string, peerConnectionConfig *webrtc.Configuration
 		}
 
 		client.mutex.Lock()
-		client.Tracks[localTrack.ID()] = localTrack
+		client.tracks[localTrack.ID()] = localTrack
 		client.mutex.Unlock()
 
 		rtpBuf := make([]byte, 1400)
@@ -314,11 +315,12 @@ func (s *SFU) NewClient(id string, opts ClientOptions) *Client {
 
 			if needRenegotiation {
 				log.Println("call renegotiate after sync ", client.ID)
+
 				go client.renegotiate()
 			}
 
 		case webrtc.PeerConnectionStateClosed:
-			for _, track := range client.Tracks {
+			for _, track := range client.tracks {
 				client.removeTrack(track.ID())
 				s.removeTrack(track.StreamID(), track.ID())
 			}
@@ -332,7 +334,7 @@ func (s *SFU) NewClient(id string, opts ClientOptions) *Client {
 	}
 
 	client.onTrack = func(ctx context.Context, localTrack *webrtc.TrackLocalStaticRTP) {
-		client.Tracks[localTrack.ID()] = localTrack
+		client.tracks[localTrack.ID()] = localTrack
 		client.pendingPublishedTracks[localTrack.StreamID()+"-"+localTrack.ID()] = localTrack
 
 		// don't publish track when not all the tracks are received
@@ -340,7 +342,7 @@ func (s *SFU) NewClient(id string, opts ClientOptions) *Client {
 			return
 		}
 
-		s.publishTracks(ctx, client.ID, client.pendingPublishedTracks)
+		s.publishTracks(client.ID, client.pendingPublishedTracks)
 	}
 
 	// request keyframe from new client for existing clients
@@ -351,9 +353,11 @@ func (s *SFU) NewClient(id string, opts ClientOptions) *Client {
 	return client
 }
 
-func (s *SFU) publishTracks(ctx context.Context, clientID string, tracks map[string]*webrtc.TrackLocalStaticRTP) {
+func (s *SFU) publishTracks(clientID string, tracks map[string]*webrtc.TrackLocalStaticRTP) {
 	pendingTracks := []PublishedTrack{}
+
 	s.mutex.Lock()
+
 	for _, track := range tracks {
 		// only publish track if it's not published yet
 
@@ -364,12 +368,13 @@ func (s *SFU) publishTracks(ctx context.Context, clientID string, tracks map[str
 		pendingTracks = append(pendingTracks, newTrack)
 
 	}
+
 	s.mutex.Unlock()
 
 	s.broadcastTracks(pendingTracks)
 
 	// request keyframe from existing client
-	for _, client := range s.Clients {
+	for _, client := range s.clients {
 		client.requestKeyFrame()
 	}
 
@@ -377,7 +382,7 @@ func (s *SFU) publishTracks(ctx context.Context, clientID string, tracks map[str
 }
 
 func (s *SFU) broadcastTracks(tracks []PublishedTrack) {
-	for _, client := range s.Clients {
+	for _, client := range s.clients {
 		renegotiate := false
 
 		for _, track := range tracks {
@@ -394,7 +399,7 @@ func (s *SFU) broadcastTracks(tracks []PublishedTrack) {
 
 func (s *SFU) removeTrack(streamID, trackID string) bool {
 	trackRemoved := false
-	for _, client := range s.Clients {
+	for _, client := range s.clients {
 		trackRemoved = client.removePublishedTrack(streamID, trackID)
 	}
 
@@ -407,8 +412,9 @@ func (s *SFU) SyncTrack(client *Client) bool {
 	currentTracks := client.GetCurrentTracks()
 
 	needRenegotiation := false
-	for _, clientPeer := range s.Clients {
-		for _, track := range clientPeer.Tracks {
+
+	for _, clientPeer := range s.clients {
+		for _, track := range clientPeer.tracks {
 			if client.ID != clientPeer.ID {
 				if _, ok := currentTracks[track.StreamID()+"-"+track.ID()]; !ok {
 					client.addTrack(track)
@@ -427,8 +433,8 @@ func (s *SFU) SyncTrack(client *Client) bool {
 
 func (s *SFU) GetTracks() map[string]*webrtc.TrackLocalStaticRTP {
 	tracks := make(map[string]*webrtc.TrackLocalStaticRTP)
-	for _, client := range s.Clients {
-		for _, track := range client.Tracks {
+	for _, client := range s.clients {
+		for _, track := range client.tracks {
 			tracks[track.StreamID()+"-"+track.ID()] = track
 		}
 	}
@@ -437,7 +443,7 @@ func (s *SFU) GetTracks() map[string]*webrtc.TrackLocalStaticRTP {
 }
 
 func (s *SFU) Stop() {
-	for _, client := range s.Clients {
+	for _, client := range s.clients {
 		client.PeerConnection.Close()
 	}
 
@@ -454,13 +460,13 @@ func (s *SFU) OnStopped(callback func()) {
 }
 
 func (s *SFU) renegotiateAllClients() {
-	for _, client := range s.Clients {
+	for _, client := range s.clients {
 		go client.renegotiate()
 	}
 }
 
 func (s *SFU) requestKeyFrameFromClient(clientID string) {
-	if client, ok := s.Clients[clientID]; ok {
+	if client, ok := s.clients[clientID]; ok {
 		client.requestKeyFrame()
 	}
 }
@@ -514,4 +520,16 @@ func (s *SFU) onTrackPublished(tracks map[string]*webrtc.TrackLocalStaticRTP) {
 	for _, callback := range s.callbacksOnTrackPublished {
 		callback(tracks)
 	}
+}
+
+func (s *SFU) GetClients() map[string]*Client {
+	return s.clients
+}
+
+func (s *SFU) GetClient(id string) (*Client, error) {
+	if client, ok := s.clients[id]; ok {
+		return client, nil
+	}
+
+	return nil, ErrClientNotFound
 }

@@ -22,6 +22,9 @@ var (
 	ClientTypeUpBridge   = "upbridge"
 	ClientTypeDownBridge = "downbridge"
 
+	TrackTypeMedia  = "media"
+	TrackTypeScreen = "screen"
+
 	ErrNegotiationIsNotRequested = errors.New("client: error negotiation is called before requested")
 )
 
@@ -31,12 +34,16 @@ type ClientOptions struct {
 	Type        string
 }
 
+type Track struct {
+	Track *webrtc.TrackLocalStaticRTP
+	Type  string
+}
+
 type Client struct {
 	ID                                string
 	Context                           context.Context
 	Cancel                            context.CancelFunc
 	canAddCandidate                   bool
-	intervalStarted                   bool
 	initialTracksCount                int
 	isInRenegotiation                 bool
 	InputChan                         chan interface{}
@@ -47,9 +54,7 @@ type Client struct {
 	pendingReceivedTracks             map[string]*webrtc.TrackLocalStaticRTP
 	pendingPublishedTracks            map[string]*webrtc.TrackLocalStaticRTP
 	publishedTracks                   map[string]*webrtc.TrackLocalStaticRTP
-	lastPLISent                       time.Time ``
 	State                             int
-	trackCount                        int
 	OutputChan                        chan interface{}
 	onConnectionStateChanged          func(webrtc.PeerConnectionState)
 	onConnectionStateChangedCallbacks []func(webrtc.PeerConnectionState)
@@ -59,7 +64,7 @@ type Client struct {
 	onStopped                         func()
 	onTrack                           func(context.Context, *webrtc.TrackLocalStaticRTP)
 	options                           ClientOptions
-	Tracks                            map[string]*webrtc.TrackLocalStaticRTP
+	tracks                            map[string]*webrtc.TrackLocalStaticRTP
 	NegotiationNeeded                 bool
 	pendingRemoteCandidates           []webrtc.ICECandidateInit
 	pendingLocalCandidates            []*webrtc.ICECandidate
@@ -151,18 +156,17 @@ func (c *Client) Negotiate(offer webrtc.SessionDescription) (*webrtc.SessionDesc
 
 // The renegotiation can be in race condition when a client is renegotiating and new track is added to the client because another client is publishing to the room.
 // We can block the renegotiation until the current renegotiation is finish, but it will block the negotiation process for a while.
-func (c *Client) renegotiate() error {
+func (c *Client) renegotiate() {
 	if c.GetType() == ClientTypeUpBridge && c.OnBeforeRenegotiation != nil && !c.OnBeforeRenegotiation(c.Context) {
 		log.Println("sfu: renegotiation is not allowed because the downbridge is doing renegotiation", c.ID)
-
-		return nil
+		return
 	}
 
 	c.NegotiationNeeded = true
 
 	// no need to run another negotiation if it's already in progress, it will rerun because we mark the negotiationneeded to true
 	if c.isInRenegotiation {
-		return nil
+		return
 	}
 
 	// mark negotiation is in progress to make sure no concurrent negotiation
@@ -179,33 +183,32 @@ func (c *Client) renegotiate() error {
 			offer, err := c.PeerConnection.CreateOffer(nil)
 			if err != nil {
 				log.Println("sfu: error create offer on renegotiation ", err)
-				return err
+				return
 			}
 
 			// Sets the LocalDescription, and starts our UDP listeners
 			err = c.PeerConnection.SetLocalDescription(offer)
 			if err != nil {
 				log.Println("sfu: error set local description on renegotiation ", err)
-				return err
+				return
 			}
 
 			// this will be blocking until the renegotiation is done
 			answer := c.OnRenegotiation(c.Context, *c.PeerConnection.LocalDescription())
 
 			if answer.Type != webrtc.SDPTypeAnswer {
-				return errors.New("sfu: invalid answer type")
+				log.Println("sfu: error on renegotiation, the answer is not an answer type")
+				return
 			}
 
 			err = c.PeerConnection.SetRemoteDescription(answer)
 			if err != nil {
-				return err
+				return
 			}
 		}
 	}
 
 	c.isInRenegotiation = false
-
-	return nil
 }
 
 // return boolean if need a renegotiation after track added
@@ -242,9 +245,8 @@ func (c *Client) setClientTrack(track *webrtc.TrackLocalStaticRTP) bool {
 func (c *Client) removeTrack(trackID string) {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
-	if _, ok := c.Tracks[trackID]; ok {
-		delete(c.Tracks, trackID)
-	}
+
+	delete(c.tracks, trackID)
 }
 
 func (c *Client) removePublishedTrack(streamID, trackID string) bool {
@@ -255,6 +257,7 @@ func (c *Client) removePublishedTrack(streamID, trackID string) bool {
 
 	if _, ok := c.publishedTracks[fmt.Sprintf("%s-%s", streamID, trackID)]; ok {
 		delete(c.publishedTracks, fmt.Sprintf("%s-%s", streamID, trackID))
+
 		removed = true
 	}
 
@@ -272,7 +275,6 @@ func (c *Client) removePublishedTrack(streamID, trackID string) bool {
 				go c.renegotiate()
 			}
 		}
-
 	}
 
 	return removed
@@ -321,7 +323,7 @@ func (c *Client) GetCurrentTracks() map[string]PublishedTrack {
 		return currentTracks
 	}
 
-	for _, track := range c.Tracks {
+	for _, track := range c.tracks {
 		currentTracks[track.StreamID()+"-"+track.ID()] = PublishedTrack{
 			ClientID: c.ID,
 			Track:    track,
@@ -388,7 +390,6 @@ func (c *Client) requestKeyFrame() {
 				MediaSSRC: uint32(receiver.Track().SSRC()),
 			},
 		})
-
 	}
 }
 
@@ -424,4 +425,8 @@ func (c *Client) GetType() string {
 
 func (c *Client) GetDirection() webrtc.RTPTransceiverDirection {
 	return c.options.Direction
+}
+
+func (c *Client) GetTracks() map[string]*webrtc.TrackLocalStaticRTP {
+	return c.tracks
 }

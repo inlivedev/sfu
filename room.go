@@ -2,7 +2,6 @@ package sfu
 
 import (
 	"context"
-	"errors"
 	"log"
 	"sync"
 	"time"
@@ -15,15 +14,6 @@ const (
 	StateRoomClosed     = "closed"
 	EventRoomClosed     = "room_closed"
 	EventRoomClientLeft = "room_client_left"
-)
-
-var (
-	ErrClientExists   = errors.New("client already exists")
-	ErrRoomIsClosed   = errors.New("room is closed")
-	ErrRoomIsNotEmpty = errors.New("room is not empty")
-	ErrDecodingData   = errors.New("error decoding data")
-	ErrEncodingData   = errors.New("error encoding data")
-	ErrNotFound       = errors.New("not found")
 )
 
 type Options struct {
@@ -96,7 +86,7 @@ func (r *Room) close() error {
 		return ErrRoomIsClosed
 	}
 
-	if len(r.sfu.Clients) > 0 {
+	if len(r.sfu.GetClients()) > 0 {
 		return ErrRoomIsNotEmpty
 	}
 
@@ -116,16 +106,18 @@ func (r *Room) close() error {
 }
 
 func (r *Room) StopClient(id string) error {
-	client, ok := r.sfu.Clients[id]
-	if !ok {
-		return ErrNotFound
+	var client *Client
+	var err error
+
+	if client, err = r.sfu.GetClient(id); err != nil {
+		return err
 	}
 
 	return client.PeerConnection.Close()
 }
 
 func (r *Room) StopAllClients() {
-	for _, client := range r.sfu.Clients {
+	for _, client := range r.sfu.GetClients() {
 		client.PeerConnection.Close()
 	}
 }
@@ -221,7 +213,7 @@ func (r *Room) onClientRemoved(clientid string) {
 		"clientid": clientid,
 	})
 
-	if len(r.sfu.Clients) == 0 {
+	if len(r.sfu.GetClients()) == 0 {
 		r.close()
 	}
 }

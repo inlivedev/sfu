@@ -83,7 +83,7 @@ Loop:
 
 	for _, client := range peers {
 		isStopped := make(chan bool)
-		relay := sfu.Clients[client.ID]
+		relay, _ := sfu.GetClient(client.ID)
 
 		relay.OnConnectionStateChanged(func(state webrtc.PeerConnectionState) {
 			if state == webrtc.PeerConnectionStateClosed {
@@ -112,7 +112,7 @@ Loop:
 	// count left tracks
 	leftTracks := 0
 
-	for _, client := range sfu.Clients {
+	for _, client := range sfu.GetClients() {
 		for _, receiver := range client.PeerConnection.GetReceivers() {
 			if receiver.Track() != nil {
 				leftTracks++
@@ -133,8 +133,8 @@ Loop:
 
 	log.Println("current tracks count: ", currentTrack)
 
-	expectedLeftTracks := (len(sfu.Clients) * 2) * (len(sfu.Clients) - 1)
-	log.Println("left tracks: ", leftTracks, "from clients: ", len(sfu.Clients))
+	expectedLeftTracks := (len(sfu.GetClients()) * 2) * (len(sfu.GetClients()) - 1)
+	log.Println("left tracks: ", leftTracks, "from clients: ", len(sfu.GetClients()))
 	log.Println("expected left tracks: ", expectedLeftTracks)
 	require.Equal(t, expectedLeftTracks, leftTracks)
 }
