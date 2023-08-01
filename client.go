@@ -26,6 +26,7 @@ var (
 	TrackTypeScreen = "screen"
 
 	ErrNegotiationIsNotRequested = errors.New("client: error negotiation is called before requested")
+	ErrClientStoped              = errors.New("client: error client already stopped")
 )
 
 type ClientOptions struct {
@@ -54,6 +55,7 @@ type Client struct {
 	pendingPublishedTracks            map[string]*webrtc.TrackLocalStaticRTP
 	publishedTracks                   map[string]*webrtc.TrackLocalStaticRTP
 	State                             int
+	sfu                               *SFU
 	onConnectionStateChanged          func(webrtc.PeerConnectionState)
 	onConnectionStateChangedCallbacks []func(webrtc.PeerConnectionState)
 	OnIceCandidate                    func(context.Context, *webrtc.ICECandidate)
@@ -148,6 +150,9 @@ func (c *Client) Negotiate(offer webrtc.SessionDescription) (*webrtc.SessionDesc
 	c.pendingRemoteCandidates = nil
 
 	c.isInRenegotiation = false
+
+	// send pending local candidates if any
+	c.sendPendingLocalCandidates()
 
 	return c.peerConnection.LocalDescription(), nil
 }
@@ -269,8 +274,8 @@ func (c *Client) removePublishedTrack(streamID, trackID string) bool {
 			if err := c.peerConnection.RemoveTrack(sender); err != nil {
 				log.Println("client: error remove track ", err)
 			} else {
-				log.Println("client: published track removed ", trackID)
-				go c.renegotiate()
+				log.Println("client: published track removed ", c.ID, streamID, trackID)
+				// go c.renegotiate()
 			}
 		}
 	}
@@ -331,9 +336,21 @@ func (c *Client) GetCurrentTracks() map[string]PublishedTrack {
 	return currentTracks
 }
 
-// return true if a RTPSender is stopped which will need a renegotiation for all subscribed clients
 func (c *Client) afterClosed() {
 	c.State = ClientStateEnded
+
+	// remove all tracks from client and SFU
+	needRenegotiation := false
+	for _, track := range c.tracks {
+		needRenegotiation = c.sfu.removeTrack(track.StreamID(), track.ID())
+	}
+
+	// trigger renegotiation if needed to all existing clients
+	if needRenegotiation {
+		c.sfu.renegotiateAllClients()
+	}
+
+	c.sfu.onAfterClientStopped(c)
 
 	c.Cancel()
 
@@ -342,12 +359,20 @@ func (c *Client) afterClosed() {
 	}
 }
 
-func (c *Client) Stop() {
-	c.peerConnection.Close()
-}
+func (c *Client) Stop() error {
+	if c.State == ClientStateEnded {
+		return ErrClientStoped
+	}
 
-func (c *Client) OnStopped(callback func()) {
-	c.onStopped = callback
+	err := c.peerConnection.Close()
+	if err != nil {
+		return err
+	}
+
+	// this will trigger remove client from SFU
+	c.afterClosed()
+
+	return nil
 }
 
 func (c *Client) AddICECandidate(candidate webrtc.ICECandidateInit) error {
@@ -369,7 +394,7 @@ func (c *Client) onIceCandidateCallback(candidate *webrtc.ICECandidate) {
 	c.OnIceCandidate(c.Context, candidate)
 }
 
-func (c *Client) SendPendingLocalCandidates() {
+func (c *Client) sendPendingLocalCandidates() {
 	for _, candidate := range c.pendingLocalCandidates {
 		c.onIceCandidateCallback(candidate)
 	}
@@ -405,7 +430,7 @@ func (c *Client) startIdleTimeout() {
 	go func() {
 		<-c.idleTimeoutContext.Done()
 		log.Println("client: idle timeout reached ", c.ID)
-		c.Stop()
+		_ = c.Stop()
 	}()
 }
 

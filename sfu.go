@@ -182,6 +182,7 @@ func (s *SFU) createClient(id string, peerConnectionConfig *webrtc.Configuration
 		pendingReceivedTracks:  make(map[string]*webrtc.TrackLocalStaticRTP),
 		pendingPublishedTracks: make(map[string]*webrtc.TrackLocalStaticRTP),
 		publishedTracks:        make(map[string]*webrtc.TrackLocalStaticRTP),
+		sfu:                    s,
 	}
 
 	peerConnection.OnICEConnectionStateChange(func(connectionState webrtc.ICEConnectionState) {
@@ -230,7 +231,10 @@ func (s *SFU) createClient(id string, peerConnectionConfig *webrtc.Configuration
 					i, _, readErr := remoteTrack.Read(rtpBuf)
 					if readErr == io.EOF {
 						client.removeTrack(localTrack.ID())
-						s.removeTrack(localTrack.StreamID(), localTrack.ID())
+						needRenegotiate := s.removeTrack(localTrack.StreamID(), localTrack.ID())
+						if needRenegotiate {
+							s.renegotiateAllClients()
+						}
 						return
 					}
 
@@ -320,12 +324,9 @@ func (s *SFU) NewClient(id string, opts ClientOptions) *Client {
 			}
 
 		case webrtc.PeerConnectionStateClosed:
-			for _, track := range client.tracks {
-				client.removeTrack(track.ID())
-				s.removeTrack(track.StreamID(), track.ID())
+			if client.State != ClientStateEnded {
+				client.afterClosed()
 			}
-
-			client.afterClosed()
 		case webrtc.PeerConnectionStateFailed:
 			client.startIdleTimeout()
 		case webrtc.PeerConnectionStateConnecting:
@@ -504,6 +505,10 @@ func (s *SFU) OnClientRemoved(callback func(*Client)) {
 	s.callbacksOnClientRemoved = append(s.callbacksOnClientRemoved, callback)
 }
 
+func (s *SFU) onAfterClientStopped(client *Client) {
+	s.removeClient(client)
+}
+
 func (s *SFU) onClientAdded(client *Client) {
 	for _, callback := range s.callbacksOnClientAdded {
 		callback(client)
@@ -532,4 +537,13 @@ func (s *SFU) GetClient(id string) (*Client, error) {
 	}
 
 	return nil, ErrClientNotFound
+}
+
+func (s *SFU) removeClient(client *Client) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	delete(s.clients, client.ID)
+
+	s.onClientRemoved(client)
 }

@@ -38,7 +38,6 @@ type Room struct {
 	callbacksRoomClosed    []func(id string)
 	Context                context.Context
 	cancelContext          context.CancelFunc
-	eventChan              chan Event
 	ID                     string `json:"id"`
 	RenegotiationChan      map[string]chan bool
 	Name                   string `json:"name"`
@@ -47,6 +46,7 @@ type Room struct {
 	State                  string
 	Type                   string
 	extensions             []IExtension
+	OnEvent                func(event Event)
 }
 
 func newRoom(ctx context.Context, id, name string, sfu *SFU, roomType string) *Room {
@@ -70,10 +70,8 @@ func (r *Room) AddExtension(extension IExtension) {
 	r.extensions = append(r.extensions, extension)
 }
 
-// room should not close manually, it will be close once no client is in the room automatically
-// this is to prevent recursive close callback
-// use StopAllClients() to close room manually that will triggered this callback once all clients are closed
-func (r *Room) close() error {
+// room can only closed once it's empty or it will return error
+func (r *Room) Close() error {
 	if r.State == StateRoomClosed {
 		return ErrRoomIsClosed
 	}
@@ -106,7 +104,7 @@ func (r *Room) StopClient(id string) error {
 		return err
 	}
 
-	return client.GetPeerConnection().Close()
+	return client.Stop()
 }
 
 func (r *Room) StopAllClients() {
@@ -130,10 +128,10 @@ func (r *Room) AddClient(id string, opts ClientOptions) (*Client, error) {
 
 	client := r.sfu.NewClient(id, opts)
 
-	client.OnStopped(func() {
+	client.onStopped = func() {
 		log.Println("client stopped ", client.ID)
 		r.RemoveClient(client.ID)
-	})
+	}
 
 	for _, ext := range r.extensions {
 		ext.OnClientAdded(client)
@@ -170,17 +168,15 @@ func (r *Room) onClientRemoved(clientid string) {
 	r.sendEvent(EventRoomClientLeft, map[string]interface{}{
 		"clientid": clientid,
 	})
-
-	if len(r.sfu.GetClients()) == 0 {
-		r.close()
-	}
 }
 
 func (r *Room) sendEvent(eventType string, data map[string]interface{}) {
-	r.eventChan <- Event{
-		Type: eventType,
-		Time: time.Now(),
-		Data: data,
+	if r.OnEvent != nil {
+		r.OnEvent(Event{
+			Type: eventType,
+			Time: time.Now(),
+			Data: data,
+		})
 	}
 }
 
@@ -194,8 +190,4 @@ func (r *Room) GetID() string {
 
 func (r *Room) GetName() string {
 	return r.Name
-}
-
-func (r *Room) GetEventChan() chan Event {
-	return r.eventChan
 }
