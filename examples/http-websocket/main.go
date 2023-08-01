@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/inlivedev/sfu"
 	"github.com/pion/webrtc/v3"
@@ -56,9 +57,8 @@ func main() {
 
 	err := http.ListenAndServe(":3000", nil)
 	if err != nil {
-		log.Fatal(err)
+		log.Panic(err)
 	}
-
 }
 
 func reader(conn *websocket.Conn, messageChan chan Request) {
@@ -86,7 +86,6 @@ MessageLoop:
 			}
 		}
 	}
-
 }
 
 func clientHandler(conn *websocket.Conn, messageChan chan Request, r *sfu.Room) {
@@ -109,30 +108,68 @@ func clientHandler(conn *websocket.Conn, messageChan chan Request, r *sfu.Room) 
 
 	defer client.Stop()
 
-	// offer channel is to wait for renegotation from SFU
-	relayOfferChan, _ := r.GetOfferChan(clientID)
+	answerChan := make(chan webrtc.SessionDescription)
 
-	// answer channel is pass the renegotiation answer from client to SFU
-	relayAnswerChan, _ := r.GetAnswerChan(clientID)
+	client.OnRenegotiation = func(ctx context.Context, offer webrtc.SessionDescription) webrtc.SessionDescription {
+		// SFU request a renegotiation, send the offer to client
+		log.Println("receive renegotiation offer from SFU")
 
-	// candidate channel is to pass the ICE candidate SFU to client
-	relayCandidateChan, _ := r.GetCandidateChan(clientID)
+		resp := Respose{
+			Status: true,
+			Type:   TypeOffer,
+			Data:   offer,
+		}
+
+		sdpBytes, _ := json.Marshal(resp)
+
+		_, _ = conn.Write(sdpBytes)
+
+		// wait for answer from client
+		ctxTimeout, cancelTimeout := context.WithTimeout(client.Context, 30*time.Second)
+
+		defer cancelTimeout()
+
+		// this will wait for answer from client in 30 seconds or timeout
+		select {
+		case <-ctxTimeout.Done():
+			log.Println("timeout on renegotiation")
+			return webrtc.SessionDescription{}
+		case answer := <-answerChan:
+			log.Println("received answer from client ", client.GetType(), client.ID)
+			return answer
+		}
+	}
+
+	client.OnIceCandidate = func(ctx context.Context, candidate *webrtc.ICECandidate) {
+		// SFU send an ICE candidate to client
+		resp := Respose{
+			Status: true,
+			Type:   TypeCandidate,
+			Data:   candidate,
+		}
+		candidateBytes, _ := json.Marshal(resp)
+
+		_, _ = conn.Write(candidateBytes)
+	}
 
 	for {
 		select {
 		case <-ctx.Done():
+			client.Stop()
 			return
 		case req := <-messageChan:
 			// handle as SDP if no error
 			if req.Type == TypeOffer || req.Type == TypeAnswer {
 				var resp Respose
-				sdp := req.Data.(string)
+
+				sdp, _ := req.Data.(string)
 
 				if req.Type == TypeOffer {
 					// handle as offer SDP
 					answer, err := client.Negotiate(webrtc.SessionDescription{SDP: sdp, Type: webrtc.SDPTypeOffer})
 					if err != nil {
 						log.Println("error on negotiate", err)
+
 						resp = Respose{
 							Status: false,
 							Type:   TypeError,
@@ -146,13 +183,15 @@ func clientHandler(conn *websocket.Conn, messageChan chan Request, r *sfu.Room) 
 							Data:   answer,
 						}
 					}
+
 					respBytes, _ := json.Marshal(resp)
+
 					conn.Write(respBytes)
 				} else {
 					log.Println("receive renegotiation answer from client")
 					// handle as answer SDP as part of renegotiation request from SFU
-					// pass the answer to SFU through channel
-					relayAnswerChan <- webrtc.SessionDescription{SDP: sdp, Type: webrtc.SDPTypeAnswer}
+					// pass the answer to onRenegotiation handler above
+					answerChan <- webrtc.SessionDescription{SDP: sdp, Type: webrtc.SDPTypeAnswer}
 				}
 
 				// don't continue execution
@@ -168,34 +207,6 @@ func clientHandler(conn *websocket.Conn, messageChan chan Request, r *sfu.Room) 
 			} else {
 				log.Println("unknown message type", req)
 			}
-		case offer := <-relayOfferChan:
-			// SFU request a renegotiation, send the offer to client
-			log.Println("receive renegotiation offer from SFU")
-			resp := Respose{
-				Status: true,
-				Type:   TypeOffer,
-				Data:   offer,
-			}
-			sdpBytes, _ := json.Marshal(resp)
-			conn.Write(sdpBytes)
-		case answer := <-relayAnswerChan:
-			// SFU send an answer to respond the negotiation offer that receive from client
-			resp := Respose{
-				Status: true,
-				Type:   TypeAnswer,
-				Data:   answer,
-			}
-			sdpBytes, _ := json.Marshal(resp)
-			conn.Write(sdpBytes)
-		case candidate := <-relayCandidateChan:
-			// SFU send an ICE candidate to client
-			resp := Respose{
-				Status: true,
-				Type:   TypeCandidate,
-				Data:   candidate,
-			}
-			candidateBytes, _ := json.Marshal(resp)
-			conn.Write(candidateBytes)
 		}
 	}
 }

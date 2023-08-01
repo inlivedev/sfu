@@ -119,6 +119,12 @@
                 }
 
                 remoteVideo.srcObject = e.streams[0];
+
+                e.streams[0].onremovetrack = function() {
+                    console.log("onremovetrack");
+                    remoteVideo.srcObject = null;
+                    remoteVideo.remove();
+                };
             };
 
             stream.getTracks().forEach(track => peerConnection.addTrack(track, stream));

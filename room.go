@@ -5,8 +5,6 @@ import (
 	"log"
 	"sync"
 	"time"
-
-	"github.com/pion/webrtc/v3"
 )
 
 const (
@@ -36,15 +34,12 @@ type Event struct {
 }
 
 type Room struct {
-	answerChans            map[string]chan webrtc.SessionDescription
-	candidateChans         map[string]chan webrtc.ICECandidate
 	callbacksClientRemoved []func(id string)
 	callbacksRoomClosed    []func(id string)
 	Context                context.Context
 	cancelContext          context.CancelFunc
 	eventChan              chan Event
 	ID                     string `json:"id"`
-	offerChans             map[string]chan webrtc.SessionDescription
 	RenegotiationChan      map[string]chan bool
 	Name                   string `json:"name"`
 	mutex                  *sync.Mutex
@@ -57,18 +52,15 @@ type Room struct {
 func newRoom(ctx context.Context, id, name string, sfu *SFU, roomType string) *Room {
 	localContext, cancel := context.WithCancel(ctx)
 	room := &Room{
-		ID:             id,
-		Context:        localContext,
-		cancelContext:  cancel,
-		sfu:            sfu,
-		State:          StateRoomOpen,
-		answerChans:    make(map[string]chan webrtc.SessionDescription),
-		offerChans:     make(map[string]chan webrtc.SessionDescription),
-		candidateChans: make(map[string]chan webrtc.ICECandidate),
-		Name:           name,
-		mutex:          &sync.Mutex{},
-		extensions:     make([]IExtension, 0),
-		Type:           roomType,
+		ID:            id,
+		Context:       localContext,
+		cancelContext: cancel,
+		sfu:           sfu,
+		State:         StateRoomOpen,
+		Name:          name,
+		mutex:         &sync.Mutex{},
+		extensions:    make([]IExtension, 0),
+		Type:          roomType,
 	}
 
 	return room
@@ -107,6 +99,7 @@ func (r *Room) close() error {
 
 func (r *Room) StopClient(id string) error {
 	var client *Client
+
 	var err error
 
 	if client, err = r.sfu.GetClient(id); err != nil {
@@ -130,48 +123,17 @@ func (r *Room) AddClient(id string, opts ClientOptions) (*Client, error) {
 		return nil, ErrRoomIsClosed
 	}
 
-	_, ok := r.offerChans[id]
+	_, ok := r.sfu.clients[id]
 	if ok {
 		return nil, ErrClientExists
 	}
 
 	client := r.sfu.NewClient(id, opts)
 
-	offerChan := make(chan webrtc.SessionDescription, 10)
-	answerChan := make(chan webrtc.SessionDescription, 10)
-	candidateChan := make(chan webrtc.ICECandidate, 50)
-
-	r.offerChans[client.ID] = offerChan
-	r.answerChans[client.ID] = answerChan
-	r.candidateChans[client.ID] = candidateChan
-
 	client.OnStopped(func() {
 		log.Println("client stopped ", client.ID)
 		r.RemoveClient(client.ID)
 	})
-
-	client.OnRenegotiation = func(ctx context.Context, offer webrtc.SessionDescription) webrtc.SessionDescription {
-		// send offer to SSE, the client should respond with the answer
-		offerChan <- offer
-
-		ctxTimeout, cancelTimeout := context.WithTimeout(client.Context, 30*time.Second)
-
-		defer cancelTimeout()
-
-		// this will wait for answer from client in 30 seconds or timeout
-		select {
-		case <-ctxTimeout.Done():
-			log.Println("timeout on renegotiation")
-			return webrtc.SessionDescription{}
-		case answer := <-answerChan:
-			log.Println("received answer from client ", client.GetType(), client.ID)
-			return answer
-		}
-	}
-
-	client.OnIceCandidate = func(ctx context.Context, candidate *webrtc.ICECandidate) {
-		candidateChan <- *candidate
-	}
 
 	for _, ext := range r.extensions {
 		ext.OnClientAdded(client)
@@ -189,10 +151,6 @@ func (r *Room) CreateClientID(id int) string {
 }
 
 func (r *Room) RemoveClient(id string) {
-	delete(r.offerChans, id)
-	delete(r.answerChans, id)
-	delete(r.candidateChans, id)
-
 	r.onClientRemoved(id)
 }
 
@@ -236,33 +194,6 @@ func (r *Room) GetID() string {
 
 func (r *Room) GetName() string {
 	return r.Name
-}
-
-func (r *Room) GetAnswerChan(clientid string) (chan webrtc.SessionDescription, error) {
-	chanAnswer, ok := r.answerChans[clientid]
-	if !ok {
-		return nil, ErrNotFound
-	}
-
-	return chanAnswer, nil
-}
-
-func (r *Room) GetOfferChan(clientid string) (chan webrtc.SessionDescription, error) {
-	offerChan, ok := r.offerChans[clientid]
-	if !ok {
-		return nil, ErrNotFound
-	}
-
-	return offerChan, nil
-}
-
-func (r *Room) GetCandidateChan(clientid string) (chan webrtc.ICECandidate, error) {
-	candidateChan, ok := r.candidateChans[clientid]
-	if !ok {
-		return nil, ErrNotFound
-	}
-
-	return candidateChan, nil
 }
 
 func (r *Room) GetEventChan() chan Event {

@@ -18,6 +18,7 @@ import (
 	"github.com/pion/webrtc/v3"
 	"github.com/pion/webrtc/v3/pkg/media"
 
+	//nolint:blank-imports // Importing drivers
 	_ "github.com/pion/mediadevices/pkg/driver/audiotest"
 	_ "github.com/pion/mediadevices/pkg/driver/videotest"
 
@@ -94,6 +95,7 @@ func GetStaticTracks(ctx context.Context, streamID string) ([]*webrtc.TrackLocal
 	videoTrackID := GenerateSecureToken(16)
 
 	codecSelector.Populate(mediaEngine)
+
 	staticTracks := make([]*webrtc.TrackLocalStaticSample, 0)
 	audioTrack := GetStaticAudioTrack(ctx, audioTrackID, streamID)
 	staticTracks = append(staticTracks, audioTrack)
@@ -191,7 +193,6 @@ func GetStaticVideoTrack(ctx context.Context, trackID, streamID string) *webrtc.
 						continue
 					}
 				}
-
 			}
 		}
 	}()
@@ -229,6 +230,7 @@ func GetStaticAudioTrack(ctx context.Context, trackID, streamID string) *webrtc.
 		// * works around latency issues with Sleep (see https://github.com/golang/go/issues/44343)
 		ticker := time.NewTicker(oggPageDuration)
 		localCtx, cancel := context.WithCancel(ctx)
+
 		defer cancel()
 
 		for {
@@ -272,7 +274,6 @@ func GetStaticAudioTrack(ctx context.Context, trackID, streamID string) *webrtc.
 	}()
 
 	return audioTrack
-
 }
 
 func SetPeerConnectionTracks(peerConnection *webrtc.PeerConnection, tracks []*webrtc.TrackLocalStaticSample) {
@@ -287,6 +288,7 @@ func SetPeerConnectionTracks(peerConnection *webrtc.PeerConnection, tracks []*we
 		// like NACK this needs to be called.
 		go func() {
 			rtcpBuf := make([]byte, 1500)
+
 			for {
 				if _, _, rtcpErr := rtpSender.Read(rtcpBuf); rtcpErr != nil {
 					return
@@ -301,5 +303,6 @@ func GenerateSecureToken(length int) string {
 	if _, err := rand.Read(b); err != nil {
 		return ""
 	}
+
 	return hex.EncodeToString(b)
 }
