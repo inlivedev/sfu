@@ -344,6 +344,9 @@ func (s *SFU) NewClient(id string, opts ClientOptions) *Client {
 		}
 
 		s.publishTracks(client.ID, client.pendingPublishedTracks)
+		// reset pending published tracks after published
+		client.pendingPublishedTracks = make(map[string]*webrtc.TrackLocalStaticRTP)
+
 	}
 
 	// request keyframe from new client for existing clients

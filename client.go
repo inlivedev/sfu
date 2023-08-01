@@ -231,8 +231,14 @@ func (c *Client) addTrack(track *webrtc.TrackLocalStaticRTP) bool {
 func (c *Client) setClientTrack(track *webrtc.TrackLocalStaticRTP) bool {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()
+	id := track.StreamID() + "-" + track.ID()
 
-	c.publishedTracks[track.StreamID()+"-"+track.ID()] = track
+	if _, ok := c.publishedTracks[id]; ok {
+		log.Println("client: track already published ", c.ID, track.StreamID(), track.ID())
+		return false
+	}
+
+	c.publishedTracks[id] = track
 
 	rtpSender, err := c.peerConnection.AddTrack(track)
 	if err != nil {
@@ -326,7 +332,7 @@ func (c *Client) GetCurrentTracks() map[string]PublishedTrack {
 		return currentTracks
 	}
 
-	for _, track := range c.tracks {
+	for _, track := range c.publishedTracks {
 		currentTracks[track.StreamID()+"-"+track.ID()] = PublishedTrack{
 			ClientID: c.ID,
 			Track:    track,

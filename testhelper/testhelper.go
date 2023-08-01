@@ -38,10 +38,6 @@ const (
 )
 
 func GetTestTracks() ([]mediadevices.Track, *webrtc.MediaEngine) {
-	if tracks != nil && mediaEngine != nil {
-		return tracks, mediaEngine
-	}
-
 	x264Params, _ := x264.NewParams()
 
 	x264Params.BitRate = 500_000 // 500kbps

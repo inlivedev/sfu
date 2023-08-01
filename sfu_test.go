@@ -2,7 +2,6 @@ package sfu
 
 import (
 	"context"
-	"io"
 	"log"
 	"strconv"
 	"testing"
@@ -19,6 +18,11 @@ type PeerClient struct {
 	ID             string
 }
 
+type RemoteTrack struct {
+	Track  *webrtc.TrackRemote
+	Client PeerClient
+}
+
 func TestActiveTracks(t *testing.T) {
 	// _ = os.Setenv("PION_LOG_DEBUG", "pc,dtls")
 	// _ = os.Setenv("PION_LOG_TRACE", "ice")
@@ -31,12 +35,13 @@ func TestActiveTracks(t *testing.T) {
 	peerCount := 3
 	trackCount := 0
 	connectedCount := 0
-	trackChan := make(chan *webrtc.TrackRemote)
+	trackChan := make(chan *RemoteTrack)
+	remoteTracks := make(map[string]map[string]*webrtc.TrackRemote)
 	peerChan := make(chan PeerClient)
 	connectedChan := make(chan bool)
-	trackEndedChan := make(chan bool)
 	peers := make(map[string]PeerClient, 0)
 	udpMux := NewUDPMux(ctx, 40004)
+	trackEndedChan := make(chan bool)
 
 	sfu := setup(t, udpMux, ctx, peerCount, trackChan, peerChan, connectedChan)
 	defer sfu.Stop()
@@ -47,65 +52,94 @@ func TestActiveTracks(t *testing.T) {
 
 	expectedTracks := (peerCount * 2) * (peerCount - 1)
 	log.Println("expected tracks: ", expectedTracks)
-Loop:
-	for {
-		select {
-		case <-ctxTimeout.Done():
-			require.Equal(t, expectedTracks, trackCount)
-			break Loop
-		case <-connectedChan:
-			connectedCount++
-			log.Println("connected count: ", connectedCount)
-		case track := <-trackChan:
-			trackCount++
-			log.Println("remote track count: ", trackCount)
 
-			// this will trigger track ended to test if stopping client will remove tracks from other clients
-			go func() {
-				ctxx, cancell := context.WithCancel(ctx)
-				defer cancell()
-				rtpBuf := make([]byte, 1400)
-				for {
-					select {
-					case <-ctxx.Done():
-						return
-					default:
-						_, _, readErr := track.Read(rtpBuf)
-						if readErr == io.EOF {
-							trackEndedChan <- true
+	continueChan := make(chan bool)
+	stoppedClient := 0
+
+	isStopped := make(chan bool)
+	trackEndedCount := 0
+
+	go func() {
+		for {
+			select {
+			case <-ctxTimeout.Done():
+				require.Equal(t, expectedTracks, trackCount)
+				return
+			case <-connectedChan:
+				connectedCount++
+				log.Println("connected count: ", connectedCount)
+			case remoteTrack := <-trackChan:
+				if _, ok := remoteTracks[remoteTrack.Client.ID]; !ok {
+					remoteTracks[remoteTrack.Client.ID] = make(map[string]*webrtc.TrackRemote)
+				}
+
+				remoteTracks[remoteTrack.Client.ID][remoteTrack.Track.ID()] = remoteTrack.Track
+
+				go func() {
+					rtcpBuf := make([]byte, 1500)
+					ctxx, cancell := context.WithCancel(ctx)
+					defer cancell()
+
+					for {
+						select {
+						case <-ctxx.Done():
 							return
+						default:
+							if _, _, rtcpErr := remoteTrack.Track.Read(rtcpBuf); rtcpErr != nil {
+								if rtcpErr.Error() == "EOF" {
+									trackEndedChan <- true
+									return
+								}
+								return
+							}
 						}
 					}
 
-				}
-			}()
+				}()
+				trackCount++
 
-			if trackCount == expectedTracks { // 2 clients
-				require.Equal(t, expectedTracks, trackCount)
-				break Loop
+				if trackCount == expectedTracks { // 2 clients
+					totalRemoteTracks := 0
+					for _, clientTrack := range remoteTracks {
+						for _, _ = range clientTrack {
+							totalRemoteTracks++
+						}
+					}
+
+					log.Println("total remote tracks: ", totalRemoteTracks)
+					continueChan <- true
+				}
+
+			case client := <-peerChan:
+				peers[client.ID] = client
+				log.Println("peer count: ", len(peers))
+			case <-isStopped:
+				stoppedClient++
+				if stoppedClient == 1 {
+					continueChan <- true
+				}
+			case <-trackEndedChan:
+				trackEndedCount++
 			}
-		case client := <-peerChan:
-			peers[client.ID] = client
-			log.Println("peer count: ", len(peers))
 		}
-	}
+	}()
+
+	<-continueChan
+
+	require.Equal(t, expectedTracks, trackCount)
 
 	currentTrack := 0
 
 	for _, client := range peers {
-		for _, transceiver := range client.PeerConnection.GetTransceivers() {
-			if transceiver != nil {
+		log.Println("client: ", client.ID, "remote track count: ", len(client.PeerConnection.GetReceivers()))
+		for _, receiver := range client.PeerConnection.GetReceivers() {
+			if receiver != nil && receiver.Track() != nil {
 				currentTrack++
 			}
 		}
 	}
 
 	log.Println("current clients count:", len(peers), ",current client tracks count:", currentTrack, "peer tracks count: ", trackCount)
-
-	stoppedClient := 0
-	trackEndedCount := 0
-	expectedLeftTracks := (len(sfu.GetClients()) * 2) * (len(sfu.GetClients()) - 1)
-	isStopped := make(chan bool)
 
 	for _, client := range peers {
 		relay, _ := sfu.GetClient(client.ID)
@@ -123,28 +157,13 @@ Loop:
 		break
 	}
 
-	for {
-		timeout, cancel := context.WithTimeout(ctx, 10*time.Second)
-		defer cancel()
-		select {
-		case <-timeout.Done():
-			break
-		case <-isStopped:
-			stoppedClient++
-		case <-trackEndedChan:
-			log.Println("track ended")
-			trackEndedCount++
-		}
-
-		if stoppedClient == 1 && trackEndedCount == 1 {
-			break
-		}
-	}
+	<-continueChan
 
 	require.Equal(t, 1, stoppedClient)
 
 	// count left tracks
 	leftTracks := 0
+	expectedLeftTracks := len(sfu.GetClients()) * 2 * (len(sfu.GetClients()))
 
 	for _, client := range sfu.GetClients() {
 		for _, receiver := range client.GetPeerConnection().GetReceivers() {
@@ -157,7 +176,6 @@ Loop:
 	currentTrack = 0
 
 	for _, peer := range peers {
-
 		for _, transceiver := range peer.PeerConnection.GetTransceivers() {
 			if transceiver != nil && transceiver.Receiver().Track() != nil {
 				currentTrack++
@@ -246,7 +264,7 @@ func createPeer(ctx context.Context, t *testing.T, s *SFU, tracks []*webrtc.Trac
 	return peerConnection, remoteTrack
 }
 
-func setup(t *testing.T, udpMux *UDPMux, ctx context.Context, peerCount int, trackChan chan *webrtc.TrackRemote, peerChan chan PeerClient, connectedChan chan bool) *SFU {
+func setup(t *testing.T, udpMux *UDPMux, ctx context.Context, peerCount int, trackChan chan *RemoteTrack, peerChan chan PeerClient, connectedChan chan bool) *SFU {
 	// test adding stream
 	// Prepare the configuration
 	// iceServers := []webrtc.ICEServer{{URLs: []string{
@@ -275,10 +293,11 @@ func setup(t *testing.T, udpMux *UDPMux, ctx context.Context, peerCount int, tra
 			testhelper.SetPeerConnectionTracks(peer, peerTracks)
 
 			uid := GenerateID([]int{sfu.Counter})
-			peerChan <- PeerClient{
+			peerClient := PeerClient{
 				PeerConnection: peer,
 				ID:             uid,
 			}
+			peerChan <- peerClient
 			relay := sfu.NewClient(uid, DefaultClientOptions())
 
 			relay.OnRenegotiation = func(ctx context.Context, sdp webrtc.SessionDescription) webrtc.SessionDescription {
@@ -323,7 +342,10 @@ func setup(t *testing.T, udpMux *UDPMux, ctx context.Context, peerCount int, tra
 				case <-localCtx.Done():
 					return
 				case trackRemote := <-remoteTrackChan:
-					trackChan <- trackRemote
+					trackChan <- &RemoteTrack{
+						Track:  trackRemote,
+						Client: peerClient,
+					}
 				}
 			}
 		}()
