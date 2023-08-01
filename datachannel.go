@@ -34,7 +34,7 @@ func (s *SFU) setupDataChannelBroadcaster(peerConnection *webrtc.PeerConnection,
 			toID := IDSs[1]
 			if _, ok := s.privateDataChannels[id][toID]; !ok {
 				if client, err := s.GetClient(toID); err == nil {
-					dc, err := client.PeerConnection.CreateDataChannel("pm-"+id, nil)
+					dc, err := client.GetPeerConnection().CreateDataChannel("pm-"+id, nil)
 					if err != nil {
 						log.Println("sfu:error creating data channel", err)
 						return

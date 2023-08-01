@@ -113,7 +113,7 @@ Loop:
 	leftTracks := 0
 
 	for _, client := range sfu.GetClients() {
-		for _, receiver := range client.PeerConnection.GetReceivers() {
+		for _, receiver := range client.GetPeerConnection().GetReceivers() {
 			if receiver.Track() != nil {
 				leftTracks++
 			}
@@ -280,7 +280,7 @@ func setup(t *testing.T, udpMux *UDPMux, ctx context.Context, peerCount int, tra
 			}
 
 			relay.Negotiate(*peer.LocalDescription())
-			_ = peer.SetRemoteDescription(*relay.PeerConnection.LocalDescription())
+			_ = peer.SetRemoteDescription(*relay.GetPeerConnection().LocalDescription())
 
 			localCtx, cancelLocal := context.WithCancel(ctx)
 			defer cancelLocal()

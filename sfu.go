@@ -175,7 +175,7 @@ func (s *SFU) createClient(id string, peerConnectionConfig *webrtc.Configuration
 		Context:                localCtx,
 		Cancel:                 cancel,
 		mutex:                  sync.RWMutex{},
-		PeerConnection:         peerConnection,
+		peerConnection:         peerConnection,
 		State:                  ClientStateNew,
 		tracks:                 make(map[string]*webrtc.TrackLocalStaticRTP),
 		options:                opts,
@@ -444,7 +444,7 @@ func (s *SFU) GetTracks() map[string]*webrtc.TrackLocalStaticRTP {
 
 func (s *SFU) Stop() {
 	for _, client := range s.clients {
-		client.PeerConnection.Close()
+		client.GetPeerConnection().Close()
 	}
 
 	if s.onStop != nil {

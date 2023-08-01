@@ -106,12 +106,12 @@ func (r *Room) StopClient(id string) error {
 		return err
 	}
 
-	return client.PeerConnection.Close()
+	return client.GetPeerConnection().Close()
 }
 
 func (r *Room) StopAllClients() {
 	for _, client := range r.sfu.GetClients() {
-		client.PeerConnection.Close()
+		client.GetPeerConnection().Close()
 	}
 }
 
