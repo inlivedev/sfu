@@ -1,6 +1,12 @@
+
+> [!IMPORTANT]  
+> This library still in very early development. The API might change in the future. We use it in production for [inLive Hub project](https://inlive.app/realtime-interactive). We're a small team, so we can't guarantee that we can fix all issues. But we will try our best to fix it especially when it's related with our product. If you have any questions or find any issues, please write it to [this repo Github issue](https://github.com/inlivedev/sfu/issues). We will appreciate it.
+
 # inLive Hub SFU
 
-This Golang package is an SFU library based on Pion WebRTC. It is designed to be used in the inLive Hub project, but it can also be used in other projects. The goal is to have a Golang SFU library that is portable but easy to extend.
+This Golang package is an SFU library based on Pion WebRTC. It is designed to be used in the [inLive Hub project](https://inlive.app/realtime-interactive), but it can also be used in other projects. The goal is to have a Golang SFU library that is portable but easy to extend.
+
+
 
 ## Features
 - [x] Group call
@@ -62,3 +68,6 @@ To prevent this, we need to check with the SFU relay client if it is allowed to 
 
 ### Leave the room
 If a client wants to leave a room or disconnect from the SFU. You can [close the PeerConnection](https://developer.mozilla.org/en-US/docs/Web/API/RTCPeerConnection/close) instance on the client side. The SFU will detect that the client is closed and will remove the client from the room.
+
+## Licence
+MIT License - see [LICENSE](./LICENSE) for the full text
