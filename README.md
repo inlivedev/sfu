@@ -6,6 +6,12 @@
 
 This Golang package is an SFU library based on Pion WebRTC. It is designed to be used in the [inLive Hub project](https://inlive.app/realtime-interactive), but it can also be used in other projects. The goal is to have a Golang SFU library that is portable but easy to extend.
 
+## Installation
+This is a Go module, so you can install it by running this command in your app directory:
+```
+go get github.com/inlivedev/sfu
+```
+
 
 
 ## Features
