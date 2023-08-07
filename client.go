@@ -47,20 +47,24 @@ type Client struct {
 	canAddCandidate                   bool
 	initialTracksCount                int
 	isInRenegotiation                 bool
+	isInRemoteNegotiation             bool
 	idleTimeoutContext                context.Context
 	idleTimeoutCancel                 context.CancelFunc
 	mutex                             sync.RWMutex
 	peerConnection                    *webrtc.PeerConnection
 	pendingReceivedTracks             map[string]*webrtc.TrackLocalStaticRTP
 	pendingPublishedTracks            map[string]*webrtc.TrackLocalStaticRTP
+	pendingRemoteRenegotiation        bool
 	publishedTracks                   map[string]*webrtc.TrackLocalStaticRTP
+	queue                             *queue
 	State                             int
 	sfu                               *SFU
 	onConnectionStateChanged          func(webrtc.PeerConnectionState)
 	onConnectionStateChangedCallbacks []func(webrtc.PeerConnectionState)
 	OnIceCandidate                    func(context.Context, *webrtc.ICECandidate)
 	OnBeforeRenegotiation             func(context.Context) bool
-	OnRenegotiation                   func(context.Context, webrtc.SessionDescription) webrtc.SessionDescription
+	OnRenegotiation                   func(context.Context, webrtc.SessionDescription) (webrtc.SessionDescription, error)
+	OnAllowedRemoteRenegotiation      func()
 	onStopped                         func()
 	onTrack                           func(context.Context, *webrtc.TrackLocalStaticRTP)
 	options                           ClientOptions
@@ -103,19 +107,44 @@ func (c *Client) CompleteNegotiation(answer webrtc.SessionDescription) {
 	}
 }
 
-// ask allow negotiation is required before call negotiation to make sure there is no racing condition of negotiation between local and remote clients.
+// ask if allowed for remote negotiation is required before call negotiation to make sure there is no racing condition of negotiation between local and remote clients.
 // return false means the negotiation is in process, the requester must have a mechanism to repeat the request once it's done.
+// requesting this must be followed by calling Negotate() to make sure the state is completed. Failed on called Negotiate() will cause the client to be in inconsistent state.
 func (c *Client) IsAllowNegotiation() bool {
 	if c.isInRenegotiation {
+		c.pendingRemoteRenegotiation = true
 		return false
 	}
 
-	c.isInRenegotiation = true
+	c.isInRemoteNegotiation = true
 
 	return true
 }
 
+// SDP negotiation from remote client
 func (c *Client) Negotiate(offer webrtc.SessionDescription) (*webrtc.SessionDescription, error) {
+	answerChan := make(chan webrtc.SessionDescription)
+	errorChan := make(chan error)
+	c.queue.Push(negotiationQueue{
+		Client:     c,
+		SDP:        offer,
+		AnswerChan: answerChan,
+		ErrorChan:  errorChan,
+	})
+
+	select {
+	case err := <-errorChan:
+		return nil, err
+	case answer := <-answerChan:
+		return &answer, nil
+	}
+}
+
+func (c *Client) negotiateQueuOp(offer webrtc.SessionDescription) (*webrtc.SessionDescription, error) {
+	c.isInRemoteNegotiation = true
+
+	currentTransceiverCount := len(c.peerConnection.GetTransceivers())
+
 	// Set the remote SessionDescription
 	err := c.peerConnection.SetRemoteDescription(offer)
 	if err != nil {
@@ -145,27 +174,36 @@ func (c *Client) Negotiate(offer webrtc.SessionDescription) (*webrtc.SessionDesc
 		}
 	}
 
-	c.initialTracksCount = len(c.peerConnection.GetTransceivers())
-
-	c.pendingRemoteCandidates = nil
-
-	c.isInRenegotiation = false
+	c.initialTracksCount = len(c.peerConnection.GetTransceivers()) - currentTransceiverCount
 
 	// send pending local candidates if any
 	c.sendPendingLocalCandidates()
 
+	c.pendingRemoteCandidates = nil
+
+	c.isInRemoteNegotiation = false
+
+	// call renegotiation that might delay because the remote client is doing renegotiation
+
 	return c.peerConnection.LocalDescription(), nil
+}
+
+func (c *Client) renegotiate() {
+	c.queue.Push(renegotiateQueue{
+		Client: c,
+	})
 }
 
 // The renegotiation can be in race condition when a client is renegotiating and new track is added to the client because another client is publishing to the room.
 // We can block the renegotiation until the current renegotiation is finish, but it will block the negotiation process for a while.
-func (c *Client) renegotiate() {
-	if c.GetType() == ClientTypeUpBridge && c.OnBeforeRenegotiation != nil && !c.OnBeforeRenegotiation(c.Context) {
-		log.Println("sfu: renegotiation is not allowed because the downbridge is doing renegotiation", c.ID)
+func (c *Client) renegotiateQueuOp() {
+	c.NegotiationNeeded = true
+
+	if c.isInRemoteNegotiation {
+		log.Println("sfu: renegotiation is delayed because the remote client is doing negotiation", c.ID)
+
 		return
 	}
-
-	c.NegotiationNeeded = true
 
 	// no need to run another negotiation if it's already in progress, it will rerun because we mark the negotiationneeded to true
 	if c.isInRenegotiation {
@@ -197,7 +235,12 @@ func (c *Client) renegotiate() {
 			}
 
 			// this will be blocking until the renegotiation is done
-			answer := c.OnRenegotiation(c.Context, *c.peerConnection.LocalDescription())
+			answer, err := c.OnRenegotiation(c.Context, *c.peerConnection.LocalDescription())
+			if err != nil {
+				//TODO: when this happen, we need to close the client and ask the remote client to reconnect
+				log.Println("sfu: error on renegotiation ", err)
+				return
+			}
 
 			if answer.Type != webrtc.SDPTypeAnswer {
 				log.Println("sfu: error on renegotiation, the answer is not an answer type")
@@ -212,6 +255,20 @@ func (c *Client) renegotiate() {
 	}
 
 	c.isInRenegotiation = false
+}
+
+func (c *Client) allowRemoteRenegotiation() {
+	c.queue.Push(allowRemoteRenegotiationQueue{
+		Client: c,
+	})
+}
+
+// inform to remote client that it's allowed to do renegotiation through event
+func (c *Client) allowRemoteRenegotiationQueuOp() {
+	if c.OnAllowedRemoteRenegotiation != nil {
+		c.isInRemoteNegotiation = true
+		go c.OnAllowedRemoteRenegotiation()
+	}
 }
 
 // return boolean if need a renegotiation after track added
@@ -279,9 +336,6 @@ func (c *Client) removePublishedTrack(streamID, trackID string) bool {
 		if track != nil && track.ID() == trackID && track.StreamID() == streamID {
 			if err := c.peerConnection.RemoveTrack(sender); err != nil {
 				log.Println("client: error remove track ", err)
-			} else {
-				log.Println("client: published track removed ", c.ID, streamID, trackID)
-				// go c.renegotiate()
 			}
 		}
 	}
@@ -319,7 +373,7 @@ func (c *Client) processPendingTracks() bool {
 		trackAdded = c.setClientTrack(track)
 	}
 
-	c.pendingReceivedTracks = nil
+	c.pendingReceivedTracks = make(map[string]*webrtc.TrackLocalStaticRTP)
 
 	return trackAdded
 }
@@ -462,4 +516,8 @@ func (c *Client) GetTracks() map[string]*webrtc.TrackLocalStaticRTP {
 
 func (c *Client) GetPeerConnection() *webrtc.PeerConnection {
 	return c.peerConnection
+}
+
+func (c *Client) errorHandler(err error) {
+	log.Println("client: error ", err)
 }

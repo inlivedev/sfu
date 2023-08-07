@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"time"
@@ -24,10 +25,11 @@ type Respose struct {
 }
 
 const (
-	TypeOffer     = "offer"
-	TypeAnswer    = "answer"
-	TypeCandidate = "candidate"
-	TypeError     = "error"
+	TypeOffer              = "offer"
+	TypeAnswer             = "answer"
+	TypeCandidate          = "candidate"
+	TypeError              = "error"
+	TypeAllowRenegotiation = "allow_renegotiation"
 )
 
 func main() {
@@ -110,7 +112,7 @@ func clientHandler(conn *websocket.Conn, messageChan chan Request, r *sfu.Room) 
 
 	answerChan := make(chan webrtc.SessionDescription)
 
-	client.OnRenegotiation = func(ctx context.Context, offer webrtc.SessionDescription) webrtc.SessionDescription {
+	client.OnRenegotiation = func(ctx context.Context, offer webrtc.SessionDescription) (webrtc.SessionDescription, error) {
 		// SFU request a renegotiation, send the offer to client
 		log.Println("receive renegotiation offer from SFU")
 
@@ -133,11 +135,26 @@ func clientHandler(conn *websocket.Conn, messageChan chan Request, r *sfu.Room) 
 		select {
 		case <-ctxTimeout.Done():
 			log.Println("timeout on renegotiation")
-			return webrtc.SessionDescription{}
+			return webrtc.SessionDescription{}, errors.New("timeout on renegotiation")
 		case answer := <-answerChan:
 			log.Println("received answer from client ", client.GetType(), client.ID)
-			return answer
+			return answer, nil
 		}
+	}
+
+	client.OnAllowedRemoteRenegotiation = func() {
+		// SFU allow a remote renegotiation
+		log.Println("receive allow remote renegotiation from SFU")
+
+		resp := Respose{
+			Status: true,
+			Type:   TypeAllowRenegotiation,
+			Data:   "ok",
+		}
+
+		respBytes, _ := json.Marshal(resp)
+
+		_, _ = conn.Write(respBytes)
 	}
 
 	client.OnIceCandidate = func(ctx context.Context, candidate *webrtc.ICECandidate) {

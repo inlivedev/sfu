@@ -82,6 +82,8 @@
                     await peerConnection.setRemoteDescription(msg.data);
                 } else if (msg.type == 'candidate') {
                     await peerConnection.addIceCandidate(msg.data);
+                } else if (msg.type == 'allow_renegotiation') {
+                    // use this event to retry renegotation when doing renegotation was not allowed
                 }
             } catch (error) {
                 console.log(error);

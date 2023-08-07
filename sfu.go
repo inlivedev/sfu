@@ -7,7 +7,6 @@ import (
 	"log"
 	"strconv"
 	"sync"
-	"time"
 
 	"github.com/pion/interceptor"
 	"github.com/pion/interceptor/pkg/intervalpli"
@@ -24,7 +23,6 @@ type SFU struct {
 	Counter                   int
 	publicDataChannels        map[string]map[string]*webrtc.DataChannel
 	privateDataChannels       map[string]map[string]*webrtc.DataChannel
-	idleTimer                 *time.Timer
 	idleChan                  chan bool
 	mutex                     sync.RWMutex
 	mux                       *UDPMux
@@ -182,6 +180,7 @@ func (s *SFU) createClient(id string, peerConnectionConfig *webrtc.Configuration
 		pendingReceivedTracks:  make(map[string]*webrtc.TrackLocalStaticRTP),
 		pendingPublishedTracks: make(map[string]*webrtc.TrackLocalStaticRTP),
 		publishedTracks:        make(map[string]*webrtc.TrackLocalStaticRTP),
+		queue:                  NewQueue(localCtx),
 		sfu:                    s,
 	}
 
@@ -320,7 +319,7 @@ func (s *SFU) NewClient(id string, opts ClientOptions) *Client {
 			if needRenegotiation {
 				log.Println("call renegotiate after sync ", client.ID)
 
-				go client.renegotiate()
+				client.renegotiate()
 			}
 
 		case webrtc.PeerConnectionStateClosed:
@@ -339,6 +338,9 @@ func (s *SFU) NewClient(id string, opts ClientOptions) *Client {
 		client.pendingPublishedTracks[localTrack.StreamID()+"-"+localTrack.ID()] = localTrack
 
 		// don't publish track when not all the tracks are received
+		// TODO:
+		// 1. figure out how to handle this when doing a screensharing
+		// 2. the renegotiation not triggered when new track after first negotiation is done
 		if client.GetType() == ClientTypePeer && client.initialTracksCount > len(client.pendingPublishedTracks) {
 			return
 		}
@@ -351,6 +353,14 @@ func (s *SFU) NewClient(id string, opts ClientOptions) *Client {
 
 	// request keyframe from new client for existing clients
 	client.requestKeyFrame()
+
+	client.peerConnection.OnSignalingStateChange(func(state webrtc.SignalingState) {
+		log.Println("client: signaling state changed ", client.ID, state)
+		if state == webrtc.SignalingStateStable && client.pendingRemoteRenegotiation {
+			client.pendingRemoteRenegotiation = false
+			client.allowRemoteRenegotiation()
+		}
+	})
 
 	s.addClient(client, client.GetDirection())
 
@@ -396,12 +406,16 @@ func (s *SFU) broadcastTracks(tracks []PublishedTrack) {
 		}
 
 		if renegotiate {
-			go client.renegotiate()
+			log.Println("sfu: call renegotiate after broadcast ", client.ID)
+			client.renegotiate()
 		}
 	}
 }
 
 func (s *SFU) removeTrack(streamID, trackID string) bool {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
 	trackRemoved := false
 	for _, client := range s.clients {
 		trackRemoved = client.removePublishedTrack(streamID, trackID)
@@ -465,7 +479,7 @@ func (s *SFU) OnStopped(callback func()) {
 
 func (s *SFU) renegotiateAllClients() {
 	for _, client := range s.clients {
-		go client.renegotiate()
+		client.renegotiate()
 	}
 }
 
@@ -473,27 +487,6 @@ func (s *SFU) requestKeyFrameFromClient(clientID string) {
 	if client, ok := s.clients[clientID]; ok {
 		client.requestKeyFrame()
 	}
-}
-
-func (s *SFU) startIdleTimeout() {
-	go func() {
-		localCtx, cancel := context.WithCancel(s.context)
-		defer cancel()
-
-		for {
-			select {
-			case <-localCtx.Done():
-				return
-			case <-time.After(50 * time.Minute):
-				s.idleChan <- true
-				s.Stop()
-			}
-		}
-	}()
-}
-
-func (s *SFU) cancelIdleTimeout() {
-	s.idleChan <- false
 }
 
 func (s *SFU) OnTrackPublished(callback func(map[string]*webrtc.TrackLocalStaticRTP)) {
