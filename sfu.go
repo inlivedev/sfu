@@ -418,7 +418,10 @@ func (s *SFU) removeTrack(streamID, trackID string) bool {
 
 	trackRemoved := false
 	for _, client := range s.clients {
-		trackRemoved = client.removePublishedTrack(streamID, trackID)
+		clientRemoved := client.removePublishedTrack(streamID, trackID)
+		if clientRemoved {
+			trackRemoved = true
+		}
 	}
 
 	return trackRemoved

@@ -55,9 +55,9 @@ func main() {
 		reader(conn, messageChan)
 	}))
 
-	log.Print("Listening on http://localhost:3000 ...")
+	log.Print("Listening on http://localhost:8000 ...")
 
-	err := http.ListenAndServe(":3000", nil)
+	err := http.ListenAndServe(":8000", nil)
 	if err != nil {
 		log.Panic(err)
 	}
@@ -172,7 +172,6 @@ func clientHandler(conn *websocket.Conn, messageChan chan Request, r *sfu.Room) 
 	for {
 		select {
 		case <-ctx.Done():
-			client.Stop()
 			return
 		case req := <-messageChan:
 			// handle as SDP if no error

@@ -315,6 +315,7 @@ func (c *Client) removeTrack(trackID string) {
 	delete(c.tracks, trackID)
 }
 
+// return boolean if a client need a renegotation because a track or more is removed
 func (c *Client) removePublishedTrack(streamID, trackID string) bool {
 	c.mutex.Lock()
 	defer c.mutex.Unlock()

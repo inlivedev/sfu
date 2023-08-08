@@ -9,8 +9,8 @@ To run this example, follow the steps below:
 ```bash
 go run main.go
 ```
-1. Open the [browser](http://localhost:8080) to open the client.
+1. Open the [browser](http://localhost:8000) to open the client.
 2. Click the `Start` button to start the WebRTC connection.
-3. Open another [browser tab](http://localhost:8080) to start a different client.
+3. Open another [browser tab](http://localhost:8000) to start a different client.
 4. Click the `Start` button to start the WebRTC connection, you should see the video stream from the first client.
 5. Repeat the steps above to add more clients.

@@ -64,7 +64,7 @@
                         },
                     ]
                 });
-        const ws = new WebSocket("ws://localhost:3000/ws");
+        const ws = new WebSocket("ws://localhost:8000/ws");
         ws.onopen = function() {
             console.log("websocket open");
             document.querySelector("button").disabled = false;
