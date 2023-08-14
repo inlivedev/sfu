@@ -2,8 +2,6 @@ package sfu
 
 import (
 	"context"
-	"errors"
-	"io"
 	"log"
 	"strconv"
 	"sync"
@@ -166,104 +164,7 @@ func (s *SFU) createClient(id string, peerConnectionConfig *webrtc.Configuration
 	// add other clients tracks before generate the answer
 	// s.addOtherClientTracksBeforeSendAnswer(peerConnection)
 
-	localCtx, cancel := context.WithCancel(s.context)
-
-	client := &Client{
-		ID:                     id,
-		Context:                localCtx,
-		Cancel:                 cancel,
-		mutex:                  sync.RWMutex{},
-		peerConnection:         peerConnection,
-		State:                  ClientStateNew,
-		tracks:                 make(map[string]*webrtc.TrackLocalStaticRTP),
-		options:                opts,
-		pendingReceivedTracks:  make(map[string]*webrtc.TrackLocalStaticRTP),
-		pendingPublishedTracks: make(map[string]*webrtc.TrackLocalStaticRTP),
-		publishedTracks:        make(map[string]*webrtc.TrackLocalStaticRTP),
-		queue:                  NewQueue(localCtx),
-		sfu:                    s,
-	}
-
-	peerConnection.OnICEConnectionStateChange(func(connectionState webrtc.ICEConnectionState) {
-		log.Println("client: ice connection state changed ", connectionState)
-	})
-
-	// TODOL: replace this with callback
-	peerConnection.OnConnectionStateChange(func(connectionState webrtc.PeerConnectionState) {
-		log.Println("client: connection state changed ", connectionState)
-		if client.State != ClientStateEnded && client.onConnectionStateChanged != nil {
-			client.onConnectionStateChanged(connectionState)
-		}
-
-		for _, callback := range client.onConnectionStateChangedCallbacks {
-			callback(connectionState)
-		}
-	})
-
-	// Set a handler for when a new remote track starts, this just distributes all our packets
-	// to connected peers
-	peerConnection.OnTrack(func(remoteTrack *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
-		trackCtx, trackCancel := context.WithCancel(client.Context)
-		log.Println("client: on track ", remoteTrack.ID(), remoteTrack.StreamID(), remoteTrack.Kind())
-		client.State = ClientStateActive
-		// Create a local track, all our SFU clients will be fed via this track
-		localTrack, newTrackErr := webrtc.NewTrackLocalStaticRTP(remoteTrack.Codec().RTPCodecCapability, remoteTrack.ID(), remoteTrack.StreamID())
-		if newTrackErr != nil {
-			panic(newTrackErr)
-		}
-
-		client.mutex.Lock()
-		client.tracks[localTrack.ID()] = localTrack
-		client.mutex.Unlock()
-
-		rtpBuf := make([]byte, 1400)
-
-		go func() {
-			defer trackCancel()
-
-			for {
-				select {
-				case <-trackCtx.Done():
-
-					return
-				default:
-					i, _, readErr := remoteTrack.Read(rtpBuf)
-					if readErr == io.EOF {
-						client.removeTrack(localTrack.ID())
-						needRenegotiate := s.removeTrack(localTrack.StreamID(), localTrack.ID())
-						if needRenegotiate {
-							s.renegotiateAllClients()
-						}
-						return
-					}
-
-					if readErr != nil {
-						log.Println("client: remote track read error ", readErr)
-					}
-
-					// ErrClosedPipe means we don't have any subscribers, this is ok if no peers have connected yet
-					if _, err = localTrack.Write(rtpBuf[:i]); err != nil && !errors.Is(err, io.ErrClosedPipe) {
-						log.Println("client: local track write error ", err)
-					}
-				}
-			}
-		}()
-
-		client.onTrack(trackCtx, localTrack)
-	})
-
-	peerConnection.OnICECandidate(func(candidate *webrtc.ICECandidate) {
-		// only sending candidate when the local description is set, means expecting the remote peer already has the remote description
-		if candidate != nil {
-			if client.canAddCandidate {
-				go client.onIceCandidateCallback(candidate)
-
-				return
-			}
-
-			client.pendingLocalCandidates = append(client.pendingLocalCandidates, candidate)
-		}
-	})
+	client := NewClient(s, id, peerConnection, opts)
 
 	// Get the LocalDescription and take it to base64 so we can paste in browser
 	return client
@@ -297,9 +198,14 @@ func (s *SFU) NewClient(id string, opts ClientOptions) *Client {
 
 	client := s.createClient(id, &peerConnectionConfig, opts)
 
-	client.onConnectionStateChanged = func(connectionState webrtc.PeerConnectionState) {
+	client.OnConnectionStateChanged(func(connectionState webrtc.PeerConnectionState) {
 		switch connectionState {
 		case webrtc.PeerConnectionStateConnected:
+			if client.State == ClientStateNew {
+				client.State = ClientStateActive
+				client.onJoined()
+			}
+
 			needRenegotiation := false
 
 			if len(client.pendingReceivedTracks) > 0 {
@@ -331,7 +237,7 @@ func (s *SFU) NewClient(id string, opts ClientOptions) *Client {
 		case webrtc.PeerConnectionStateConnecting:
 			client.cancelIdleTimeout()
 		}
-	}
+	})
 
 	client.onTrack = func(ctx context.Context, localTrack *webrtc.TrackLocalStaticRTP) {
 		client.tracks[localTrack.ID()] = localTrack

@@ -57,9 +57,14 @@ func (m *Manager) CreateRoomID() string {
 	return GenerateID([]int{len(m.rooms)})
 }
 
-func (m *Manager) NewRoom(id, name, roomType string) *Room {
+func (m *Manager) NewRoom(id, name, roomType string) (*Room, error) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
+
+	err := m.onBeforeNewRoom(id, name, roomType)
+	if err != nil {
+		return nil, err
+	}
 
 	newSFU := New(m.Context, m.TurnServer, m.UDPMux)
 
@@ -72,16 +77,31 @@ func (m *Manager) NewRoom(id, name, roomType string) *Room {
 	// TODO: what manager should do when a room is closed?
 	// is there any neccesary resource to be released?
 	room.OnRoomClosed(func(id string) {
-
+		for _, ext := range m.extension {
+			ext.OnRoomClosed(m, room)
+		}
 	})
 
-	room.OnClientRemoved(func(id string) {
+	room.OnClientLeft(func(client *Client) {
 		// TODO: should check if the room is empty and close it if it is
+
 	})
 
 	m.rooms[room.ID] = room
 
-	return room
+	return room, nil
+}
+
+func (m *Manager) onBeforeNewRoom(id, name, roomType string) error {
+	for _, ext := range m.extension {
+		err := ext.OnBeforeNewRoom(id, name, roomType)
+		if err != nil {
+			return err
+		}
+
+	}
+
+	return nil
 }
 
 func (m *Manager) RoomsCount() int {

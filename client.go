@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"sync"
 	"time"
@@ -59,13 +60,15 @@ type Client struct {
 	queue                             *queue
 	State                             int
 	sfu                               *SFU
-	onConnectionStateChanged          func(webrtc.PeerConnectionState)
 	onConnectionStateChangedCallbacks []func(webrtc.PeerConnectionState)
+	onJoinedCallbacks                 []func()
+	onLeftCallbacks                   []func()
+	onTrackAddedCallbacks             []func(sourceType string, track *webrtc.TrackLocalStaticRTP)
+	onTrackRemovedCallbacks           []func(sourceType string, track *webrtc.TrackLocalStaticRTP)
 	OnIceCandidate                    func(context.Context, *webrtc.ICECandidate)
 	OnBeforeRenegotiation             func(context.Context) bool
 	OnRenegotiation                   func(context.Context, webrtc.SessionDescription) (webrtc.SessionDescription, error)
 	OnAllowedRemoteRenegotiation      func()
-	onStopped                         func()
 	onTrack                           func(context.Context, *webrtc.TrackLocalStaticRTP)
 	options                           ClientOptions
 	tracks                            map[string]*webrtc.TrackLocalStaticRTP
@@ -80,6 +83,102 @@ func DefaultClientOptions() ClientOptions {
 		IdleTimeout: 30 * time.Second,
 		Type:        ClientTypePeer,
 	}
+}
+
+func NewClient(s *SFU, id string, peerConnection *webrtc.PeerConnection, opts ClientOptions) *Client {
+	localCtx, cancel := context.WithCancel(s.context)
+
+	client := &Client{
+		ID:                     id,
+		Context:                localCtx,
+		Cancel:                 cancel,
+		mutex:                  sync.RWMutex{},
+		peerConnection:         peerConnection,
+		State:                  ClientStateNew,
+		tracks:                 make(map[string]*webrtc.TrackLocalStaticRTP),
+		options:                opts,
+		pendingReceivedTracks:  make(map[string]*webrtc.TrackLocalStaticRTP),
+		pendingPublishedTracks: make(map[string]*webrtc.TrackLocalStaticRTP),
+		publishedTracks:        make(map[string]*webrtc.TrackLocalStaticRTP),
+		queue:                  NewQueue(localCtx),
+		sfu:                    s,
+	}
+
+	peerConnection.OnICEConnectionStateChange(func(connectionState webrtc.ICEConnectionState) {
+		log.Println("client: ice connection state changed ", connectionState)
+	})
+
+	// TODOL: replace this with callback
+	peerConnection.OnConnectionStateChange(func(connectionState webrtc.PeerConnectionState) {
+		client.onConnectionStateChanged(connectionState)
+	})
+
+	// Set a handler for when a new remote track starts, this just distributes all our packets
+	// to connected peers
+	peerConnection.OnTrack(func(remoteTrack *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
+		trackCtx, trackCancel := context.WithCancel(client.Context)
+		log.Println("client: on track ", remoteTrack.ID(), remoteTrack.StreamID(), remoteTrack.Kind())
+
+		// Create a local track, all our SFU clients will be fed via this track
+		localTrack, newTrackErr := webrtc.NewTrackLocalStaticRTP(remoteTrack.Codec().RTPCodecCapability, remoteTrack.ID(), remoteTrack.StreamID())
+		if newTrackErr != nil {
+			panic(newTrackErr)
+		}
+
+		client.mutex.Lock()
+		client.tracks[localTrack.ID()] = localTrack
+		client.mutex.Unlock()
+
+		rtpBuf := make([]byte, 1400)
+
+		go func() {
+			defer trackCancel()
+
+			for {
+				select {
+				case <-trackCtx.Done():
+
+					return
+				default:
+					i, _, readErr := remoteTrack.Read(rtpBuf)
+					if readErr == io.EOF {
+						client.removeTrack(localTrack.ID())
+						needRenegotiate := s.removeTrack(localTrack.StreamID(), localTrack.ID())
+						if needRenegotiate {
+							s.renegotiateAllClients()
+						}
+						return
+					}
+
+					if readErr != nil {
+						log.Println("client: remote track read error ", readErr)
+					}
+
+					// ErrClosedPipe means we don't have any subscribers, this is ok if no peers have connected yet
+					if _, err := localTrack.Write(rtpBuf[:i]); err != nil && !errors.Is(err, io.ErrClosedPipe) {
+						log.Println("client: local track write error ", err)
+					}
+				}
+			}
+		}()
+
+		client.onTrack(trackCtx, localTrack)
+	})
+
+	peerConnection.OnICECandidate(func(candidate *webrtc.ICECandidate) {
+		// only sending candidate when the local description is set, means expecting the remote peer already has the remote description
+		if candidate != nil {
+			if client.canAddCandidate {
+				go client.onIceCandidateCallback(candidate)
+
+				return
+			}
+
+			client.pendingLocalCandidates = append(client.pendingLocalCandidates, candidate)
+		}
+	})
+
+	return client
 }
 
 // Init and Complete negotiation is used for bridging the room between servers
@@ -398,8 +497,9 @@ func (c *Client) GetCurrentTracks() map[string]PublishedTrack {
 }
 
 func (c *Client) afterClosed() {
-	c.State = ClientStateEnded
-
+	if c.State != ClientStateEnded {
+		c.State = ClientStateEnded
+	}
 	// remove all tracks from client and SFU
 	needRenegotiation := false
 	for _, track := range c.tracks {
@@ -411,13 +511,9 @@ func (c *Client) afterClosed() {
 		c.sfu.renegotiateAllClients()
 	}
 
-	c.sfu.onAfterClientStopped(c)
-
 	c.Cancel()
 
-	if c.onStopped != nil {
-		c.onStopped()
-	}
+	c.sfu.onAfterClientStopped(c)
 }
 
 func (c *Client) Stop() error {
@@ -425,12 +521,13 @@ func (c *Client) Stop() error {
 		return ErrClientStoped
 	}
 
+	c.State = ClientStateEnded
+
 	err := c.peerConnection.Close()
 	if err != nil {
 		return err
 	}
 
-	// this will trigger remove client from SFU
 	c.afterClosed()
 
 	return nil
@@ -481,6 +578,34 @@ func (c *Client) OnConnectionStateChanged(callback func(webrtc.PeerConnectionSta
 	c.onConnectionStateChangedCallbacks = append(c.onConnectionStateChangedCallbacks, callback)
 }
 
+func (c *Client) onConnectionStateChanged(state webrtc.PeerConnectionState) {
+	for _, callback := range c.onConnectionStateChangedCallbacks {
+		callback(webrtc.PeerConnectionState(state))
+	}
+}
+
+func (c *Client) onJoined() {
+	for _, callback := range c.onJoinedCallbacks {
+		callback()
+	}
+}
+
+func (c *Client) OnJoined(callback func()) {
+	c.onJoinedCallbacks = append(c.onJoinedCallbacks, callback)
+}
+
+func (c *Client) OnLeft(callback func()) {
+	c.onLeftCallbacks = append(c.onLeftCallbacks, callback)
+}
+
+func (c *Client) OnTrackAdded(callback func(sourceType string, track *webrtc.TrackLocalStaticRTP)) {
+	c.onTrackAddedCallbacks = append(c.onTrackAddedCallbacks, callback)
+}
+
+func (c *Client) OnTrackRemoved(callback func(sourceType string, track *webrtc.TrackLocalStaticRTP)) {
+	c.onTrackRemovedCallbacks = append(c.onTrackRemovedCallbacks, callback)
+}
+
 func (c *Client) IsBridge() bool {
 	return c.GetType() == ClientTypeUpBridge || c.GetType() == ClientTypeDownBridge
 }
@@ -517,8 +642,4 @@ func (c *Client) GetTracks() map[string]*webrtc.TrackLocalStaticRTP {
 
 func (c *Client) GetPeerConnection() *webrtc.PeerConnection {
 	return c.peerConnection
-}
-
-func (c *Client) errorHandler(err error) {
-	log.Println("client: error ", err)
 }

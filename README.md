@@ -72,6 +72,8 @@ The renegotiation also can be initiated by the client if the client is adding a 
 
 To prevent this, we need to check with the SFU relay client if it is allowed to do renegotiation from the client side by checking the [client.IsAllowNegotiation()](./client.go#L103) method. If it returns true, then we can start the renegotiation by calling [client.Negotiate(offer)](./client.go#L113) method. The same method that we used for the first negotiation. The SFU will respond with an SDP answer to the client. Make sure after you call [client.IsAllowNegotiation()](./client.go#L1o3) method, you also call [client.Negotiate(offer)](./client.go#L113) method to make sure the in-renegotiation state is processed by the SFU. If you do not call the following method, the SFU will think that the client is doing a renegotiation and won't initiate the renegotiation.
 
+If the `client.IsAllowNegotiation()` is returned false, it means the SFU is currently trying to renegotiate with the client. So the client should wait until the SFU is done renegotiating with the client. In the browser, you can listen to the `onnegotiationneeded` event to know when the SFU is done renegotiating with the client.
+
 ### Leave the room
 If a client wants to leave a room or disconnect from the SFU. You can [close the PeerConnection](https://developer.mozilla.org/en-US/docs/Web/API/RTCPeerConnection/close) instance on the client side. The SFU will detect that the client is closed and will remove the client from the room.
 

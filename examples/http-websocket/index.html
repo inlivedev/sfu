@@ -104,7 +104,7 @@
             stream = await navigator.mediaDevices.getUserMedia(constraints)
             localVideo.srcObject = stream;
             localVideo.play();
-            
+
             peerConnection.ontrack = function(e) {
                 if(e.track.kind != "video") {
                     return

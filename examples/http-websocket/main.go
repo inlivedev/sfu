@@ -44,7 +44,7 @@ func main() {
 	roomName := "test-room"
 
 	// create new room
-	defaultRoom := roomManager.NewRoom(roomID, roomName, sfu.RoomTypeLocal)
+	defaultRoom, _ := roomManager.NewRoom(roomID, roomName, sfu.RoomTypeLocal)
 
 	fs := http.FileServer(http.Dir("./"))
 	http.Handle("/", fs)

@@ -2,7 +2,6 @@ package sfu
 
 import (
 	"context"
-	"log"
 	"sync"
 	"time"
 )
@@ -34,23 +33,25 @@ type Event struct {
 }
 
 type Room struct {
-	callbacksClientRemoved []func(id string)
-	callbacksRoomClosed    []func(id string)
-	Context                context.Context
-	cancelContext          context.CancelFunc
-	ID                     string `json:"id"`
-	RenegotiationChan      map[string]chan bool
-	Name                   string `json:"name"`
-	mutex                  *sync.Mutex
-	sfu                    *SFU
-	State                  string
-	Type                   string
-	extensions             []IExtension
-	OnEvent                func(event Event)
+	onRoomClosedCallbacks   []func(id string)
+	onClientJoinedCallbacks []func(*Client)
+	onClientLeftCallbacks   []func(*Client)
+	Context                 context.Context
+	cancelContext           context.CancelFunc
+	ID                      string `json:"id"`
+	RenegotiationChan       map[string]chan bool
+	Name                    string `json:"name"`
+	mutex                   *sync.Mutex
+	sfu                     *SFU
+	State                   string
+	Type                    string
+	extensions              []IExtension
+	OnEvent                 func(event Event)
 }
 
 func newRoom(ctx context.Context, id, name string, sfu *SFU, roomType string) *Room {
 	localContext, cancel := context.WithCancel(ctx)
+
 	room := &Room{
 		ID:            id,
 		Context:       localContext,
@@ -62,6 +63,10 @@ func newRoom(ctx context.Context, id, name string, sfu *SFU, roomType string) *R
 		extensions:    make([]IExtension, 0),
 		Type:          roomType,
 	}
+
+	sfu.OnClientRemoved(func(client *Client) {
+		room.onClientLeft(client)
+	})
 
 	return room
 }
@@ -84,13 +89,11 @@ func (r *Room) Close() error {
 
 	r.sfu.Stop()
 
-	for _, callback := range r.callbacksRoomClosed {
+	for _, callback := range r.onRoomClosedCallbacks {
 		callback(r.ID)
 	}
 
 	r.State = StateRoomClosed
-
-	r.sendEvent(EventRoomClosed, nil)
 
 	return nil
 }
@@ -121,6 +124,12 @@ func (r *Room) AddClient(id string, opts ClientOptions) (*Client, error) {
 		return nil, ErrRoomIsClosed
 	}
 
+	for _, ext := range r.extensions {
+		if err := ext.OnBeforeClientAdded(id); err != nil {
+			return nil, err
+		}
+	}
+
 	_, ok := r.sfu.clients[id]
 	if ok {
 		return nil, ErrClientExists
@@ -128,14 +137,9 @@ func (r *Room) AddClient(id string, opts ClientOptions) (*Client, error) {
 
 	client := r.sfu.NewClient(id, opts)
 
-	client.onStopped = func() {
-		log.Println("client stopped ", client.ID)
-		r.RemoveClient(client.ID)
-	}
-
-	for _, ext := range r.extensions {
-		ext.OnClientAdded(client)
-	}
+	client.OnJoined(func() {
+		r.onClientJoined(client)
+	})
 
 	return client, nil
 }
@@ -148,36 +152,36 @@ func (r *Room) CreateClientID(id int) string {
 	return GenerateID([]int{r.sfu.Counter, id})
 }
 
-func (r *Room) RemoveClient(id string) {
-	r.onClientRemoved(id)
-}
-
 func (r *Room) OnRoomClosed(callback func(id string)) {
-	r.callbacksRoomClosed = append(r.callbacksRoomClosed, callback)
+	r.onRoomClosedCallbacks = append(r.onRoomClosedCallbacks, callback)
 }
 
-func (r *Room) OnClientRemoved(callback func(id string)) {
-	r.callbacksClientRemoved = append(r.callbacksClientRemoved, callback)
+func (r *Room) OnClientLeft(callback func(client *Client)) {
+	r.onClientLeftCallbacks = append(r.onClientLeftCallbacks, callback)
 }
 
-func (r *Room) onClientRemoved(clientid string) {
-	for _, callback := range r.callbacksClientRemoved {
-		callback(clientid)
+func (r *Room) onClientLeft(client *Client) {
+	for _, callback := range r.onClientLeftCallbacks {
+		callback(client)
 	}
 
-	r.sendEvent(EventRoomClientLeft, map[string]interface{}{
-		"clientid": clientid,
-	})
+	for _, ext := range r.extensions {
+		ext.OnClientRemoved(client)
+	}
 }
 
-func (r *Room) sendEvent(eventType string, data map[string]interface{}) {
-	if r.OnEvent != nil {
-		r.OnEvent(Event{
-			Type: eventType,
-			Time: time.Now(),
-			Data: data,
-		})
+func (r *Room) onClientJoined(client *Client) {
+	for _, callback := range r.onClientJoinedCallbacks {
+		callback(client)
 	}
+
+	for _, ext := range r.extensions {
+		ext.OnClientAdded(client)
+	}
+}
+
+func (r *Room) OnClientJoined(callback func(client *Client)) {
+	r.onClientJoinedCallbacks = append(r.onClientJoinedCallbacks, callback)
 }
 
 func (r *Room) GetSFU() *SFU {

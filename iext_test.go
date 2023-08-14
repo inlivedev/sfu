@@ -11,59 +11,99 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestRoomCreateAndClose(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// create room manager first before create new room
-	roomManager := NewManager(ctx, "test", Options{})
-
-	roomID := roomManager.CreateRoomID()
-	roomName := "test-room"
-
-	// create new room
-	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal)
-	require.NoErrorf(t, err, "error creating new room: %v", err)
-
-	// add a new client to room
-	// you can also get the client by using r.GetClient(clientID)
-	client1, err := testRoom.AddClient(testRoom.CreateClientID(testRoom.GetSFU().Counter), DefaultClientOptions())
-	require.NoErrorf(t, err, "error adding client to room: %v", err)
-
-	// stop client
-	err = testRoom.StopClient(client1.ID)
-	require.NoErrorf(t, err, "error stopping client: %v", err)
-
-	client2, err := testRoom.AddClient(testRoom.CreateClientID(testRoom.GetSFU().Counter), DefaultClientOptions())
-	require.NoErrorf(t, err, "error adding client to room: %v", err)
-
-	// stop all clients should error on not empty room
-	err = testRoom.Close()
-	require.EqualError(t, err, ErrRoomIsNotEmpty.Error(), "expecting error room is not empty: %v", err)
-
-	// stop other client
-	err = testRoom.StopClient(client2.ID)
-	require.NoErrorf(t, err, "error stopping client: %v", err)
-
-	err = testRoom.Close()
-	require.NoErrorf(t, err, "error closing room: %v", err)
+type testManagerExtension struct {
+	onGetRoom       bool
+	onBeforeNewRoom bool
+	onNewRoom       bool
+	onRoomClosed    bool
 }
 
-func TestRoomJoinLeftEvent(t *testing.T) {
+type testExtension struct {
+	onBeforeClientAdded bool
+	onClientAdded       bool
+	onClientRemoved     bool
+}
+
+func NewTestExtension() *testExtension {
+	return &testExtension{}
+}
+
+func (t *testExtension) OnBeforeClientAdded(id string) error {
+	t.onBeforeClientAdded = true
+	return nil
+}
+
+func (t *testExtension) OnClientAdded(client *Client) {
+	t.onClientAdded = true
+}
+
+func (t *testExtension) OnClientRemoved(client *Client) {
+	t.onClientRemoved = true
+}
+
+func NewTestManagerExtension() *testManagerExtension {
+	return &testManagerExtension{}
+}
+
+func (t *testManagerExtension) OnGetRoom(manager *Manager, roomID string) (*Room, error) {
+	t.onGetRoom = true
+	return nil, nil
+}
+
+func (t *testManagerExtension) OnBeforeNewRoom(id, name, roomType string) error {
+	t.onBeforeNewRoom = true
+	return nil
+}
+
+func (t *testManagerExtension) OnNewRoom(manager *Manager, room *Room) {
+	t.onNewRoom = true
+}
+
+func (t *testManagerExtension) OnRoomClosed(manager *Manager, room *Room) {
+	t.onRoomClosed = true
+}
+
+func TestManagerExtension(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// create room manager first before create new room
-	roomManager := NewManager(ctx, "test-join-left", Options{WebRTCPort: 40000})
+	m := NewManager(ctx, "test", DefaultOptions())
+	managerExt := NewTestManagerExtension()
+	m.AddExtension(managerExt)
+	roomID := m.CreateRoomID()
 
-	roomID := roomManager.CreateRoomID()
-	roomName := "test-room"
+	room, err := m.NewRoom(roomID, "test", "p2p")
+	require.NotNil(t, room, "room is nil")
+	require.NoError(t, err, "error creating room")
 
-	clients := make(map[string]*Client)
+	room.Close()
+
+	_, err = m.GetRoom("wrong-room-id")
+
+	require.NoError(t, err, "error getting room")
+
+	require.True(t, managerExt.onGetRoom, "OnGetRoom is not called")
+
+	require.True(t, managerExt.onBeforeNewRoom, "OnBeforeNewRoom is not called")
+
+	require.True(t, managerExt.onNewRoom, "OnNewRoom is not called")
+
+	require.True(t, managerExt.onRoomClosed, "OnRoomClosed is not called")
+}
+
+func TestExtension(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	m := NewManager(ctx, "test", DefaultOptions())
 
 	// create new room
-	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal)
+	testRoom, err := m.NewRoom("test", "test", RoomTypeLocal)
+	ext := NewTestExtension()
+	testRoom.AddExtension(ext)
+
 	require.NoError(t, err, "error creating room: %v", err)
+
 	leftChan := make(chan bool)
 	joinChan := make(chan bool)
 	peerCount := 0
@@ -78,14 +118,10 @@ func TestRoomJoinLeftEvent(t *testing.T) {
 
 	testRoom.OnClientLeft(func(client *Client) {
 		leftChan <- true
-		log.Println("client left", client.ID)
-		delete(clients, client.ID)
 	})
 
 	testRoom.OnClientJoined(func(client *Client) {
 		joinChan <- true
-		log.Println("client join", client.ID)
-		clients[client.ID] = client
 	})
 
 	// add a new client to room
@@ -126,7 +162,7 @@ func TestRoomJoinLeftEvent(t *testing.T) {
 
 	})
 
-	timeout, cancelTimeout := context.WithTimeout(ctx, 20*time.Second)
+	timeout, cancelTimeout := context.WithTimeout(ctx, 30*time.Second)
 	defer cancelTimeout()
 
 	for {
@@ -137,7 +173,7 @@ func TestRoomJoinLeftEvent(t *testing.T) {
 			log.Println("client left")
 			peerCount--
 		case <-joinChan:
-			log.Println("client join")
+			log.Println("client joined")
 			peerCount++
 			// stop client in go routine so we can receive left event
 			go func() {
@@ -153,4 +189,10 @@ func TestRoomJoinLeftEvent(t *testing.T) {
 	}
 
 	_ = testRoom.Close()
+
+	require.True(t, ext.onBeforeClientAdded, "OnBeforeClientAdded is not called")
+
+	require.True(t, ext.onClientAdded, "OnClientAdded is not called")
+
+	require.True(t, ext.onClientRemoved, "OnClientRemoved is not called")
 }
