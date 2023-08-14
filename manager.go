@@ -118,6 +118,9 @@ func (m *Manager) GetRoom(id string) (*Room, error) {
 	if err == ErrRoomNotFound {
 		for _, ext := range m.extension {
 			room, err = ext.OnGetRoom(m, id)
+			if err == nil && room != nil {
+				return room, nil
+			}
 		}
 
 		return room, err
