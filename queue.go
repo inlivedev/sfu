@@ -45,16 +45,16 @@ func NewQueue(ctx context.Context) *queue {
 	return q
 }
 
-func (q *queue) Push(item interface{}) error {
-	if !q.IsOpen {
-		return ErrQueueIsClosed
-	}
-
+func (q *queue) Push(item interface{}) {
 	go func() {
+		q.mutex.Lock()
+		defer q.mutex.Unlock()
+		if !q.IsOpen {
+			return
+		}
+
 		q.opChan <- item
 	}()
-
-	return nil
 }
 
 func (q *queue) run(ctx context.Context) {
