@@ -11,7 +11,7 @@ type IManagerExtension interface {
 
 type IExtension interface {
 	// This can be use for authentication before a client add to a room
-	OnBeforeClientAdded(id string) error
-	OnClientAdded(client *Client)
-	OnClientRemoved(client *Client)
+	OnBeforeClientAdded(room *Room, clientID string) error
+	OnClientAdded(room *Room, client *Client)
+	OnClientRemoved(room *Room, client *Client)
 }

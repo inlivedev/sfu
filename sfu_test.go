@@ -92,7 +92,7 @@ func TestActiveTracks(t *testing.T) {
 				if trackCount == expectedTracks { // 2 clients
 					totalRemoteTracks := 0
 					for _, clientTrack := range remoteTracks {
-						for _, _ = range clientTrack {
+						for range clientTrack {
 							totalRemoteTracks++
 						}
 					}

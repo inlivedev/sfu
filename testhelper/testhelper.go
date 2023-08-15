@@ -27,7 +27,6 @@ import (
 	"github.com/pion/webrtc/v3/pkg/media/oggreader"
 )
 
-var tracks []mediadevices.Track
 var mediaEngine *webrtc.MediaEngine
 
 const (
@@ -66,8 +65,6 @@ func GetTestTracks() ([]mediadevices.Track, *webrtc.MediaEngine) {
 		},
 		Codec: codecSelector,
 	})
-
-	tracks = s.GetTracks()
 
 	return s.GetTracks(), mediaEngine
 }

@@ -28,16 +28,16 @@ func NewTestExtension() *testExtension {
 	return &testExtension{}
 }
 
-func (t *testExtension) OnBeforeClientAdded(id string) error {
+func (t *testExtension) OnBeforeClientAdded(room *Room, id string) error {
 	t.onBeforeClientAdded = true
 	return nil
 }
 
-func (t *testExtension) OnClientAdded(client *Client) {
+func (t *testExtension) OnClientAdded(room *Room, client *Client) {
 	t.onClientAdded = true
 }
 
-func (t *testExtension) OnClientRemoved(client *Client) {
+func (t *testExtension) OnClientRemoved(room *Room, client *Client) {
 	t.onClientRemoved = true
 }
 

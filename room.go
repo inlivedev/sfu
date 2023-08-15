@@ -125,7 +125,7 @@ func (r *Room) AddClient(id string, opts ClientOptions) (*Client, error) {
 	}
 
 	for _, ext := range r.extensions {
-		if err := ext.OnBeforeClientAdded(id); err != nil {
+		if err := ext.OnBeforeClientAdded(r, id); err != nil {
 			return nil, err
 		}
 	}
@@ -166,7 +166,7 @@ func (r *Room) onClientLeft(client *Client) {
 	}
 
 	for _, ext := range r.extensions {
-		ext.OnClientRemoved(client)
+		ext.OnClientRemoved(r, client)
 	}
 }
 
@@ -176,7 +176,7 @@ func (r *Room) onClientJoined(client *Client) {
 	}
 
 	for _, ext := range r.extensions {
-		ext.OnClientAdded(client)
+		ext.OnClientAdded(r, client)
 	}
 }
 
