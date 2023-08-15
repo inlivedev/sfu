@@ -95,7 +95,10 @@ func TestExtension(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	m := NewManager(ctx, "test", DefaultOptions())
+	m := NewManager(ctx, "test", Options{
+		WebRTCPort:               50010,
+		ConnectRemoteRoomTimeout: 30 * time.Second,
+	})
 
 	// create new room
 	testRoom, err := m.NewRoom("test", "test", RoomTypeLocal)
