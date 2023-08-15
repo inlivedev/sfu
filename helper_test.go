@@ -3,10 +3,10 @@ package sfu
 import (
 	"context"
 	"errors"
-	"log"
 	"strconv"
 	"testing"
 
+	"github.com/golang/glog"
 	"github.com/inlivedev/sfu/testhelper"
 	"github.com/pion/webrtc/v3"
 	"github.com/stretchr/testify/require"
@@ -47,7 +47,7 @@ func CreatePeer(ctx context.Context, t *testing.T, iceServers []webrtc.ICEServer
 
 	peerConnection.OnICEConnectionStateChange(func(connectionState webrtc.ICEConnectionState) {
 		if connectionState == webrtc.ICEConnectionStateConnected {
-			log.Println("ICE connected")
+			glog.Info("ICE connected")
 			connectedChan <- true
 		}
 	})
@@ -127,7 +127,7 @@ func Setup(t *testing.T, ctx context.Context, udpMux *UDPMux, peerCount int, tra
 			uid := GenerateID([]int{s.Counter})
 
 			peer.OnSignalingStateChange(func(state webrtc.SignalingState) {
-				log.Println("test: peer signaling state: ", uid, state)
+				glog.Info("test: peer signaling state: ", uid, state)
 			})
 
 			relay := s.NewClient(uid, DefaultClientOptions())
@@ -140,10 +140,10 @@ func Setup(t *testing.T, ctx context.Context, udpMux *UDPMux, peerCount int, tra
 			peerChan <- peerClient
 
 			relay.OnRenegotiation = func(ctx context.Context, sdp webrtc.SessionDescription) (webrtc.SessionDescription, error) {
-				log.Println("test: renegotiation triggered", peerClient.ID, CountTracks(peer.LocalDescription().SDP), peerClient.InRenegotiation)
+				glog.Info("test: renegotiation triggered", peerClient.ID, CountTracks(peer.LocalDescription().SDP), peerClient.InRenegotiation)
 				if peer.SignalingState() != webrtc.SignalingStateClosed {
 					if peerClient.InRenegotiation {
-						log.Println("test: rollback renegotiation", peerClient.ID)
+						glog.Info("test: rollback renegotiation", peerClient.ID)
 						_ = peer.SetLocalDescription(webrtc.SessionDescription{
 							Type: webrtc.SDPTypeRollback,
 						})
@@ -167,10 +167,10 @@ func Setup(t *testing.T, ctx context.Context, udpMux *UDPMux, peerCount int, tra
 			}
 
 			relay.OnIceCandidate = func(ctx context.Context, candidate *webrtc.ICECandidate) {
-				// log.Println("candidate: ", candidate.Address)
+				// glog.Info("candidate: ", candidate.Address)
 
 				if candidate != nil && receivedAnswer {
-					// log.Println("adding candidate: ", candidate.Address)
+					// glog.Info("adding candidate: ", candidate.Address)
 					err := peer.AddICECandidate(candidate.ToJSON())
 					require.NoError(t, err)
 					return
@@ -188,18 +188,18 @@ func Setup(t *testing.T, ctx context.Context, udpMux *UDPMux, peerCount int, tra
 				// reset pending tracks once processed
 				peerClient.PendingTracks = make([]*webrtc.TrackLocalStaticSample, 0)
 
-				log.Println("test: renegotiating allowed for client: ", relay.ID)
+				glog.Error("test: renegotiating allowed for client: ", relay.ID)
 				offer, _ := peer.CreateOffer(nil)
 				err := peer.SetLocalDescription(offer)
 				if err != nil {
-					log.Println("test: error setting local description: ", relay.ID, err)
+					glog.Error("test: error setting local description: ", relay.ID, err)
 				}
 				require.NoError(t, err)
 				answer, err := relay.Negotiate(*peer.LocalDescription())
 				require.NoError(t, err)
 				err = peer.SetRemoteDescription(*answer)
 				if err != nil {
-					log.Println("test: error setting remote description: ", relay.ID, err)
+					glog.Info("test: error setting remote description: ", relay.ID, err)
 				}
 				require.NoError(t, err)
 			}

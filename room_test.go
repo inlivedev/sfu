@@ -2,10 +2,10 @@ package sfu
 
 import (
 	"context"
-	"log"
 	"testing"
 	"time"
 
+	"github.com/golang/glog"
 	"github.com/inlivedev/sfu/testhelper"
 	"github.com/pion/webrtc/v3"
 	"github.com/stretchr/testify/require"
@@ -78,13 +78,13 @@ func TestRoomJoinLeftEvent(t *testing.T) {
 
 	testRoom.OnClientLeft(func(client *Client) {
 		leftChan <- true
-		log.Println("client left", client.ID)
+		glog.Info("client left", client.ID)
 		delete(clients, client.ID)
 	})
 
 	testRoom.OnClientJoined(func(client *Client) {
 		joinChan <- true
-		log.Println("client join", client.ID)
+		glog.Info("client join", client.ID)
 		clients[client.ID] = client
 	})
 
@@ -134,10 +134,10 @@ func TestRoomJoinLeftEvent(t *testing.T) {
 		case <-timeout.Done():
 			t.Fatal("timeout waiting for client left event")
 		case <-leftChan:
-			log.Println("client left")
+			glog.Info("client left")
 			peerCount--
 		case <-joinChan:
-			log.Println("client join")
+			glog.Info("client join")
 			peerCount++
 			// stop client in go routine so we can receive left event
 			go func() {
@@ -146,7 +146,7 @@ func TestRoomJoinLeftEvent(t *testing.T) {
 
 		}
 
-		log.Println("peer count", peerCount)
+		glog.Info("peer count", peerCount)
 		if peerCount == 0 {
 			break
 		}

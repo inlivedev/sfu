@@ -2,10 +2,10 @@ package sfu
 
 import (
 	"context"
-	"log"
 	"testing"
 	"time"
 
+	"github.com/golang/glog"
 	"github.com/inlivedev/sfu/testhelper"
 	"github.com/pion/webrtc/v3"
 	"github.com/stretchr/testify/require"
@@ -170,10 +170,10 @@ func TestExtension(t *testing.T) {
 		case <-timeout.Done():
 			t.Fatal("timeout waiting for client left event")
 		case <-leftChan:
-			log.Println("client left")
+			glog.Info("client left")
 			peerCount--
 		case <-joinChan:
-			log.Println("client joined")
+			glog.Info("client joined")
 			peerCount++
 			// stop client in go routine so we can receive left event
 			go func() {
@@ -182,7 +182,7 @@ func TestExtension(t *testing.T) {
 
 		}
 
-		log.Println("peer count", peerCount)
+		glog.Info("peer count", peerCount)
 		if peerCount == 0 {
 			break
 		}

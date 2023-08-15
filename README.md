@@ -77,5 +77,10 @@ If the `client.IsAllowNegotiation()` is returned false, it means the SFU is curr
 ### Leave the room
 If a client wants to leave a room or disconnect from the SFU. You can [close the PeerConnection](https://developer.mozilla.org/en-US/docs/Web/API/RTCPeerConnection/close) instance on the client side. The SFU will detect that the client is closed and will remove the client from the room.
 
+## Logging
+This library is using Glog for logging. You can set the log level by setting the `-flag stderrthreshold=warning` when running an application from the command line. You can control it also from your app using the [flag package](https://pkg.go.dev/flag). The default log level is `info`. The available log levels are `info`, `warning`, `error`, `fatal`, and `panic`. You can read more about Glog [here](https://pkg.go.dev/github.com/golang/glog)
+
+To set the log printing to stderr instead of a file, you can set the `-flag logtostderr=true` flag variable to `true`. The default is `false`.
+
 ## Licence
 MIT License - see [LICENSE](./LICENSE) for the full text

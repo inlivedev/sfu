@@ -29,7 +29,7 @@ func TestBroadcastDataChannel(t *testing.T) {
 	// chatChan := make(chan Data)
 
 	// dataChannel.OnMessage(func(msg webrtc.DataChannelMessage) {
-	// 	log.Println("data channel message: ", string(msg.Data))
+	// 	glog.Info("data channel message: ", string(msg.Data))
 	// 	chat := Data{}
 	// 	json.Unmarshal(msg.Data, &chat)
 	// 	chatChan <- chat

@@ -5,10 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"sync"
 	"time"
 
+	"github.com/golang/glog"
 	"github.com/pion/rtcp"
 	"github.com/pion/webrtc/v3"
 )
@@ -105,7 +105,7 @@ func NewClient(s *SFU, id string, peerConnection *webrtc.PeerConnection, opts Cl
 	}
 
 	peerConnection.OnICEConnectionStateChange(func(connectionState webrtc.ICEConnectionState) {
-		log.Println("client: ice connection state changed ", connectionState)
+		glog.Info("client: ice connection state changed ", connectionState)
 	})
 
 	// TODOL: replace this with callback
@@ -117,7 +117,7 @@ func NewClient(s *SFU, id string, peerConnection *webrtc.PeerConnection, opts Cl
 	// to connected peers
 	peerConnection.OnTrack(func(remoteTrack *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
 		trackCtx, trackCancel := context.WithCancel(client.Context)
-		log.Println("client: on track ", remoteTrack.ID(), remoteTrack.StreamID(), remoteTrack.Kind())
+		glog.Info("client: on track ", remoteTrack.ID(), remoteTrack.StreamID(), remoteTrack.Kind())
 
 		// Create a local track, all our SFU clients will be fed via this track
 		localTrack, newTrackErr := webrtc.NewTrackLocalStaticRTP(remoteTrack.Codec().RTPCodecCapability, remoteTrack.ID(), remoteTrack.StreamID())
@@ -151,12 +151,12 @@ func NewClient(s *SFU, id string, peerConnection *webrtc.PeerConnection, opts Cl
 					}
 
 					if readErr != nil {
-						log.Println("client: remote track read error ", readErr)
+						glog.Error("client: remote track read error ", readErr)
 					}
 
 					// ErrClosedPipe means we don't have any subscribers, this is ok if no peers have connected yet
 					if _, err := localTrack.Write(rtpBuf[:i]); err != nil && !errors.Is(err, io.ErrClosedPipe) {
-						log.Println("client: local track write error ", err)
+						glog.Error("client: local track write error ", err)
 					}
 				}
 			}
@@ -296,10 +296,14 @@ func (c *Client) renegotiate() {
 // The renegotiation can be in race condition when a client is renegotiating and new track is added to the client because another client is publishing to the room.
 // We can block the renegotiation until the current renegotiation is finish, but it will block the negotiation process for a while.
 func (c *Client) renegotiateQueuOp() {
+	if c.OnRenegotiation == nil {
+		glog.Info("client: onRenegotiation")
+	}
+
 	c.NegotiationNeeded = true
 
 	if c.isInRemoteNegotiation {
-		log.Println("sfu: renegotiation is delayed because the remote client is doing negotiation", c.ID)
+		glog.Info("sfu: renegotiation is delayed because the remote client is doing negotiation", c.ID)
 
 		return
 	}
@@ -322,14 +326,14 @@ func (c *Client) renegotiateQueuOp() {
 			c.peerConnection.ConnectionState() == webrtc.PeerConnectionStateConnected {
 			offer, err := c.peerConnection.CreateOffer(nil)
 			if err != nil {
-				log.Println("sfu: error create offer on renegotiation ", err)
+				glog.Error("sfu: error create offer on renegotiation ", err)
 				return
 			}
 
 			// Sets the LocalDescription, and starts our UDP listeners
 			err = c.peerConnection.SetLocalDescription(offer)
 			if err != nil {
-				log.Println("sfu: error set local description on renegotiation ", err)
+				glog.Error("sfu: error set local description on renegotiation ", err)
 				return
 			}
 
@@ -337,12 +341,12 @@ func (c *Client) renegotiateQueuOp() {
 			answer, err := c.OnRenegotiation(c.Context, *c.peerConnection.LocalDescription())
 			if err != nil {
 				//TODO: when this happen, we need to close the client and ask the remote client to reconnect
-				log.Println("sfu: error on renegotiation ", err)
+				glog.Error("sfu: error on renegotiation ", err)
 				return
 			}
 
 			if answer.Type != webrtc.SDPTypeAnswer {
-				log.Println("sfu: error on renegotiation, the answer is not an answer type")
+				glog.Error("sfu: error on renegotiation, the answer is not an answer type")
 				return
 			}
 
@@ -390,7 +394,7 @@ func (c *Client) setClientTrack(track *webrtc.TrackLocalStaticRTP) bool {
 	id := track.StreamID() + "-" + track.ID()
 
 	if _, ok := c.publishedTracks[id]; ok {
-		log.Println("client: track already published ", c.ID, track.StreamID(), track.ID())
+		glog.Warning("client: track already published ", c.ID, track.StreamID(), track.ID())
 		return false
 	}
 
@@ -398,7 +402,7 @@ func (c *Client) setClientTrack(track *webrtc.TrackLocalStaticRTP) bool {
 
 	rtpSender, err := c.peerConnection.AddTrack(track)
 	if err != nil {
-		log.Println("client: error on adding track ", err)
+		glog.Error("client: error on adding track ", err)
 		return false
 	}
 
@@ -433,9 +437,9 @@ func (c *Client) removePublishedTrack(streamID, trackID string) bool {
 
 	for _, sender := range c.peerConnection.GetSenders() {
 		track := sender.Track()
-		if track != nil && track.ID() == trackID && track.StreamID() == streamID {
+		if track != nil && track.ID() == trackID && track.StreamID() == streamID && c.peerConnection.ConnectionState() != webrtc.PeerConnectionStateClosed {
 			if err := c.peerConnection.RemoveTrack(sender); err != nil {
-				log.Println("client: error remove track ", err)
+				glog.Error("client: error remove track ", err)
 			}
 		}
 	}
@@ -454,7 +458,7 @@ func readRTCP(ctx context.Context, rtpSender *webrtc.RTPSender) {
 		case <-localCtx.Done():
 			err := rtpSender.Stop()
 			if err != nil {
-				log.Println("client: error stop rtp sender ", err)
+				glog.Error("client: error stop rtp sender ", err)
 			}
 
 			return
@@ -540,7 +544,7 @@ func (c *Client) AddICECandidate(candidate webrtc.ICECandidateInit) error {
 		c.mutex.Unlock()
 	} else {
 		if err := c.peerConnection.AddICECandidate(candidate); err != nil {
-			log.Println("client: error add ice candidate ", err)
+			glog.Error("client: error add ice candidate ", err)
 			return err
 		}
 	}
@@ -549,6 +553,11 @@ func (c *Client) AddICECandidate(candidate webrtc.ICECandidateInit) error {
 }
 
 func (c *Client) onIceCandidateCallback(candidate *webrtc.ICECandidate) {
+	if c.OnIceCandidate == nil {
+		glog.Info("client: on ice candidate callback is not set")
+		return
+	}
+
 	c.OnIceCandidate(c.Context, candidate)
 }
 
@@ -615,7 +624,7 @@ func (c *Client) startIdleTimeout() {
 
 	go func() {
 		<-c.idleTimeoutContext.Done()
-		log.Println("client: idle timeout reached ", c.ID)
+		glog.Info("client: idle timeout reached ", c.ID)
 		_ = c.Stop()
 	}()
 }

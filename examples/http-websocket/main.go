@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/golang/glog"
 	"github.com/inlivedev/sfu"
 	"github.com/pion/webrtc/v3"
 	"golang.org/x/net/websocket"
@@ -82,7 +83,7 @@ MessageLoop:
 						continue
 					}
 
-					log.Println("error decoding message", err)
+					glog.Info("error decoding message", err)
 				}
 				messageChan <- req
 			}
@@ -106,7 +107,7 @@ func clientHandler(conn *websocket.Conn, messageChan chan Request, r *sfu.Room) 
 		return
 	}
 
-	log.Println("client", clientID, "added to room. Total clients", r.GetSFU().Counter)
+	glog.Info("client", clientID, "added to room. Total clients", r.GetSFU().Counter)
 
 	defer client.Stop()
 
@@ -114,7 +115,7 @@ func clientHandler(conn *websocket.Conn, messageChan chan Request, r *sfu.Room) 
 
 	client.OnRenegotiation = func(ctx context.Context, offer webrtc.SessionDescription) (webrtc.SessionDescription, error) {
 		// SFU request a renegotiation, send the offer to client
-		log.Println("receive renegotiation offer from SFU")
+		glog.Info("receive renegotiation offer from SFU")
 
 		resp := Respose{
 			Status: true,
@@ -134,17 +135,17 @@ func clientHandler(conn *websocket.Conn, messageChan chan Request, r *sfu.Room) 
 		// this will wait for answer from client in 30 seconds or timeout
 		select {
 		case <-ctxTimeout.Done():
-			log.Println("timeout on renegotiation")
+			glog.Error("timeout on renegotiation")
 			return webrtc.SessionDescription{}, errors.New("timeout on renegotiation")
 		case answer := <-answerChan:
-			log.Println("received answer from client ", client.GetType(), client.ID)
+			glog.Info("received answer from client ", client.GetType(), client.ID)
 			return answer, nil
 		}
 	}
 
 	client.OnAllowedRemoteRenegotiation = func() {
 		// SFU allow a remote renegotiation
-		log.Println("receive allow remote renegotiation from SFU")
+		glog.Info("receive allow remote renegotiation from SFU")
 
 		resp := Respose{
 			Status: true,
@@ -184,7 +185,7 @@ func clientHandler(conn *websocket.Conn, messageChan chan Request, r *sfu.Room) 
 					// handle as offer SDP
 					answer, err := client.Negotiate(webrtc.SessionDescription{SDP: sdp, Type: webrtc.SDPTypeOffer})
 					if err != nil {
-						log.Println("error on negotiate", err)
+						glog.Error("error on negotiate", err)
 
 						resp = Respose{
 							Status: false,
@@ -204,7 +205,7 @@ func clientHandler(conn *websocket.Conn, messageChan chan Request, r *sfu.Room) 
 
 					conn.Write(respBytes)
 				} else {
-					log.Println("receive renegotiation answer from client")
+					glog.Info("receive renegotiation answer from client")
 					// handle as answer SDP as part of renegotiation request from SFU
 					// pass the answer to onRenegotiation handler above
 					answerChan <- webrtc.SessionDescription{SDP: sdp, Type: webrtc.SDPTypeAnswer}
@@ -221,7 +222,7 @@ func clientHandler(conn *websocket.Conn, messageChan chan Request, r *sfu.Room) 
 					log.Panic("error on add ice candidate", err)
 				}
 			} else {
-				log.Println("unknown message type", req)
+				glog.Error("unknown message type", req)
 			}
 		}
 	}

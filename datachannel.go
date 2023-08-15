@@ -1,10 +1,10 @@
 package sfu
 
 import (
-	"log"
 	"strings"
 	"time"
 
+	"github.com/golang/glog"
 	"github.com/pion/webrtc/v3"
 )
 
@@ -18,7 +18,7 @@ type Data struct {
 func (s *SFU) setupDataChannelBroadcaster(peerConnection *webrtc.PeerConnection, id string) {
 	// wait data channel
 	peerConnection.OnDataChannel(func(d *webrtc.DataChannel) {
-		log.Println("sfu:received data channel", id, d.Label())
+		glog.Info("sfu:received data channel", id, d.Label())
 		if strings.HasPrefix(d.Label(), "pm-") {
 			// private channel
 			if _, ok := s.privateDataChannels[id]; !ok {
@@ -36,7 +36,7 @@ func (s *SFU) setupDataChannelBroadcaster(peerConnection *webrtc.PeerConnection,
 				if client, err := s.GetClient(toID); err == nil {
 					dc, err := client.GetPeerConnection().CreateDataChannel("pm-"+id, nil)
 					if err != nil {
-						log.Println("sfu:error creating data channel", err)
+						glog.Error("sfu:error creating data channel", err)
 						return
 					}
 

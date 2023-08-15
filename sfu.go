@@ -2,10 +2,10 @@ package sfu
 
 import (
 	"context"
-	"log"
 	"strconv"
 	"sync"
 
+	"github.com/golang/glog"
 	"github.com/pion/interceptor"
 	"github.com/pion/interceptor/pkg/intervalpli"
 	"github.com/pion/webrtc/v3"
@@ -223,7 +223,7 @@ func (s *SFU) NewClient(id string, opts ClientOptions) *Client {
 			}
 
 			if needRenegotiation {
-				log.Println("call renegotiate after sync ", client.ID)
+				glog.Info("call renegotiate after sync ", client.ID)
 
 				client.renegotiate()
 			}
@@ -261,7 +261,7 @@ func (s *SFU) NewClient(id string, opts ClientOptions) *Client {
 	client.requestKeyFrame()
 
 	client.peerConnection.OnSignalingStateChange(func(state webrtc.SignalingState) {
-		log.Println("client: signaling state changed ", client.ID, state)
+		glog.Info("client: signaling state changed ", client.ID, state)
 		if state == webrtc.SignalingStateStable && client.pendingRemoteRenegotiation {
 			client.pendingRemoteRenegotiation = false
 			client.allowRemoteRenegotiation()
@@ -312,7 +312,7 @@ func (s *SFU) broadcastTracks(tracks []PublishedTrack) {
 		}
 
 		if renegotiate {
-			log.Println("sfu: call renegotiate after broadcast ", client.ID)
+			glog.Info("sfu: call renegotiate after broadcast ", client.ID)
 			client.renegotiate()
 		}
 	}

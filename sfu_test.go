@@ -2,10 +2,10 @@ package sfu
 
 import (
 	"context"
-	"log"
 	"testing"
 	"time"
 
+	"github.com/golang/glog"
 	"github.com/inlivedev/sfu/testhelper"
 
 	"github.com/pion/webrtc/v3"
@@ -41,7 +41,7 @@ func TestActiveTracks(t *testing.T) {
 	defer cancel()
 
 	expectedTracks := (peerCount * 2) * (peerCount - 1)
-	log.Println("expected tracks: ", expectedTracks)
+	glog.Info("expected tracks: ", expectedTracks)
 
 	continueChan := make(chan bool)
 	stoppedClient := 0
@@ -57,7 +57,7 @@ func TestActiveTracks(t *testing.T) {
 				return
 			case <-connectedChan:
 				connectedCount++
-				log.Println("connected count: ", connectedCount)
+				glog.Info("connected count: ", connectedCount)
 			case remoteTrack := <-trackChan:
 				if _, ok := remoteTracks[remoteTrack.Client.ID]; !ok {
 					remoteTracks[remoteTrack.Client.ID] = make(map[string]*webrtc.TrackRemote)
@@ -87,7 +87,7 @@ func TestActiveTracks(t *testing.T) {
 
 				}()
 				trackCount++
-				log.Println("track count: ", trackCount)
+				glog.Info("track count: ", trackCount)
 
 				if trackCount == expectedTracks { // 2 clients
 					totalRemoteTracks := 0
@@ -97,13 +97,13 @@ func TestActiveTracks(t *testing.T) {
 						}
 					}
 
-					log.Println("total remote tracks: ", totalRemoteTracks)
+					glog.Info("total remote tracks: ", totalRemoteTracks)
 					continueChan <- true
 				}
 
 			case client := <-peerChan:
 				peers[client.ID] = client
-				log.Println("peer count: ", len(peers))
+				glog.Info("peer count: ", len(peers))
 			case <-isStopped:
 				stoppedClient++
 				if stoppedClient == 1 {
@@ -111,7 +111,7 @@ func TestActiveTracks(t *testing.T) {
 				}
 			case <-trackEndedChan:
 				trackEndedCount++
-				log.Println("track ended count: ", trackEndedCount)
+				glog.Info("track ended count: ", trackEndedCount)
 			}
 		}
 	}()
@@ -123,7 +123,7 @@ func TestActiveTracks(t *testing.T) {
 	currentTrack := 0
 
 	for _, client := range peers {
-		log.Println("client: ", client.ID, "remote track count: ", len(client.PeerConnection.GetReceivers()))
+		glog.Info("client: ", client.ID, "remote track count: ", len(client.PeerConnection.GetReceivers()))
 		for _, receiver := range client.PeerConnection.GetReceivers() {
 			if receiver != nil && receiver.Track() != nil {
 				currentTrack++
@@ -131,7 +131,7 @@ func TestActiveTracks(t *testing.T) {
 		}
 	}
 
-	log.Println("current clients count:", len(peers), ",current client tracks count:", currentTrack, "peer tracks count: ", trackCount)
+	glog.Info("current clients count:", len(peers), ",current client tracks count:", currentTrack, "peer tracks count: ", trackCount)
 
 	for _, client := range peers {
 		relay, _ := sfu.GetClient(client.ID)
@@ -177,13 +177,13 @@ func TestActiveTracks(t *testing.T) {
 		}
 	}
 
-	log.Println("current tracks count: ", currentTrack)
+	glog.Info("current tracks count: ", currentTrack)
 
-	log.Println("left tracks: ", leftTracks, "from clients: ", len(sfu.GetClients()))
-	log.Println("expected left tracks: ", expectedLeftTracks)
+	glog.Info("left tracks: ", leftTracks, "from clients: ", len(sfu.GetClients()))
+	glog.Info("expected left tracks: ", expectedLeftTracks)
 	require.Equal(t, expectedLeftTracks, leftTracks)
 
-	log.Println("test adding extra tracks")
+	glog.Info("test adding extra tracks")
 	// reset track count and expected tracks
 	trackCount = 0
 	expectedTracks = (peerCount * 2) * (peerCount - 1)
@@ -200,7 +200,7 @@ func TestActiveTracks(t *testing.T) {
 				_, err := peer.PeerConnection.AddTrack(track)
 				require.NoError(t, err)
 			}
-			log.Println("test: renegotiating", peer.ID)
+			glog.Info("test: renegotiating", peer.ID)
 			offer, _ := peer.PeerConnection.CreateOffer(nil)
 			err := peer.PeerConnection.SetLocalDescription(offer)
 			require.NoError(t, err)
@@ -209,7 +209,7 @@ func TestActiveTracks(t *testing.T) {
 			err = peer.PeerConnection.SetRemoteDescription(*answer)
 			require.NoError(t, err)
 		} else {
-			log.Println("not renegotiating", peer.ID)
+			glog.Info("not renegotiating", peer.ID)
 
 			peer.PendingTracks = append(peer.PendingTracks, newTracks...)
 		}
