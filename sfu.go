@@ -387,6 +387,9 @@ func (s *SFU) OnStopped(callback func()) {
 }
 
 func (s *SFU) renegotiateAllClients() {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
 	for _, client := range s.clients {
 		client.renegotiate()
 	}
