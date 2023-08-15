@@ -27,7 +27,7 @@ type allowRemoteRenegotiationQueue struct {
 
 func NewQueue(ctx context.Context) *queue {
 	q := &queue{
-		opChan: make(chan interface{}),
+		opChan: make(chan interface{}, 10),
 	}
 
 	go q.run(ctx)
@@ -43,7 +43,10 @@ func (q *queue) Push(item interface{}) {
 
 func (q *queue) run(ctx context.Context) {
 	ctxx, cancel := context.WithCancel(ctx)
-	defer cancel()
+	defer func() {
+		cancel()
+		close(q.opChan)
+	}()
 
 	for {
 		select {
