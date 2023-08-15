@@ -2,12 +2,20 @@ package sfu
 
 import (
 	"context"
+	"errors"
+	"sync"
 
 	"github.com/pion/webrtc/v3"
 )
 
+var (
+	ErrQueueIsClosed = errors.New("queue is closed")
+)
+
 type queue struct {
 	opChan chan interface{}
+	mutex  sync.Mutex
+	IsOpen bool
 }
 
 type negotiationQueue struct {
@@ -27,6 +35,8 @@ type allowRemoteRenegotiationQueue struct {
 
 func NewQueue(ctx context.Context) *queue {
 	q := &queue{
+		IsOpen: true,
+		mutex:  sync.Mutex{},
 		opChan: make(chan interface{}, 10),
 	}
 
@@ -35,17 +45,26 @@ func NewQueue(ctx context.Context) *queue {
 	return q
 }
 
-func (q *queue) Push(item interface{}) {
+func (q *queue) Push(item interface{}) error {
+	if !q.IsOpen {
+		return ErrQueueIsClosed
+	}
+
 	go func() {
 		q.opChan <- item
 	}()
+
+	return nil
 }
 
 func (q *queue) run(ctx context.Context) {
 	ctxx, cancel := context.WithCancel(ctx)
 	defer func() {
+		q.mutex.Lock()
 		cancel()
+		q.IsOpen = false
 		close(q.opChan)
+		q.mutex.Unlock()
 	}()
 
 	for {
