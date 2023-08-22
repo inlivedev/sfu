@@ -40,6 +40,7 @@ type ClientOptions struct {
 }
 
 type ClientStats struct {
+	mutex    sync.Mutex
 	Sender   map[webrtc.SSRC]stats.Stats
 	Receiver map[webrtc.SSRC]stats.Stats
 }
@@ -54,7 +55,7 @@ type Client struct {
 	Context                           context.Context
 	Cancel                            context.CancelFunc
 	canAddCandidate                   bool
-	clientStats                       ClientStats
+	clientStats                       *ClientStats
 	initialTracksCount                int
 	isInRenegotiation                 bool
 	isInRemoteNegotiation             bool
@@ -178,7 +179,8 @@ func NewClient(s *SFU, id string, peerConnectionConfig webrtc.Configuration, opt
 		ID:      id,
 		Context: localCtx,
 		Cancel:  cancel,
-		clientStats: ClientStats{
+		clientStats: &ClientStats{
+			mutex:    sync.Mutex{},
 			Sender:   make(map[webrtc.SSRC]stats.Stats),
 			Receiver: make(map[webrtc.SSRC]stats.Stats),
 		},
@@ -241,7 +243,7 @@ func NewClient(s *SFU, id string, peerConnectionConfig webrtc.Configuration, opt
 						return
 					}
 
-					client.updateReceiverStats(remoteTrack)
+					go client.updateReceiverStats(remoteTrack)
 
 					if readErr != nil {
 						glog.Error("client: remote track read error ", readErr)
@@ -567,7 +569,7 @@ func (c *Client) readRTCP(ctx context.Context, rtpSender *webrtc.RTPSender) {
 				return
 			}
 
-			c.updateSenderStats(rtpSender)
+			go c.updateSenderStats(rtpSender)
 		}
 	}
 }
@@ -755,7 +757,7 @@ func (c *Client) GetPeerConnection() *webrtc.PeerConnection {
 	return c.peerConnection
 }
 
-func (c *Client) GetStats() ClientStats {
+func (c *Client) GetStats() *ClientStats {
 	c.mutex.Lock()
 
 	defer func() {
@@ -779,8 +781,8 @@ func (c *Client) updateReceiverStats(remoteTrack *webrtc.TrackRemote) {
 		return
 	}
 
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
+	c.clientStats.mutex.Lock()
+	defer c.clientStats.mutex.Unlock()
 
 	c.clientStats.Receiver[remoteTrack.SSRC()] = *c.statsGetter.Get(uint32(remoteTrack.SSRC()))
 }
@@ -798,8 +800,8 @@ func (c *Client) updateSenderStats(sender *webrtc.RTPSender) {
 		return
 	}
 
-	c.mutex.Lock()
-	defer c.mutex.Unlock()
+	c.clientStats.mutex.Lock()
+	defer c.clientStats.mutex.Unlock()
 
 	ssrc := sender.GetParameters().Encodings[0].SSRC
 
