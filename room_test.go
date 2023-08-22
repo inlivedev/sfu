@@ -190,8 +190,6 @@ Loop:
 					totalClientEgressBytes += stat.OutboundRTPStreamStats.BytesSent
 				}
 
-				glog.Info("test: break loop")
-
 				break Loop
 			}
 		}
@@ -206,6 +204,8 @@ Loop:
 	require.NotEqual(t, uint64(0), totalClientEgressBytes)
 	require.NotEqual(t, uint64(0), totalClientIngressBytes)
 
+	glog.Info("total room bytes sent: ", roomStats.ByteSent)
+	glog.Info("total room bytes receive: ", roomStats.BytesReceived)
 	require.Equal(t, totalClientIngressBytes, roomStats.ByteSent)
 	require.Equal(t, totalClientEgressBytes, roomStats.BytesReceived)
 
@@ -288,7 +288,7 @@ func createPeerPair(t *testing.T, ctx context.Context, testRoom *Room, peerName 
 				return
 
 			case <-done:
-				time.Sleep(2 * time.Second)
+				time.Sleep(3 * time.Second)
 				allDone <- true
 			}
 		}
