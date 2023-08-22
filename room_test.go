@@ -2,6 +2,7 @@ package sfu
 
 import (
 	"context"
+	"errors"
 	"io"
 	"testing"
 	"time"
@@ -202,8 +203,8 @@ Loop:
 	glog.Info("get room stats")
 	roomStats := testRoom.GetStats()
 
-	require.NotEqual(t, 0, totalClientEgressBytes)
-	require.NotEqual(t, 0, totalClientIngressBytes)
+	require.NotEqual(t, uint64(0), totalClientEgressBytes)
+	require.NotEqual(t, uint64(0), totalClientIngressBytes)
 
 	require.Equal(t, totalClientIngressBytes, roomStats.ByteSent)
 	require.Equal(t, totalClientEgressBytes, roomStats.BytesReceived)
@@ -251,10 +252,9 @@ func createPeerPair(t *testing.T, ctx context.Context, testRoom *Room, peerName 
 
 	require.NoErrorf(t, err, "error creating peer connection: %v", err)
 
-	testhelper.SetPeerConnectionTracks(pc, tracks)
+	testhelper.SetPeerConnectionTracks(ctx, pc, tracks)
 
-	trackRemoved := make(chan bool)
-	allRemoved := make(chan bool)
+	allDone := make(chan bool)
 
 	pc.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
 		glog.Info("test: got track ", peerName, track.Kind().String())
@@ -270,11 +270,6 @@ func createPeerPair(t *testing.T, ctx context.Context, testRoom *Room, peerName 
 				default:
 					_, _, err = track.Read(rtpBuff)
 					if err == io.EOF {
-						glog.Info("EOF, removed track", track.Kind().String(), peerName)
-						trackRemoved <- true
-						return
-					} else if err != nil {
-						glog.Error("error reading track: ", err)
 						return
 					}
 				}
@@ -284,7 +279,6 @@ func createPeerPair(t *testing.T, ctx context.Context, testRoom *Room, peerName 
 	})
 
 	go func() {
-		trackCount := 2
 		ctxx, cancel := context.WithCancel(ctx)
 		defer cancel()
 
@@ -292,37 +286,10 @@ func createPeerPair(t *testing.T, ctx context.Context, testRoom *Room, peerName 
 			select {
 			case <-ctxx.Done():
 				return
-			case <-trackRemoved:
-				go func() {
-					trackCount--
-					glog.Info(peerName, " track ended")
-					if trackCount == 0 {
-						allRemoved <- true
-						cancel()
-						return
-					}
-
-				}()
 
 			case <-done:
-				time.Sleep(1 * time.Second)
-				for _, sender := range pc.GetSenders() {
-					if sender.Track() != nil {
-						glog.Info("test: sender track is remove ", sender.Track().Kind().String())
-						err = pc.RemoveTrack(sender)
-						require.NoErrorf(t, err, "error removing track: %v", err)
-					} else {
-						glog.Info("test: sender track is nil")
-					}
-				}
-
-				glog.Info(peerName, " track removed")
-
-				if client.IsAllowNegotiation() {
-					negotiate(t, pc, client)
-				}
-
-				glog.Info(peerName, " track removed negotiated")
+				time.Sleep(2 * time.Second)
+				allDone <- true
 			}
 		}
 	}()
@@ -345,10 +312,18 @@ func createPeerPair(t *testing.T, ctx context.Context, testRoom *Room, peerName 
 	}
 
 	client.OnRenegotiation = func(ctx context.Context, offer webrtc.SessionDescription) (answer webrtc.SessionDescription, e error) {
+		if client.State == ClientStateEnded {
+			glog.Info("test: renegotiation canceled because client has ended")
+			return webrtc.SessionDescription{}, errors.New("client ended")
+		}
+
 		glog.Info("test: got renegotiation ", peerName)
-		_ = pc.SetRemoteDescription(offer)
-		answer, _ = pc.CreateAnswer(nil)
-		_ = pc.SetLocalDescription(answer)
+		err = pc.SetRemoteDescription(offer)
+		require.NoErrorf(t, err, "error setting remote description: %v", err)
+		answer, err = pc.CreateAnswer(nil)
+		require.NoErrorf(t, err, "error creating answer: %v", err)
+		err = pc.SetLocalDescription(answer)
+		require.NoErrorf(t, err, "error setting local description: %v", err)
 		return *pc.LocalDescription(), nil
 	}
 
@@ -365,7 +340,7 @@ func createPeerPair(t *testing.T, ctx context.Context, testRoom *Room, peerName 
 
 	})
 
-	return pc, client, statsGetter, allRemoved
+	return pc, client, statsGetter, allDone
 }
 
 func negotiate(t *testing.T, pc *webrtc.PeerConnection, client *Client) {

@@ -133,6 +133,7 @@ func (s *SFU) NewClient(id string, opts ClientOptions) *Client {
 	client := s.createClient(id, peerConnectionConfig, opts)
 
 	client.OnConnectionStateChanged(func(connectionState webrtc.PeerConnectionState) {
+		glog.Info("client: connection state changed ", client.ID, connectionState)
 		switch connectionState {
 		case webrtc.PeerConnectionStateConnected:
 			if client.State == ClientStateNew {
@@ -174,6 +175,9 @@ func (s *SFU) NewClient(id string, opts ClientOptions) *Client {
 	})
 
 	client.onTrack = func(ctx context.Context, localTrack *webrtc.TrackLocalStaticRTP) {
+		client.mutex.Lock()
+		defer client.mutex.Unlock()
+
 		client.tracks[localTrack.ID()] = localTrack
 		client.pendingPublishedTracks[localTrack.StreamID()+"-"+localTrack.ID()] = localTrack
 
@@ -195,7 +199,6 @@ func (s *SFU) NewClient(id string, opts ClientOptions) *Client {
 	client.requestKeyFrame()
 
 	client.peerConnection.OnSignalingStateChange(func(state webrtc.SignalingState) {
-		glog.Info("client: signaling state changed ", client.ID, state)
 		if state == webrtc.SignalingStateStable && client.pendingRemoteRenegotiation {
 			client.pendingRemoteRenegotiation = false
 			client.allowRemoteRenegotiation()

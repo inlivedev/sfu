@@ -5,7 +5,6 @@ import (
 	"math/rand"
 	"strings"
 
-	"github.com/golang/glog"
 	"github.com/pion/interceptor/pkg/stats"
 	"github.com/pion/webrtc/v3"
 	"github.com/speps/go-hashids"
@@ -59,15 +58,9 @@ func GenerateID(data []int) string {
 }
 
 func GetReceiverStats(pc *webrtc.PeerConnection, statsGetter stats.Getter) map[webrtc.SSRC]stats.Stats {
-	defer func() {
-		if err := recover(); err != nil {
-			glog.Info("panic occurred:", err)
-		}
-	}()
-
 	stats := make(map[webrtc.SSRC]stats.Stats)
 	for _, t := range pc.GetTransceivers() {
-		if t.Receiver().Track() != nil {
+		if t.Receiver() != nil && t.Receiver().Track() != nil {
 			stats[t.Receiver().Track().SSRC()] = *statsGetter.Get(uint32(t.Receiver().Track().SSRC()))
 		}
 	}
@@ -76,15 +69,9 @@ func GetReceiverStats(pc *webrtc.PeerConnection, statsGetter stats.Getter) map[w
 }
 
 func GetSenderStats(pc *webrtc.PeerConnection, statsGetter stats.Getter) map[webrtc.SSRC]stats.Stats {
-	defer func() {
-		if err := recover(); err != nil {
-			glog.Info("panic occurred:", err)
-		}
-	}()
-
 	stats := make(map[webrtc.SSRC]stats.Stats)
 	for _, t := range pc.GetTransceivers() {
-		if t.Sender().Track() != nil {
+		if t.Sender() != nil && t.Sender().Track() != nil {
 			ssrc := t.Sender().GetParameters().Encodings[0].SSRC
 			stats[ssrc] = *statsGetter.Get(uint32(ssrc))
 		}

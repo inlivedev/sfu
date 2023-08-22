@@ -241,6 +241,8 @@ func NewClient(s *SFU, id string, peerConnectionConfig webrtc.Configuration, opt
 						return
 					}
 
+					client.updateReceiverStats(remoteTrack)
+
 					if readErr != nil {
 						glog.Error("client: remote track read error ", readErr)
 					}
@@ -422,9 +424,6 @@ func (c *Client) renegotiateQueuOp() {
 			c.peerConnection.SignalingState() == webrtc.SignalingStateStable &&
 			c.peerConnection.ConnectionState() == webrtc.PeerConnectionStateConnected {
 
-			c.mutex.Lock()
-			defer c.mutex.Unlock()
-
 			offer, err := c.peerConnection.CreateOffer(nil)
 			if err != nil {
 				glog.Error("sfu: error create offer on renegotiation ", err)
@@ -507,7 +506,7 @@ func (c *Client) setClientTrack(track *webrtc.TrackLocalStaticRTP) bool {
 		return false
 	}
 
-	go readRTCP(c.Context, rtpSender)
+	go c.readRTCP(c.Context, rtpSender)
 
 	return true
 }
@@ -548,7 +547,7 @@ func (c *Client) removePublishedTrack(streamID, trackID string) bool {
 	return removed
 }
 
-func readRTCP(ctx context.Context, rtpSender *webrtc.RTPSender) {
+func (c *Client) readRTCP(ctx context.Context, rtpSender *webrtc.RTPSender) {
 	rtcpBuf := make([]byte, 1500)
 	localCtx, cancel := context.WithCancel(ctx)
 
@@ -567,6 +566,8 @@ func readRTCP(ctx context.Context, rtpSender *webrtc.RTPSender) {
 			if _, _, rtcpErr := rtpSender.Read(rtcpBuf); rtcpErr != nil {
 				return
 			}
+
+			c.updateSenderStats(rtpSender)
 		}
 	}
 }
@@ -759,22 +760,48 @@ func (c *Client) GetStats() ClientStats {
 
 	defer func() {
 		c.mutex.Unlock()
-		if err := recover(); err != nil {
-			glog.Info("panic occurred:", err)
-		}
+
 	}()
 
-	for _, t := range c.GetPeerConnection().GetTransceivers() {
-		if t.Sender() != nil && t.Sender().Track() != nil {
-			ssrc := t.Sender().GetParameters().Encodings[0].SSRC
-			c.clientStats.Sender[ssrc] = *c.statsGetter.Get(uint32(ssrc))
-		}
+	return c.clientStats
+}
 
-		if t.Receiver() != nil && t.Receiver().Track() != nil {
-			ssrc := t.Receiver().Track().SSRC()
-			c.clientStats.Receiver[ssrc] = *c.statsGetter.Get(uint32(ssrc))
-		}
+func (c *Client) updateReceiverStats(remoteTrack *webrtc.TrackRemote) {
+	if c.statsGetter == nil {
+		return
 	}
 
-	return c.clientStats
+	if remoteTrack == nil {
+		return
+	}
+
+	if remoteTrack.SSRC() == 0 {
+		return
+	}
+
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	c.clientStats.Receiver[remoteTrack.SSRC()] = *c.statsGetter.Get(uint32(remoteTrack.SSRC()))
+}
+
+func (c *Client) updateSenderStats(sender *webrtc.RTPSender) {
+	if c.statsGetter == nil {
+		return
+	}
+
+	if sender == nil {
+		return
+	}
+
+	if sender.Track() == nil {
+		return
+	}
+
+	c.mutex.Lock()
+	defer c.mutex.Unlock()
+
+	ssrc := sender.GetParameters().Encodings[0].SSRC
+
+	c.clientStats.Sender[ssrc] = *c.statsGetter.Get(uint32(ssrc))
 }

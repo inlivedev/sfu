@@ -10,7 +10,6 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/golang/glog"
 	"github.com/pion/mediadevices"
 	"github.com/pion/mediadevices/pkg/codec/opus"
 	"github.com/pion/mediadevices/pkg/codec/x264"
@@ -108,17 +107,13 @@ func GetStaticTracks(ctx context.Context, streamID string, loop bool) ([]*webrtc
 			case <-ctxx.Done():
 				return
 			case <-audioDoneChan:
-				glog.Info("test: audio done")
 				trackDone++
 			case <-videoDoneChan:
-				glog.Info("test: video done")
 				trackDone++
 			}
 
-			if trackDone == 2 {
-				glog.Info("test: all done")
+			if trackDone == 2 && !loop {
 				allDone <- true
-				glog.Info("test: all done signal sent")
 			}
 		}
 	}()
@@ -311,7 +306,7 @@ func GetStaticAudioTrack(ctx context.Context, trackID, streamID string, loop boo
 	return audioTrack, done
 }
 
-func SetPeerConnectionTracks(peerConnection *webrtc.PeerConnection, tracks []*webrtc.TrackLocalStaticSample) {
+func SetPeerConnectionTracks(ctx context.Context, peerConnection *webrtc.PeerConnection, tracks []*webrtc.TrackLocalStaticSample) {
 	for _, track := range tracks {
 		rtpSender, trackErr := peerConnection.AddTrack(track)
 		if trackErr != nil {
@@ -323,11 +318,18 @@ func SetPeerConnectionTracks(peerConnection *webrtc.PeerConnection, tracks []*we
 		// like NACK this needs to be called.
 		go func() {
 			rtcpBuf := make([]byte, 1500)
-
+			ctxx, cancel := context.WithCancel(ctx)
+			defer cancel()
 			for {
-				if _, _, rtcpErr := rtpSender.Read(rtcpBuf); rtcpErr != nil {
+				select {
+				case <-ctxx.Done():
 					return
+				default:
+					if _, _, rtcpErr := rtpSender.Read(rtcpBuf); rtcpErr != nil {
+						return
+					}
 				}
+
 			}
 		}()
 	}
