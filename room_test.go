@@ -165,7 +165,7 @@ Loop:
 			// this will trying to break out after all audio video packets are received
 
 			if peerCount == 2 {
-				time.Sleep(5 * time.Second)
+				time.Sleep(2 * time.Second)
 				pc1ReceiverStats := GetReceiverStats(pc1, statsGetter1)
 				pc1SenderStats := GetSenderStats(pc1, statsGetter1)
 				pc2ReceiverStats := GetReceiverStats(pc2, statsGetter2)
@@ -190,7 +190,18 @@ Loop:
 					totalClientEgressBytes += stat.OutboundRTPStreamStats.BytesSent
 				}
 
-				break Loop
+				roomStats := testRoom.GetStats()
+
+				if totalClientIngressBytes == roomStats.ByteSent &&
+					totalClientEgressBytes == roomStats.BytesReceived {
+					break Loop
+				}
+
+				glog.Info("total client ingress bytes: ", totalClientIngressBytes)
+				glog.Info("total client egress bytes: ", totalClientEgressBytes)
+				glog.Info("total room bytes sent: ", roomStats.ByteSent)
+				glog.Info("total room bytes receive: ", roomStats.BytesReceived)
+				glog.Info("total room packet lost: ", roomStats.PacketLost)
 			}
 		}
 	}
@@ -206,6 +217,8 @@ Loop:
 
 	glog.Info("total room bytes sent: ", roomStats.ByteSent)
 	glog.Info("total room bytes receive: ", roomStats.BytesReceived)
+	glog.Info("total room packet lost: ", roomStats.PacketLost)
+
 	require.Equal(t, totalClientIngressBytes, roomStats.ByteSent)
 	require.Equal(t, totalClientEgressBytes, roomStats.BytesReceived)
 
@@ -288,7 +301,6 @@ func createPeerPair(t *testing.T, ctx context.Context, testRoom *Room, peerName 
 				return
 
 			case <-done:
-				time.Sleep(3 * time.Second)
 				allDone <- true
 			}
 		}

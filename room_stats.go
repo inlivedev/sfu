@@ -14,6 +14,7 @@ type StatTracks struct {
 type RoomStats struct {
 	ActiveSessions int        `json:"active_sessions"`
 	Clients        int        `json:"clients"`
+	PacketLost     int64      `json:"packet_lost"`
 	ByteSent       uint64     `json:"bytes_sent"`
 	BytesReceived  uint64     `json:"bytes_received"`
 	Tracks         StatTracks `json:"tracks"`
@@ -24,12 +25,14 @@ func generateCurrentStats(r *Room) RoomStats {
 	var (
 		bytesReceived uint64
 		bytesSent     uint64
+		packet_lost   int64
 	)
 	clients := r.GetSFU().GetClients()
 	for _, c := range clients {
 		stats := c.GetStats()
 		for _, stat := range stats.Receiver {
 			bytesReceived += stat.InboundRTPStreamStats.BytesReceived
+			packet_lost += stat.InboundRTPStreamStats.PacketsLost
 		}
 
 		for _, stat := range stats.Sender {
@@ -39,6 +42,7 @@ func generateCurrentStats(r *Room) RoomStats {
 	return RoomStats{
 		ActiveSessions: calculateActiveSessions(r.GetSFU().GetClients()),
 		Clients:        len(r.GetSFU().GetClients()),
+		PacketLost:     packet_lost,
 		BytesReceived:  bytesReceived,
 		ByteSent:       bytesSent,
 		Timestamp:      time.Now(),

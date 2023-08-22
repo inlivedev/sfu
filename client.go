@@ -408,7 +408,7 @@ func (c *Client) renegotiateQueuOp() {
 
 	// no need to run another negotiation if it's already in progress, it will rerun because we mark the negotiationneeded to true
 	if c.isInRenegotiation {
-		glog.Info("sfu: renegotiation can't run, an renegotiation still in progress ", c.ID)
+		glog.Info("sfu: renegotiation can't run, renegotiation still in progress ", c.ID)
 		return
 	}
 
