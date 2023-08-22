@@ -111,7 +111,7 @@ func TestExtension(t *testing.T) {
 	joinChan := make(chan bool)
 	peerCount := 0
 
-	tracks, mediaEngine := testhelper.GetStaticTracks(ctx, "test")
+	tracks, mediaEngine, _ := testhelper.GetStaticTracks(ctx, "test", true)
 
 	iceServers := []webrtc.ICEServer{
 		{

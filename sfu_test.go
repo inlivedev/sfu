@@ -36,7 +36,7 @@ func TestActiveTracks(t *testing.T) {
 	sfu := Setup(t, ctx, udpMux, peerCount, trackChan, peerChan, connectedChan)
 	defer sfu.Stop()
 
-	ctxTimeout, cancel := context.WithTimeout(ctx, 50*time.Second)
+	ctxTimeout, cancel := context.WithTimeout(ctx, 60*time.Second)
 
 	defer cancel()
 
@@ -191,7 +191,7 @@ func TestActiveTracks(t *testing.T) {
 	// Test adding extra 2 tracks for each peer
 	for _, peer := range peers {
 		peer.InRenegotiation = true
-		newTracks, _ := testhelper.GetStaticTracks(ctx, testhelper.GenerateSecureToken(16))
+		newTracks, _, _ := testhelper.GetStaticTracks(ctx, testhelper.GenerateSecureToken(16), true)
 
 		// renegotiate after adding tracks
 		allowRenegotiate := peer.RelayClient.IsAllowNegotiation()

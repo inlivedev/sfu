@@ -119,7 +119,7 @@ func Setup(t *testing.T, ctx context.Context, udpMux *UDPMux, peerCount int, tra
 			receivedAnswer := false
 
 			streamID := testhelper.GenerateSecureToken(16)
-			peerTracks, mediaEngine := testhelper.GetStaticTracks(ctx, streamID)
+			peerTracks, mediaEngine, _ := testhelper.GetStaticTracks(ctx, streamID, true)
 
 			peer, remoteTrackChan := CreatePeer(ctx, t, iceServers, peerTracks, mediaEngine, connectedChan)
 			testhelper.SetPeerConnectionTracks(peer, peerTracks)

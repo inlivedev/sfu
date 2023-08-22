@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/golang/glog"
 	"github.com/pion/mediadevices"
 	"github.com/pion/mediadevices/pkg/codec/opus"
 	"github.com/pion/mediadevices/pkg/codec/x264"
@@ -69,7 +70,7 @@ func GetTestTracks() ([]mediadevices.Track, *webrtc.MediaEngine) {
 	return s.GetTracks(), mediaEngine
 }
 
-func GetStaticTracks(ctx context.Context, streamID string) ([]*webrtc.TrackLocalStaticSample, *webrtc.MediaEngine) {
+func GetStaticTracks(ctx context.Context, streamID string, loop bool) ([]*webrtc.TrackLocalStaticSample, *webrtc.MediaEngine, chan bool) {
 	x264Params, _ := x264.NewParams()
 
 	opusParams, _ := opus.NewParams()
@@ -90,12 +91,39 @@ func GetStaticTracks(ctx context.Context, streamID string) ([]*webrtc.TrackLocal
 	codecSelector.Populate(mediaEngine)
 
 	staticTracks := make([]*webrtc.TrackLocalStaticSample, 0)
-	audioTrack := GetStaticAudioTrack(ctx, audioTrackID, streamID)
+	audioTrack, audioDoneChan := GetStaticAudioTrack(ctx, audioTrackID, streamID, loop)
 	staticTracks = append(staticTracks, audioTrack)
-	videoTrack := GetStaticVideoTrack(ctx, videoTrackID, streamID)
+	videoTrack, videoDoneChan := GetStaticVideoTrack(ctx, videoTrackID, streamID, loop)
 	staticTracks = append(staticTracks, videoTrack)
 
-	return staticTracks, mediaEngine
+	allDone := make(chan bool)
+
+	go func() {
+		trackDone := 0
+		ctxx, cancel := context.WithCancel(ctx)
+		defer cancel()
+
+		for {
+			select {
+			case <-ctxx.Done():
+				return
+			case <-audioDoneChan:
+				glog.Info("test: audio done")
+				trackDone++
+			case <-videoDoneChan:
+				glog.Info("test: video done")
+				trackDone++
+			}
+
+			if trackDone == 2 {
+				glog.Info("test: all done")
+				allDone <- true
+				glog.Info("test: all done signal sent")
+			}
+		}
+	}()
+
+	return staticTracks, mediaEngine, allDone
 }
 
 func GetVideoTrack() (mediadevices.Track, *webrtc.MediaEngine) {
@@ -129,7 +157,7 @@ func GetVideoTrack() (mediadevices.Track, *webrtc.MediaEngine) {
 	return s.GetTracks()[0], &mediaEngine
 }
 
-func GetStaticVideoTrack(ctx context.Context, trackID, streamID string) *webrtc.TrackLocalStaticSample {
+func GetStaticVideoTrack(ctx context.Context, trackID, streamID string, loop bool) (*webrtc.TrackLocalStaticSample, chan bool) {
 	_, filename, _, ok := runtime.Caller(0)
 	if !ok {
 		panic("No caller information")
@@ -147,6 +175,8 @@ func GetStaticVideoTrack(ctx context.Context, trackID, streamID string) *webrtc.
 	if videoTrackErr != nil {
 		panic(videoTrackErr)
 	}
+
+	done := make(chan bool)
 
 	go func() {
 		// Send our video file frame at a time. Pace our sending so we send it at the same speed it should be played back as.
@@ -176,7 +206,12 @@ func GetStaticVideoTrack(ctx context.Context, trackID, streamID string) *webrtc.
 				default:
 					nal, h264Err := h264.NextNAL()
 					if h264Err == io.EOF {
-						break Loop
+						if loop {
+							break Loop
+						} else {
+							done <- true
+							return
+						}
 					}
 					if h264Err != nil {
 						panic(h264Err)
@@ -190,10 +225,10 @@ func GetStaticVideoTrack(ctx context.Context, trackID, streamID string) *webrtc.
 		}
 	}()
 
-	return videoTrack
+	return videoTrack, done
 }
 
-func GetStaticAudioTrack(ctx context.Context, trackID, streamID string) *webrtc.TrackLocalStaticSample {
+func GetStaticAudioTrack(ctx context.Context, trackID, streamID string, loop bool) (*webrtc.TrackLocalStaticSample, chan bool) {
 	_, filename, _, ok := runtime.Caller(0)
 	if !ok {
 		panic("No caller information")
@@ -212,6 +247,8 @@ func GetStaticAudioTrack(ctx context.Context, trackID, streamID string) *webrtc.
 	if audioTrackErr != nil {
 		panic(audioTrackErr)
 	}
+
+	done := make(chan bool)
 
 	go func() {
 		// Open a ogg file and start reading using our oggReader
@@ -246,7 +283,12 @@ func GetStaticAudioTrack(ctx context.Context, trackID, streamID string) *webrtc.
 				default:
 					pageData, pageHeader, oggErr := ogg.ParseNextPage()
 					if oggErr == io.EOF {
-						break Loop
+						if loop {
+							break Loop
+						} else {
+							done <- true
+							return
+						}
 					}
 
 					if oggErr != nil {
@@ -266,7 +308,7 @@ func GetStaticAudioTrack(ctx context.Context, trackID, streamID string) *webrtc.
 		}
 	}()
 
-	return audioTrack
+	return audioTrack, done
 }
 
 func SetPeerConnectionTracks(peerConnection *webrtc.PeerConnection, tracks []*webrtc.TrackLocalStaticSample) {
