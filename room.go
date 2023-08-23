@@ -44,6 +44,7 @@ type Room struct {
 	mutex                   *sync.Mutex
 	sfu                     *SFU
 	State                   string
+	stats                   map[string]ClientStats
 	Type                    string
 	extensions              []IExtension
 	OnEvent                 func(event Event)
@@ -57,6 +58,7 @@ func newRoom(ctx context.Context, id, name string, sfu *SFU, roomType string) *R
 		Context:       localContext,
 		cancelContext: cancel,
 		sfu:           sfu,
+		stats:         make(map[string]ClientStats),
 		State:         StateRoomOpen,
 		Name:          name,
 		mutex:         &sync.Mutex{},
@@ -168,6 +170,9 @@ func (r *Room) onClientLeft(client *Client) {
 	for _, ext := range r.extensions {
 		ext.OnClientRemoved(r, client)
 	}
+
+	// update the latest stats from client before they left
+	r.stats[client.ID] = *client.GetStats()
 }
 
 func (r *Room) onClientJoined(client *Client) {
@@ -196,6 +201,40 @@ func (r *Room) GetName() string {
 	return r.Name
 }
 
+//nolint:copylocks // Statistic won't use the mutex
 func (r *Room) GetStats() RoomStats {
-	return generateCurrentStats(r)
+	var (
+		bytesReceived uint64
+		bytesSent     uint64
+		packet_lost   int64
+	)
+
+	// make sure the stats is up to date
+	r.updateStats()
+
+	for _, cstats := range r.stats {
+		for _, stat := range cstats.Receiver {
+			bytesReceived += stat.InboundRTPStreamStats.BytesReceived
+			packet_lost += stat.InboundRTPStreamStats.PacketsLost
+		}
+
+		for _, stat := range cstats.Sender {
+			bytesSent += stat.OutboundRTPStreamStats.BytesSent
+		}
+	}
+
+	return RoomStats{
+		ActiveSessions: calculateActiveSessions(r.GetSFU().GetClients()),
+		Clients:        len(r.stats),
+		PacketLost:     packet_lost,
+		BytesReceived:  bytesReceived,
+		ByteSent:       bytesSent,
+		Timestamp:      time.Now(),
+	}
+}
+
+func (r *Room) updateStats() {
+	for _, client := range r.sfu.GetClients() {
+		r.stats[client.ID] = *client.GetStats()
+	}
 }
