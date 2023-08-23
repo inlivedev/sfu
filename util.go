@@ -5,6 +5,8 @@ import (
 	"math/rand"
 	"strings"
 
+	"github.com/pion/interceptor/pkg/stats"
+	"github.com/pion/webrtc/v3"
 	"github.com/speps/go-hashids"
 )
 
@@ -53,4 +55,27 @@ func GenerateID(data []int) string {
 	e, _ := h.Encode(data)
 
 	return e
+}
+
+func GetReceiverStats(pc *webrtc.PeerConnection, statsGetter stats.Getter) map[webrtc.SSRC]stats.Stats {
+	stats := make(map[webrtc.SSRC]stats.Stats)
+	for _, t := range pc.GetTransceivers() {
+		if t.Receiver() != nil && t.Receiver().Track() != nil {
+			stats[t.Receiver().Track().SSRC()] = *statsGetter.Get(uint32(t.Receiver().Track().SSRC()))
+		}
+	}
+
+	return stats
+}
+
+func GetSenderStats(pc *webrtc.PeerConnection, statsGetter stats.Getter) map[webrtc.SSRC]stats.Stats {
+	stats := make(map[webrtc.SSRC]stats.Stats)
+	for _, t := range pc.GetTransceivers() {
+		if t.Sender() != nil && t.Sender().Track() != nil {
+			ssrc := t.Sender().GetParameters().Encodings[0].SSRC
+			stats[ssrc] = *statsGetter.Get(uint32(ssrc))
+		}
+	}
+
+	return stats
 }

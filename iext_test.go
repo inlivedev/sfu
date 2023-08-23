@@ -111,7 +111,7 @@ func TestExtension(t *testing.T) {
 	joinChan := make(chan bool)
 	peerCount := 0
 
-	tracks, mediaEngine := testhelper.GetStaticTracks(ctx, "test")
+	tracks, mediaEngine, _ := testhelper.GetStaticTracks(ctx, "test", true)
 
 	iceServers := []webrtc.ICEServer{
 		{
@@ -147,7 +147,7 @@ func TestExtension(t *testing.T) {
 	}
 
 	require.NoErrorf(t, err, "error creating peer connection: %v", err)
-	testhelper.SetPeerConnectionTracks(peer1, tracks)
+	testhelper.SetPeerConnectionTracks(ctx, peer1, tracks)
 	offer, err := peer1.CreateOffer(nil)
 	require.NoErrorf(t, err, "error creating offer: %v", err)
 	err = peer1.SetLocalDescription(offer)

@@ -195,3 +195,7 @@ func (r *Room) GetID() string {
 func (r *Room) GetName() string {
 	return r.Name
 }
+
+func (r *Room) GetStats() RoomStats {
+	return generateCurrentStats(r)
+}

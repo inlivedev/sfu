@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 
+	"github.com/golang/glog"
 	"github.com/pion/webrtc/v3"
 )
 
@@ -50,6 +51,7 @@ func (q *queue) Push(item interface{}) {
 		q.mutex.Lock()
 		defer q.mutex.Unlock()
 		if !q.IsOpen {
+			glog.Warning("sfu: queue is closed when push renegotiation")
 			return
 		}
 
