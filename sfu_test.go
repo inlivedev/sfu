@@ -13,6 +13,7 @@ import (
 )
 
 func TestActiveTracks(t *testing.T) {
+	t.Parallel()
 	// _ = os.Setenv("PION_LOG_DEBUG", "pc,dtls")
 	// _ = os.Setenv("PION_LOG_TRACE", "ice")
 	// _ = os.Setenv("PIONS_LOG_INFO", "all")
