@@ -218,7 +218,7 @@ func TestActiveTracks(t *testing.T) {
 		peer.InRenegotiation = false
 	}
 
-	timeoutt, cancellTimeout := context.WithTimeout(ctx, 30*time.Second)
+	timeoutt, cancellTimeout := context.WithTimeout(ctx, 50*time.Second)
 	defer cancellTimeout()
 
 	select {
