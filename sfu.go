@@ -10,20 +10,20 @@ import (
 )
 
 type SFU struct {
-	clients                   map[string]*Client
-	context                   context.Context
-	cancel                    context.CancelFunc
-	callbacksOnTrackPublished []func(map[string]*webrtc.TrackLocalStaticRTP)
-	callbacksOnClientRemoved  []func(*Client)
-	callbacksOnClientAdded    []func(*Client)
-	Counter                   int
-	publicDataChannels        map[string]map[string]*webrtc.DataChannel
-	privateDataChannels       map[string]map[string]*webrtc.DataChannel
-	idleChan                  chan bool
-	mutex                     sync.RWMutex
-	mux                       *UDPMux
-	turnServer                TurnServer
-	onStop                    func()
+	clients                  map[string]*Client
+	context                  context.Context
+	cancel                   context.CancelFunc
+	callbacksOnClientRemoved []func(*Client)
+	callbacksOnClientAdded   []func(*Client)
+	Counter                  int
+	publicDataChannels       map[string]map[string]*webrtc.DataChannel
+	privateDataChannels      map[string]map[string]*webrtc.DataChannel
+	idleChan                 chan bool
+	mutex                    sync.RWMutex
+	mux                      *UDPMux
+	turnServer               TurnServer
+	onStop                   func()
+	OnTracksAvailable        func(tracks []Track)
 }
 
 type TurnServer struct {
@@ -83,7 +83,7 @@ func New(ctx context.Context, turnServer TurnServer, mux *UDPMux) *SFU {
 	return sfu
 }
 
-func (s *SFU) addClient(client *Client, direction webrtc.RTPTransceiverDirection) {
+func (s *SFU) addClient(client *Client) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -143,18 +143,10 @@ func (s *SFU) NewClient(id string, opts ClientOptions) *Client {
 
 			needRenegotiation := false
 
-			if len(client.pendingReceivedTracks) > 0 {
+			if client.pendingReceivedTracks.Length() > 0 {
 				client.processPendingTracks()
 
 				needRenegotiation = true
-			}
-
-			if opts.Direction == webrtc.RTPTransceiverDirectionRecvonly || opts.Direction == webrtc.RTPTransceiverDirectionSendrecv {
-				// get the tracks from other clients if the direction is receiving track
-				isNeedRenegotiation := s.SyncTrack(client)
-				if !needRenegotiation && isNeedRenegotiation {
-					needRenegotiation = true
-				}
 			}
 
 			if needRenegotiation {
@@ -174,24 +166,36 @@ func (s *SFU) NewClient(id string, opts ClientOptions) *Client {
 		}
 	})
 
-	client.onTrack = func(ctx context.Context, localTrack *webrtc.TrackLocalStaticRTP) {
+	client.onTrack = func(ctx context.Context, track *Track) {
 		client.mutex.Lock()
 		defer client.mutex.Unlock()
-
-		client.tracks[localTrack.ID()] = localTrack
-		client.pendingPublishedTracks[localTrack.StreamID()+"-"+localTrack.ID()] = localTrack
+		if err := client.pendingPublishedTracks.Add(track); err != nil {
+			glog.Error("client: failed to add pending published track ", err)
+			return
+		}
 
 		// don't publish track when not all the tracks are received
 		// TODO:
 		// 1. figure out how to handle this when doing a screensharing
-		// 2. the renegotiation not triggered when new track after first negotiation is done
-		if client.GetType() == ClientTypePeer && client.initialTracksCount > len(client.pendingPublishedTracks) {
+		// 2. the renegotiation not triggered when new track after negotiation is done
+		if client.GetType() == ClientTypePeer && client.initialTracksCount > client.pendingPublishedTracks.Length() {
 			return
 		}
 
-		s.publishTracks(client.ID, client.pendingPublishedTracks)
+		availableTracks := make([]*Track, 0)
+		for _, track := range client.pendingPublishedTracks.GetTracks() {
+			availableTracks = append(availableTracks, track)
+		}
+
+		if client.OnTracksAdded != nil {
+			client.OnTracksAdded(availableTracks)
+		}
+
+		// broadcast to client with auto subscribe tracks
+		s.broadcastTracksToAutoSubscribeClients(availableTracks)
+
 		// reset pending published tracks after published
-		client.pendingPublishedTracks = make(map[string]*webrtc.TrackLocalStaticRTP)
+		client.pendingPublishedTracks.Reset()
 
 	}
 
@@ -205,69 +209,15 @@ func (s *SFU) NewClient(id string, opts ClientOptions) *Client {
 		}
 	})
 
-	s.addClient(client, client.GetDirection())
+	s.addClient(client)
 
 	return client
 }
 
-func (s *SFU) publishTracks(clientID string, tracks map[string]*webrtc.TrackLocalStaticRTP) {
-	pendingTracks := []PublishedTrack{}
-
-	s.mutex.Lock()
-
-	for _, track := range tracks {
-		// only publish track if it's not published yet
-
-		newTrack := PublishedTrack{
-			ClientID: clientID,
-			Track:    track,
-		}
-		pendingTracks = append(pendingTracks, newTrack)
-
-	}
-
-	s.mutex.Unlock()
-
-	s.broadcastTracks(pendingTracks)
-
-	// request keyframe from existing client
+func (s *SFU) removeTracks(tracks []*Track) {
 	for _, client := range s.clients {
-		client.requestKeyFrame()
+		client.removePublishedTrack(tracks)
 	}
-
-	s.onTrackPublished(tracks)
-}
-
-func (s *SFU) broadcastTracks(tracks []PublishedTrack) {
-	for _, client := range s.clients {
-		renegotiate := false
-
-		for _, track := range tracks {
-			if client.ID != track.ClientID {
-				renegotiate = client.addTrack(track.Track.(*webrtc.TrackLocalStaticRTP))
-			}
-		}
-
-		if renegotiate {
-			glog.Info("sfu: call renegotiate after broadcast ", client.ID)
-			client.renegotiate()
-		}
-	}
-}
-
-func (s *SFU) removeTrack(streamID, trackID string) bool {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
-
-	trackRemoved := false
-	for _, client := range s.clients {
-		clientRemoved := client.removePublishedTrack(streamID, trackID)
-		if clientRemoved {
-			trackRemoved = true
-		}
-	}
-
-	return trackRemoved
 }
 
 // Syncs track from connected client to other clients
@@ -278,15 +228,16 @@ func (s *SFU) SyncTrack(client *Client) bool {
 	needRenegotiation := false
 
 	for _, clientPeer := range s.clients {
-		for _, track := range clientPeer.tracks {
+		for _, track := range clientPeer.tracks.GetTracks() {
 			if client.ID != clientPeer.ID {
-				if _, ok := currentTracks[track.StreamID()+"-"+track.ID()]; !ok {
-					client.addTrack(track)
+				if _, ok := currentTracks[track.LocalStaticRTP.StreamID()+"-"+track.LocalStaticRTP.ID()]; !ok {
+					isNeedRenegotiation := client.addTrack(track)
 
 					// request the keyframe from track publisher after added
 					s.requestKeyFrameFromClient(clientPeer.ID)
-
-					needRenegotiation = true
+					if isNeedRenegotiation {
+						needRenegotiation = true
+					}
 				}
 			}
 		}
@@ -295,11 +246,11 @@ func (s *SFU) SyncTrack(client *Client) bool {
 	return needRenegotiation
 }
 
-func (s *SFU) GetTracks() map[string]*webrtc.TrackLocalStaticRTP {
-	tracks := make(map[string]*webrtc.TrackLocalStaticRTP)
+func (s *SFU) GetTracks() []*Track {
+	tracks := make([]*Track, 0)
 	for _, client := range s.clients {
-		for _, track := range client.tracks {
-			tracks[track.StreamID()+"-"+track.ID()] = track
+		for _, track := range client.tracks.GetTracks() {
+			tracks = append(tracks, track)
 		}
 	}
 
@@ -323,23 +274,10 @@ func (s *SFU) OnStopped(callback func()) {
 	s.onStop = callback
 }
 
-func (s *SFU) renegotiateAllClients() {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
-
-	for _, client := range s.clients {
-		client.renegotiate()
-	}
-}
-
 func (s *SFU) requestKeyFrameFromClient(clientID string) {
 	if client, ok := s.clients[clientID]; ok {
 		client.requestKeyFrame()
 	}
-}
-
-func (s *SFU) OnTrackPublished(callback func(map[string]*webrtc.TrackLocalStaticRTP)) {
-	s.callbacksOnTrackPublished = append(s.callbacksOnTrackPublished, callback)
 }
 
 func (s *SFU) OnClientAdded(callback func(*Client)) {
@@ -366,9 +304,30 @@ func (s *SFU) onClientRemoved(client *Client) {
 	}
 }
 
-func (s *SFU) onTrackPublished(tracks map[string]*webrtc.TrackLocalStaticRTP) {
-	for _, callback := range s.callbacksOnTrackPublished {
-		callback(tracks)
+func (s *SFU) onTracksAvailable(tracks []*Track) {
+	for _, client := range s.clients {
+		if !client.IsSubscribeAllTracks && client.OnTracksAvailable != nil {
+			client.OnTracksAvailable(tracks)
+		}
+	}
+}
+
+func (s *SFU) broadcastTracksToAutoSubscribeClients(tracks []*Track) {
+	trackReq := make([]SubscribeTrackRequest, 0)
+	for _, track := range tracks {
+		trackReq = append(trackReq, SubscribeTrackRequest{
+			ClientID: track.ClientID,
+			StreamID: track.LocalStaticRTP.StreamID(),
+			TrackID:  track.LocalStaticRTP.ID(),
+		})
+	}
+
+	for _, client := range s.clients {
+		if client.IsSubscribeAllTracks {
+			if err := client.SubscribeTracks(trackReq); err != nil {
+				glog.Error("client: failed to subscribe tracks ", err)
+			}
+		}
 	}
 }
 

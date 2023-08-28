@@ -54,7 +54,6 @@ func TestRoomCreateAndClose(t *testing.T) {
 }
 
 func TestRoomJoinLeftEvent(t *testing.T) {
-	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -117,7 +116,6 @@ func TestRoomJoinLeftEvent(t *testing.T) {
 }
 
 func TestRoomStats(t *testing.T) {
-	t.Parallel()
 	var (
 		totalClientIngressBytes uint64
 		totalClientEgressBytes  uint64
@@ -127,7 +125,7 @@ func TestRoomStats(t *testing.T) {
 	defer cancel()
 
 	// create room manager first before create new room
-	roomManager := NewManager(ctx, "test-join-left", Options{WebRTCPort: 40001})
+	roomManager := NewManager(ctx, "test-join-left", Options{WebRTCPort: 40000})
 
 	roomID := roomManager.CreateRoomID()
 	roomName := "test-room"

@@ -84,6 +84,15 @@
                     await peerConnection.addIceCandidate(msg.data);
                 } else if (msg.type == 'allow_renegotiation') {
                     // use this event to retry renegotation when doing renegotation was not allowed
+                } else if (msg.type == 'track_added') {
+                    const trackType = {}
+                    const tracksAdded = msg.data
+                    Object.keys(tracksAdded).forEach(uid => {
+                        // we suppose to check tracksAdded[key].id and compare it with current track id from  navigator.mediaDevices.getUserMedia() to know the source is media 
+                        trackType[uid] = "media"
+                    });
+
+                    ws.send(JSON.stringify({type:'track_added',data:trackType}));
                 }
             } catch (error) {
                 console.log(error);

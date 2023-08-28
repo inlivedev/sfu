@@ -31,6 +31,7 @@ const (
 	TypeCandidate          = "candidate"
 	TypeError              = "error"
 	TypeAllowRenegotiation = "allow_renegotiation"
+	TypeTrackAdded         = "track_added"
 )
 
 func main() {
@@ -112,6 +113,24 @@ func clientHandler(conn *websocket.Conn, messageChan chan Request, r *sfu.Room) 
 	defer client.Stop()
 
 	answerChan := make(chan webrtc.SessionDescription)
+
+	client.SubscribeAllTracks()
+
+	client.OnTracksAdded = func(tracks []*sfu.Track) {
+		tracksAdded := map[string]map[string]string{}
+		for _, track := range tracks {
+			tracksAdded[track.ID()] = map[string]string{"id": track.LocalStaticRTP.ID(), "stream_id": track.LocalStaticRTP.StreamID()}
+		}
+		resp := Respose{
+			Status: true,
+			Type:   TypeTrackAdded,
+			Data:   tracksAdded,
+		}
+
+		trackAddedResp, _ := json.Marshal(resp)
+
+		_, _ = conn.Write(trackAddedResp)
+	}
 
 	client.OnRenegotiation = func(ctx context.Context, offer webrtc.SessionDescription) (webrtc.SessionDescription, error) {
 		// SFU request a renegotiation, send the offer to client
@@ -221,6 +240,16 @@ func clientHandler(conn *websocket.Conn, messageChan chan Request, r *sfu.Room) 
 				if err != nil {
 					log.Panic("error on add ice candidate", err)
 				}
+			} else if req.Type == TypeTrackAdded {
+				setTracks := make(map[string]sfu.TrackType, 0)
+				for id, trackType := range req.Data.(map[string]interface{}) {
+					if trackType.(string) == "media" {
+						setTracks[id] = sfu.TrackTypeMedia
+					} else {
+						setTracks[id] = sfu.TrackTypeScreen
+					}
+				}
+				client.SetTracksSourceType(setTracks)
 			} else {
 				glog.Error("unknown message type", req)
 			}

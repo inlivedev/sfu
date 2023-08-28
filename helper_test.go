@@ -139,6 +139,27 @@ func Setup(t *testing.T, ctx context.Context, udpMux *UDPMux, peerCount int, tra
 			}
 			peerChan <- peerClient
 
+			relay.OnTracksAdded = func(tracks []*Track) {
+				setTracks := make(map[string]TrackType, 0)
+				for _, track := range tracks {
+					setTracks[track.ID()] = TrackTypeMedia
+				}
+				relay.SetTracksSourceType(setTracks)
+			}
+
+			relay.OnTracksAvailable = func(tracks []*Track) {
+				req := make([]SubscribeTrackRequest, 0)
+				for _, track := range tracks {
+					req = append(req, SubscribeTrackRequest{
+						ClientID: track.ClientID,
+						TrackID:  track.LocalStaticRTP.ID(),
+						StreamID: track.LocalStaticRTP.StreamID(),
+					})
+				}
+				err := relay.SubscribeTracks(req)
+				require.NoError(t, err)
+			}
+
 			relay.OnRenegotiation = func(ctx context.Context, sdp webrtc.SessionDescription) (webrtc.SessionDescription, error) {
 				glog.Info("test: renegotiation triggered", peerClient.ID, CountTracks(peer.LocalDescription().SDP), peerClient.InRenegotiation)
 				if peer.SignalingState() != webrtc.SignalingStateClosed {
