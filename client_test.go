@@ -98,7 +98,7 @@ func TestAutoSubscribeTracks(t *testing.T) {
 	defer cancel()
 
 	// create room manager first before create new room
-	roomManager := NewManager(ctx, "test-join-left", Options{WebRTCPort: 40004})
+	roomManager := NewManager(ctx, "test-join-left", Options{WebRTCPort: 40001})
 
 	roomID := roomManager.CreateRoomID()
 	roomName := "test-room"
