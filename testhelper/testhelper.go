@@ -2,14 +2,13 @@ package testhelper
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"io"
 	"os"
 	"path"
 	"runtime"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/pion/mediadevices"
 	"github.com/pion/mediadevices/pkg/codec/opus"
 	"github.com/pion/mediadevices/pkg/codec/x264"
@@ -84,8 +83,8 @@ func GetStaticTracks(ctx context.Context, streamID string, loop bool) ([]*webrtc
 		panic(err)
 	}
 
-	audioTrackID := GenerateSecureToken(16)
-	videoTrackID := GenerateSecureToken(16)
+	audioTrackID := GenerateSecureToken()
+	videoTrackID := GenerateSecureToken()
 
 	codecSelector.Populate(mediaEngine)
 
@@ -335,11 +334,6 @@ func SetPeerConnectionTracks(ctx context.Context, peerConnection *webrtc.PeerCon
 	}
 }
 
-func GenerateSecureToken(length int) string {
-	b := make([]byte, length)
-	if _, err := rand.Read(b); err != nil {
-		return ""
-	}
-
-	return hex.EncodeToString(b)
+func GenerateSecureToken() string {
+	return uuid.New().String()
 }

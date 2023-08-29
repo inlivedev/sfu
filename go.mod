@@ -16,7 +16,7 @@ require github.com/golang/glog v1.1.2
 
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/google/uuid v1.3.0 // indirect
+	github.com/google/uuid v1.3.1 // indirect
 	github.com/pion/datachannel v1.5.5 // indirect
 	github.com/pion/dtls/v2 v2.2.7 // indirect
 	github.com/pion/logging v0.2.2 // indirect

@@ -192,7 +192,7 @@ func TestActiveTracks(t *testing.T) {
 	// Test adding extra 2 tracks for each peer
 	for _, peer := range peers {
 		peer.InRenegotiation = true
-		newTracks, _, _ := testhelper.GetStaticTracks(ctx, testhelper.GenerateSecureToken(16), true)
+		newTracks, _, _ := testhelper.GetStaticTracks(ctx, testhelper.GenerateSecureToken(), true)
 
 		// renegotiate after adding tracks
 		allowRenegotiate := peer.RelayClient.IsAllowNegotiation()

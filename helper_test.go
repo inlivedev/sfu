@@ -3,6 +3,7 @@ package sfu
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strconv"
 	"testing"
 
@@ -118,8 +119,7 @@ func Setup(t *testing.T, ctx context.Context, udpMux *UDPMux, peerCount int, tra
 			pendingCandidates := make([]*webrtc.ICECandidate, 0)
 			receivedAnswer := false
 
-			streamID := testhelper.GenerateSecureToken(16)
-			peerTracks, mediaEngine, _ := testhelper.GetStaticTracks(ctx, streamID, true)
+			peerTracks, mediaEngine, _ := testhelper.GetStaticTracks(ctx, fmt.Sprintf("stream-%d", i), true)
 
 			peer, remoteTrackChan := CreatePeer(ctx, t, iceServers, peerTracks, mediaEngine, connectedChan)
 			testhelper.SetPeerConnectionTracks(ctx, peer, peerTracks)
