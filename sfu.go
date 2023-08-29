@@ -19,7 +19,7 @@ type SFU struct {
 	publicDataChannels       map[string]map[string]*webrtc.DataChannel
 	privateDataChannels      map[string]map[string]*webrtc.DataChannel
 	idleChan                 chan bool
-	mutex                    sync.RWMutex
+	mutex                    sync.Mutex
 	mux                      *UDPMux
 	turnServer               TurnServer
 	onStop                   func()
@@ -58,7 +58,7 @@ func New(ctx context.Context, turnServer TurnServer, mux *UDPMux) *SFU {
 		cancel:              cancel,
 		publicDataChannels:  make(map[string]map[string]*webrtc.DataChannel),
 		privateDataChannels: make(map[string]map[string]*webrtc.DataChannel),
-		mutex:               sync.RWMutex{},
+		mutex:               sync.Mutex{},
 		mux:                 mux,
 		turnServer:          turnServer,
 	}
@@ -167,8 +167,6 @@ func (s *SFU) NewClient(id string, opts ClientOptions) *Client {
 	})
 
 	client.onTrack = func(ctx context.Context, track *Track) {
-		client.mutex.Lock()
-		defer client.mutex.Unlock()
 		if err := client.pendingPublishedTracks.Add(track); err != nil {
 			glog.Error("client: failed to add pending published track ", err)
 			return
@@ -215,6 +213,9 @@ func (s *SFU) NewClient(id string, opts ClientOptions) *Client {
 }
 
 func (s *SFU) removeTracks(tracks []*Track) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
 	for _, client := range s.clients {
 		client.removePublishedTrack(tracks)
 	}
@@ -336,6 +337,9 @@ func (s *SFU) GetClients() map[string]*Client {
 }
 
 func (s *SFU) GetClient(id string) (*Client, error) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
 	if client, ok := s.clients[id]; ok {
 		return client, nil
 	}
