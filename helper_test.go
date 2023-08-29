@@ -119,7 +119,7 @@ func Setup(t *testing.T, ctx context.Context, udpMux *UDPMux, peerCount int, tra
 			pendingCandidates := make([]*webrtc.ICECandidate, 0)
 			receivedAnswer := false
 
-			peerTracks, mediaEngine, _ := testhelper.GetStaticTracks(ctx, fmt.Sprintf("stream-%d", i), true)
+			peerTracks, mediaEngine, _ := testhelper.GetStaticTracks(ctx, fmt.Sprintf("stream-%v", testhelper.GenerateSecureToken()), true)
 
 			peer, remoteTrackChan := CreatePeer(ctx, t, iceServers, peerTracks, mediaEngine, connectedChan)
 			testhelper.SetPeerConnectionTracks(ctx, peer, peerTracks)
