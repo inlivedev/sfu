@@ -31,9 +31,9 @@ func (t *Track) ID() string {
 }
 
 type SubscribeTrackRequest struct {
-	ClientID string
-	StreamID string
-	TrackID  string
+	ClientID string `json:"client_id"`
+	StreamID string `json:"stream_id"`
+	TrackID  string `json:"track_id"`
 }
 
 type TrackList struct {
