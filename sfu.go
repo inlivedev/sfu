@@ -304,7 +304,17 @@ func (s *SFU) onClientRemoved(client *Client) {
 func (s *SFU) onTracksAvailable(tracks []*Track) {
 	for _, client := range s.clients {
 		if !client.IsSubscribeAllTracks && client.OnTracksAvailable != nil {
-			client.OnTracksAvailable(tracks)
+			// filter out tracks from the same client
+			filteredTracks := make([]*Track, 0)
+			for _, track := range tracks {
+				if track.ClientID != client.ID {
+					filteredTracks = append(filteredTracks, track)
+				}
+			}
+
+			if len(filteredTracks) > 0 {
+				client.OnTracksAvailable(tracks)
+			}
 		}
 	}
 }
