@@ -779,6 +779,9 @@ func (c *Client) SetTracksSourceType(trackTypes map[string]TrackType) {
 		if track, ok := tracks[id]; ok {
 			track.SourceType = trackType
 			availableTracks = append(availableTracks, track)
+
+			// remove it from pending published once it published available to other clients
+			c.pendingPublishedTracks.Remove(track.LocalStaticRTP)
 		}
 	}
 

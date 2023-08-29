@@ -191,10 +191,6 @@ func (s *SFU) NewClient(id string, opts ClientOptions) *Client {
 
 		// broadcast to client with auto subscribe tracks
 		s.broadcastTracksToAutoSubscribeClients(availableTracks)
-
-		// reset pending published tracks after published
-		client.pendingPublishedTracks.Reset()
-
 	}
 
 	// request keyframe from new client for existing clients
