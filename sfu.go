@@ -151,8 +151,9 @@ func (s *SFU) NewClient(id string, opts ClientOptions) *Client {
 							}
 						}
 					}
-
-					client.OnTracksAvailable(availableTracks)
+					if len(availableTracks) > 0 {
+						client.OnTracksAvailable(availableTracks)
+					}
 				}
 			}
 
