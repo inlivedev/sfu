@@ -144,8 +144,8 @@ func (s *SFU) NewClient(id string, opts ClientOptions) *Client {
 				if client.OnTracksAvailable != nil {
 					availableTracks := make([]*Track, 0)
 
-					for _, client := range s.clients {
-						for _, track := range client.tracks.GetTracks() {
+					for _, c := range s.clients {
+						for _, track := range c.tracks.GetTracks() {
 							if track.ClientID != client.ID {
 								availableTracks = append(availableTracks, track)
 							}
