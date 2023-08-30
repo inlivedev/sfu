@@ -28,6 +28,7 @@ func TestTracksManualSubscribe(t *testing.T) {
 	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal)
 	require.NoError(t, err, "error creating room: %v", err)
 
+	tracksAddedChan := make(chan int)
 	tracksAvailableChan := make(chan int)
 	trackChan := make(chan bool)
 
@@ -48,6 +49,7 @@ func TestTracksManualSubscribe(t *testing.T) {
 		}
 
 		client.OnTracksAdded = func(addedTracks []*Track) {
+			tracksAddedChan <- len(addedTracks)
 			setTracks := make(map[string]TrackType, 0)
 			for _, track := range addedTracks {
 				setTracks[track.ID()] = TrackTypeMedia
@@ -64,6 +66,7 @@ func TestTracksManualSubscribe(t *testing.T) {
 	defer cancelTimeout()
 
 	tracksAdded := 0
+	tracksAvailable := 0
 	trackReceived := 0
 	expectedTracks := (peerCount * 2) * (peerCount - 1)
 
@@ -72,12 +75,10 @@ Loop:
 		select {
 		case <-timeout.Done():
 			break Loop
-		case added := <-tracksAvailableChan:
+		case added := <-tracksAddedChan:
 			tracksAdded += added
-
-			// if tracksAdded == peerCounts*2 {
-			// 	break Loop
-			// }
+		case available := <-tracksAvailableChan:
+			tracksAvailable += available
 		case <-trackChan:
 			trackReceived++
 			if trackReceived == expectedTracks {
@@ -87,7 +88,8 @@ Loop:
 
 	}
 
-	require.Equal(t, peerCount*peerCount*2, tracksAdded)
+	require.Equal(t, peerCount*2, tracksAdded)
+	require.Equal(t, expectedTracks, tracksAvailable)
 	require.Equal(t, expectedTracks, trackReceived)
 }
 

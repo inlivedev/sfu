@@ -139,6 +139,21 @@ func (s *SFU) NewClient(id string, opts ClientOptions) *Client {
 			if client.State == ClientStateNew {
 				client.State = ClientStateActive
 				client.onJoined()
+
+				// trigger available tracks from other clients
+				if client.OnTracksAvailable != nil {
+					availableTracks := make([]*Track, 0)
+
+					for _, client := range s.clients {
+						for _, track := range client.tracks.GetTracks() {
+							if track.ClientID != client.ID {
+								availableTracks = append(availableTracks, track)
+							}
+						}
+					}
+
+					client.OnTracksAvailable(availableTracks)
+				}
 			}
 
 			needRenegotiation := false
