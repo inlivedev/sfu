@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"sync"
+
+	"github.com/pion/webrtc/v3"
 )
 
 var (
@@ -19,7 +21,7 @@ type Manager struct {
 	rooms         map[string]*Room
 	Context       context.Context
 	CancelContext context.CancelFunc
-	TurnServer    TurnServer
+	iceServers    []webrtc.ICEServer
 	UDPMux        *UDPMux
 	Name          string
 	mutex         sync.RWMutex
@@ -30,15 +32,13 @@ type Manager struct {
 func NewManager(ctx context.Context, name string, options Options) *Manager {
 	localCtx, cancel := context.WithCancel(ctx)
 
-	turnServer := DefaultTurnServer()
-
 	udpMux := NewUDPMux(ctx, options.WebRTCPort)
 
 	m := &Manager{
 		rooms:         make(map[string]*Room),
 		Context:       localCtx,
 		CancelContext: cancel,
-		TurnServer:    turnServer,
+		iceServers:    options.IceServers,
 		UDPMux:        udpMux,
 		Name:          name,
 		mutex:         sync.RWMutex{},
@@ -66,7 +66,7 @@ func (m *Manager) NewRoom(id, name, roomType string) (*Room, error) {
 		return nil, err
 	}
 
-	newSFU := New(m.Context, m.TurnServer, m.UDPMux)
+	newSFU := New(m.Context, m.iceServers, m.UDPMux)
 
 	room := newRoom(m.Context, id, name, newSFU, roomType)
 

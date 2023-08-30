@@ -66,8 +66,9 @@ func (t *testManagerExtension) OnRoomClosed(manager *Manager, room *Room) {
 func TestManagerExtension(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-
-	m := NewManager(ctx, "test", DefaultOptions())
+	options := DefaultOptions()
+	options.IceServers = DefaultTestIceServers()
+	m := NewManager(ctx, "test", options)
 	managerExt := NewTestManagerExtension()
 	m.AddExtension(managerExt)
 	roomID := m.CreateRoomID()
@@ -98,6 +99,7 @@ func TestExtension(t *testing.T) {
 	m := NewManager(ctx, "test", Options{
 		WebRTCPort:               50010,
 		ConnectRemoteRoomTimeout: 30 * time.Second,
+		IceServers:               DefaultTestIceServers(),
 	})
 
 	// create new room
@@ -112,12 +114,6 @@ func TestExtension(t *testing.T) {
 	peerCount := 0
 
 	tracks, mediaEngine, _ := testhelper.GetStaticTracks(ctx, "test", true)
-
-	iceServers := []webrtc.ICEServer{
-		{
-			URLs: []string{"stun:stun.l.google.com:19302"},
-		},
-	}
 
 	testRoom.OnClientLeft(func(client *Client) {
 		leftChan <- true
@@ -134,7 +130,7 @@ func TestExtension(t *testing.T) {
 	webrtcAPI := webrtc.NewAPI(webrtc.WithMediaEngine(mediaEngine))
 
 	peer1, err := webrtcAPI.NewPeerConnection(webrtc.Configuration{
-		ICEServers: iceServers,
+		ICEServers: DefaultTestIceServers(),
 	})
 
 	client1.OnIceCandidate = func(ctx context.Context, candidate *webrtc.ICECandidate) {

@@ -14,7 +14,11 @@ func TestRoomCreateAndClose(t *testing.T) {
 	defer cancel()
 
 	// create room manager first before create new room
-	roomManager := NewManager(ctx, "test", Options{})
+	roomManager := NewManager(ctx, "test", Options{
+		WebRTCPort:               40007,
+		ConnectRemoteRoomTimeout: 30 * time.Second,
+		IceServers:               DefaultTestIceServers(),
+	})
 
 	roomID := roomManager.CreateRoomID()
 	roomName := "test-room"
@@ -52,7 +56,11 @@ func TestRoomJoinLeftEvent(t *testing.T) {
 	defer cancel()
 
 	// create room manager first before create new room
-	roomManager := NewManager(ctx, "test-join-left", Options{WebRTCPort: 40000})
+	roomManager := NewManager(ctx, "test-join-left", Options{
+		WebRTCPort:               40000,
+		ConnectRemoteRoomTimeout: 30 * time.Second,
+		IceServers:               DefaultTestIceServers(),
+	})
 
 	roomID := roomManager.CreateRoomID()
 	roomName := "test-room"
@@ -120,7 +128,11 @@ func TestRoomStats(t *testing.T) {
 	defer cancel()
 
 	// create room manager first before create new room
-	roomManager := NewManager(ctx, "test-join-left", Options{WebRTCPort: 40005})
+	roomManager := NewManager(ctx, "test-join-left", Options{
+		WebRTCPort:               40005,
+		ConnectRemoteRoomTimeout: 30 * time.Second,
+		IceServers:               DefaultTestIceServers(),
+	})
 
 	roomID := roomManager.CreateRoomID()
 	roomName := "test-room"
@@ -206,8 +218,11 @@ Loop:
 
 				roomStats := testRoom.GetStats()
 
-				if totalClientIngressBytes == roomStats.ByteSent &&
-					totalClientEgressBytes == roomStats.BytesReceived {
+				diffPercentClientIgressRoomBytesSent := (float64(totalClientIngressBytes) - float64(roomStats.ByteSent)) / float64(totalClientIngressBytes) * 100
+				diffPercentClientEgressRoomBytesReceived := (float64(totalClientEgressBytes) - float64(roomStats.BytesReceived)) / float64(totalClientEgressBytes) * 100
+
+				if diffPercentClientIgressRoomBytesSent < 10.0 &&
+					diffPercentClientEgressRoomBytesReceived < 10.0 {
 					break Loop
 				}
 

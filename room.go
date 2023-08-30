@@ -4,6 +4,8 @@ import (
 	"context"
 	"sync"
 	"time"
+
+	"github.com/pion/webrtc/v3"
 )
 
 const (
@@ -17,12 +19,18 @@ type Options struct {
 	WebRTCPort               int
 	ConnectRemoteRoomTimeout time.Duration
 	EnableBridging           bool
+	IceServers               []webrtc.ICEServer
 }
 
 func DefaultOptions() Options {
 	return Options{
 		WebRTCPort:               50005,
 		ConnectRemoteRoomTimeout: 30 * time.Second,
+		IceServers: []webrtc.ICEServer{
+			{
+				URLs: []string{"stun:stun.l.google.com:19302"},
+			},
+		},
 	}
 }
 

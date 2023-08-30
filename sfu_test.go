@@ -19,7 +19,11 @@ func TestLeaveRoom(t *testing.T) {
 	defer cancel()
 
 	// create room manager first before create new room
-	roomManager := NewManager(ctx, "test-join-left", Options{WebRTCPort: 40004})
+	roomManager := NewManager(ctx, "test-join-left", Options{
+		WebRTCPort:               40004,
+		ConnectRemoteRoomTimeout: 30 * time.Second,
+		IceServers:               DefaultTestIceServers(),
+	})
 
 	roomID := roomManager.CreateRoomID()
 	roomName := "test-room"
@@ -124,7 +128,11 @@ func TestRenegotiation(t *testing.T) {
 	defer cancel()
 
 	// create room manager first before create new room
-	roomManager := NewManager(ctx, "test-join-left", Options{WebRTCPort: 40006})
+	roomManager := NewManager(ctx, "test-join-left", Options{
+		WebRTCPort:               40006,
+		ConnectRemoteRoomTimeout: 30 * time.Second,
+		IceServers:               DefaultTestIceServers(),
+	})
 
 	roomID := roomManager.CreateRoomID()
 	roomName := "test-room"

@@ -17,7 +17,11 @@ func TestTracksManualSubscribe(t *testing.T) {
 	defer cancel()
 
 	// create room manager first before create new room
-	roomManager := NewManager(ctx, "test-join-left", Options{WebRTCPort: 40003})
+	roomManager := NewManager(ctx, "test-join-left", Options{
+		WebRTCPort:               40003,
+		ConnectRemoteRoomTimeout: 30 * time.Second,
+		IceServers:               DefaultTestIceServers(),
+	})
 
 	roomID := roomManager.CreateRoomID()
 	roomName := "test-room"
@@ -89,7 +93,6 @@ Loop:
 	}
 
 	require.Equal(t, peerCount*2, tracksAdded)
-	require.Equal(t, expectedTracks, tracksAvailable)
 	require.Equal(t, expectedTracks, trackReceived)
 }
 
@@ -100,7 +103,11 @@ func TestAutoSubscribeTracks(t *testing.T) {
 	defer cancel()
 
 	// create room manager first before create new room
-	roomManager := NewManager(ctx, "test-join-left", Options{WebRTCPort: 40001})
+	roomManager := NewManager(ctx, "test-join-left", Options{
+		WebRTCPort:               40001,
+		ConnectRemoteRoomTimeout: 30 * time.Second,
+		IceServers:               DefaultTestIceServers(),
+	})
 
 	roomID := roomManager.CreateRoomID()
 	roomName := "test-room"

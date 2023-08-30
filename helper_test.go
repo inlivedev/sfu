@@ -186,3 +186,14 @@ func negotiate(t *testing.T, pc *webrtc.PeerConnection, client *Client) {
 	err = pc.SetRemoteDescription(*answer)
 	require.NoErrorf(t, err, "error setting remote description: %v", err)
 }
+
+func DefaultTestIceServers() []webrtc.ICEServer {
+	return []webrtc.ICEServer{
+		{
+			URLs:           []string{"turn:127.0.0.1:3478", "stun:127.0.0.1:3478"},
+			Username:       "user",
+			Credential:     "pass",
+			CredentialType: webrtc.ICECredentialTypePassword,
+		},
+	}
+}

@@ -2,7 +2,6 @@ package sfu
 
 import (
 	"context"
-	"strconv"
 	"sync"
 
 	"github.com/golang/glog"
@@ -19,18 +18,11 @@ type SFU struct {
 	publicDataChannels       map[string]map[string]*webrtc.DataChannel
 	privateDataChannels      map[string]map[string]*webrtc.DataChannel
 	idleChan                 chan bool
+	iceServers               []webrtc.ICEServer
 	mutex                    sync.Mutex
 	mux                      *UDPMux
-	turnServer               TurnServer
 	onStop                   func()
 	OnTracksAvailable        func(tracks []Track)
-}
-
-type TurnServer struct {
-	Host     string
-	Port     int
-	Username string
-	Password string
 }
 
 type PublishedTrack struct {
@@ -38,17 +30,8 @@ type PublishedTrack struct {
 	Track    webrtc.TrackLocal
 }
 
-func DefaultTurnServer() TurnServer {
-	return TurnServer{
-		Port:     3478,
-		Host:     "turn.inlive.app",
-		Username: "inlive",
-		Password: "inlivesdkturn",
-	}
-}
-
 // @Param muxPort: port for udp mux
-func New(ctx context.Context, turnServer TurnServer, mux *UDPMux) *SFU {
+func New(ctx context.Context, iceServers []webrtc.ICEServer, mux *UDPMux) *SFU {
 	localCtx, cancel := context.WithCancel(ctx)
 
 	sfu := &SFU{
@@ -59,8 +42,8 @@ func New(ctx context.Context, turnServer TurnServer, mux *UDPMux) *SFU {
 		publicDataChannels:  make(map[string]map[string]*webrtc.DataChannel),
 		privateDataChannels: make(map[string]map[string]*webrtc.DataChannel),
 		mutex:               sync.Mutex{},
+		iceServers:          iceServers,
 		mux:                 mux,
-		turnServer:          turnServer,
 	}
 
 	go func() {
@@ -111,23 +94,8 @@ func (s *SFU) NewClient(id string, opts ClientOptions) *Client {
 	// 	"stun:stun.l.google.com:19302",
 	// }}}
 
-	iceServers := []webrtc.ICEServer{}
-
-	if s.turnServer.Host != "" {
-		iceServers = append(iceServers,
-			webrtc.ICEServer{
-				URLs:           []string{"turn:" + s.turnServer.Host + ":" + strconv.Itoa(s.turnServer.Port)},
-				Username:       s.turnServer.Username,
-				Credential:     s.turnServer.Password,
-				CredentialType: webrtc.ICECredentialTypePassword,
-			},
-			webrtc.ICEServer{
-				URLs: []string{"stun:" + s.turnServer.Host + ":" + strconv.Itoa(s.turnServer.Port)},
-			})
-	}
-
 	peerConnectionConfig := webrtc.Configuration{
-		ICEServers: iceServers,
+		ICEServers: s.iceServers,
 	}
 
 	client := s.createClient(id, peerConnectionConfig, opts)
