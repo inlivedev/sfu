@@ -210,7 +210,6 @@ func NewClient(s *SFU, id string, peerConnectionConfig webrtc.Configuration, opt
 	// to connected peers
 	peerConnection.OnTrack(func(remoteTrack *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
 		trackCtx, trackCancel := context.WithCancel(client.Context)
-		glog.Info("client: on track ", remoteTrack.ID(), remoteTrack.StreamID(), remoteTrack.Kind())
 
 		// Create a local track, all our SFU clients will be fed via this track
 		localTrack, newTrackErr := webrtc.NewTrackLocalStaticRTP(remoteTrack.Codec().RTPCodecCapability, remoteTrack.ID(), remoteTrack.StreamID())
@@ -220,7 +219,9 @@ func NewClient(s *SFU, id string, peerConnectionConfig webrtc.Configuration, opt
 
 		newTrack := &Track{ClientID: id, LocalStaticRTP: localTrack}
 
-		client.tracks.Add(newTrack)
+		if err := client.tracks.Add(newTrack); err != nil {
+			glog.Error("client: error add track ", err)
+		}
 
 		rtpBuf := make([]byte, 1450)
 
@@ -484,7 +485,9 @@ func (c *Client) allowRemoteRenegotiationQueuOp() {
 func (c *Client) addTrack(track *Track) bool {
 	// if the client is not connected, we wait until it's connected in go routine
 	if c.peerConnection.ICEConnectionState() != webrtc.ICEConnectionStateConnected {
-		c.pendingReceivedTracks.Add(track)
+		if err := c.pendingReceivedTracks.Add(track); err != nil {
+			glog.Error("client: error add pending received track ", err)
+		}
 
 		return false
 	}
@@ -510,7 +513,6 @@ func (c *Client) setClientTrack(track *Track) bool {
 	return true
 }
 
-// return boolean if a client need a renegotation because a track or more is removed
 func (c *Client) removePublishedTrack(removeTracks []*Track) {
 	removed := false
 

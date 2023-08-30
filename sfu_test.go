@@ -2,229 +2,199 @@ package sfu
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/golang/glog"
 	"github.com/inlivedev/sfu/testhelper"
-
 	"github.com/pion/webrtc/v3"
 	"github.com/stretchr/testify/require"
 )
 
-func TestActiveTracks(t *testing.T) {
+func TestLeaveRoom(t *testing.T) {
 	t.Parallel()
-	// _ = os.Setenv("PION_LOG_DEBUG", "pc,dtls")
-	// _ = os.Setenv("PION_LOG_TRACE", "ice")
-	// _ = os.Setenv("PIONS_LOG_INFO", "all")
 
 	ctx, cancel := context.WithCancel(context.Background())
-
 	defer cancel()
 
-	peerCount := 3
-	trackCount := 0
-	connectedCount := 0
-	trackChan := make(chan *RemoteTrack)
-	remoteTracks := make(map[string]map[string]*webrtc.TrackRemote)
-	peerChan := make(chan *PeerClient)
-	connectedChan := make(chan bool)
-	peers := make(map[string]*PeerClient, 0)
-	udpMux := NewUDPMux(ctx, 40004)
-	trackEndedChan := make(chan bool)
+	// create room manager first before create new room
+	roomManager := NewManager(ctx, "test-join-left", Options{WebRTCPort: 40004})
 
-	// sfu := testhelper.Setup(t, udpMux, ctx, peerCount, trackChan, peerChan, connectedChan)
-	sfu := Setup(t, ctx, udpMux, peerCount, trackChan, peerChan, connectedChan)
-	defer sfu.Stop()
+	roomID := roomManager.CreateRoomID()
+	roomName := "test-room"
 
-	ctxTimeout, cancel := context.WithTimeout(ctx, 60*time.Second)
+	peerCount := 5
 
-	defer cancel()
+	// create new room
+	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal)
+	require.NoError(t, err, "error creating room: %v", err)
 
-	expectedTracks := (peerCount * 2) * (peerCount - 1)
-	glog.Info("expected tracks: ", expectedTracks)
+	trackChan := make(chan bool)
 
-	continueChan := make(chan bool)
-	stoppedClient := 0
+	clients := make([]*Client, 0)
 
-	isStopped := make(chan bool)
-	trackEndedCount := 0
+	for i := 0; i < peerCount; i++ {
+		go func() {
+			pc, client, _, _ := createPeerPair(t, ctx, testRoom, fmt.Sprintf("peer-%d", i), true)
 
-	go func() {
-		for {
-			select {
-			case <-ctxTimeout.Done():
-				require.Equal(t, expectedTracks, trackCount)
-				return
-			case <-connectedChan:
-				connectedCount++
-				glog.Info("connected count: ", connectedCount)
-			case remoteTrack := <-trackChan:
-				if _, ok := remoteTracks[remoteTrack.Client.ID]; !ok {
-					remoteTracks[remoteTrack.Client.ID] = make(map[string]*webrtc.TrackRemote)
+			clients = append(clients, client)
+
+			client.SubscribeAllTracks()
+
+			client.OnTracksAdded = func(addedTracks []*Track) {
+				setTracks := make(map[string]TrackType, 0)
+				for _, track := range addedTracks {
+					setTracks[track.ID()] = TrackTypeMedia
 				}
+				client.SetTracksSourceType(setTracks)
+			}
 
-				remoteTracks[remoteTrack.Client.ID][remoteTrack.Track.ID()] = remoteTrack.Track
+			pc.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
+				trackChan <- true
+			})
+		}()
+	}
 
+	timeout, cancelTimeout := context.WithTimeout(ctx, 60*time.Second)
+	defer cancelTimeout()
+
+	trackReceived := 0
+	peerToClose := 2
+	expectedTracks := (peerCount * 2) * (peerCount - 1)
+	leftClientsCounts := peerCount - peerToClose
+	expectedActiveTracks := (leftClientsCounts * 2) * (leftClientsCounts - 1)
+	checkReceiverChan := make(chan bool)
+	activeTracks := 0
+
+Loop:
+	for {
+		select {
+		case <-timeout.Done():
+			break Loop
+
+		case <-trackChan:
+			trackReceived++
+			glog.Info("Tracks received: ", trackReceived, " from expected: ", expectedTracks)
+			if trackReceived == expectedTracks {
+				// put in go routine so the channel won't blocking
 				go func() {
-					rtcpBuf := make([]byte, 1500)
-					ctxx, cancell := context.WithCancel(ctx)
-					defer cancell()
+					// when all tracks received, make two peers leave the room
+					glog.Info("all tracks received, make two peers leave the room")
+					for i := 0; i < 2; i++ {
+						err = clients[i].Stop()
+						require.NoError(t, err, "error stopping client: %v", err)
+					}
+					checkReceiverChan <- true
+					glog.Info("two clients left the room")
+				}()
+			}
 
-					for {
-						select {
-						case <-ctxx.Done():
-							return
-						default:
-							if _, _, rtcpErr := remoteTrack.Track.Read(rtcpBuf); rtcpErr != nil {
-								if rtcpErr.Error() == "EOF" {
-									trackEndedChan <- true
-									return
-								}
-								return
+		case <-checkReceiverChan:
+			go func() {
+				for {
+					activeTracks = 0
+					for _, client := range clients {
+						for _, sender := range client.peerConnection.GetSenders() {
+							if sender.Track() != nil {
+								activeTracks++
 							}
 						}
 					}
 
-				}()
-				trackCount++
-				glog.Info("track count: ", trackCount)
-
-				if trackCount == expectedTracks { // 2 clients
-					totalRemoteTracks := 0
-					for _, clientTrack := range remoteTracks {
-						for range clientTrack {
-							totalRemoteTracks++
-						}
+					if activeTracks == expectedActiveTracks {
+						cancelTimeout()
 					}
 
-					glog.Info("total remote tracks: ", totalRemoteTracks)
-					continueChan <- true
+					time.Sleep(1 * time.Second)
 				}
-
-			case client := <-peerChan:
-				peers[client.ID] = client
-				glog.Info("peer count: ", len(peers))
-			case <-isStopped:
-				stoppedClient++
-				if stoppedClient == 1 {
-					continueChan <- true
-				}
-			case <-trackEndedChan:
-				trackEndedCount++
-				glog.Info("track ended count: ", trackEndedCount)
-			}
+			}()
 		}
-	}()
 
-	<-continueChan
-
-	require.Equal(t, expectedTracks, trackCount)
-
-	currentTrack := 0
-
-	for _, client := range peers {
-		glog.Info("client: ", client.ID, "remote track count: ", len(client.PeerConnection.GetReceivers()))
-		for _, receiver := range client.PeerConnection.GetReceivers() {
-			if receiver != nil && receiver.Track() != nil {
-				currentTrack++
-			}
-		}
 	}
 
-	glog.Info("current clients count:", len(peers), ",current client tracks count:", currentTrack, "peer tracks count: ", trackCount)
+	require.Equal(t, expectedTracks, trackReceived)
+	require.Equal(t, activeTracks, expectedActiveTracks)
+}
 
-	for _, client := range peers {
-		relay, _ := sfu.GetClient(client.ID)
+func TestRenegotiation(t *testing.T) {
+	t.Parallel()
 
-		relay.OnConnectionStateChanged(func(state webrtc.PeerConnectionState) {
-			if state == webrtc.PeerConnectionStateClosed {
-				isStopped <- true
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// create room manager first before create new room
+	roomManager := NewManager(ctx, "test-join-left", Options{WebRTCPort: 40006})
+
+	roomID := roomManager.CreateRoomID()
+	roomName := "test-room"
+
+	peerCount := 3
+
+	// create new room
+	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal)
+	require.NoError(t, err, "error creating room: %v", err)
+
+	trackChan := make(chan bool)
+
+	type Pair struct {
+		pc     *webrtc.PeerConnection
+		client *Client
+	}
+
+	pairs := make([]Pair, 0)
+
+	for i := 0; i < peerCount; i++ {
+		pc, client, _, _ := createPeerPair(t, ctx, testRoom, fmt.Sprintf("peer-%d", i), true)
+		client.SubscribeAllTracks()
+		pairs = append(pairs, Pair{pc, client})
+
+		client.OnTracksAdded = func(addedTracks []*Track) {
+			setTracks := make(map[string]TrackType, 0)
+			for _, track := range addedTracks {
+				setTracks[track.ID()] = TrackTypeMedia
 			}
+			client.SetTracksSourceType(setTracks)
+		}
+
+		pc.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
+			trackChan <- true
 		})
-
-		err := relay.Stop()
-		require.NoError(t, err)
-		delete(peers, client.ID)
-		peerCount = len(peers)
-
-		// stop after one client
-		break
 	}
 
-	<-continueChan
+	timeout, cancelTimeout := context.WithTimeout(ctx, 30*time.Second)
+	defer cancelTimeout()
 
-	require.Equal(t, 1, stoppedClient)
+	trackReceived := 0
+	expectedTracks := (peerCount * 2) * (peerCount - 1)
+	expectedTracksAfterAdded := (peerCount * 3) * (peerCount - 1)
 
-	// count left tracks
-	leftTracks := 0
-	expectedLeftTracks := len(sfu.GetClients()) * 2 * (len(sfu.GetClients()))
+Loop:
+	for {
+		select {
+		case <-timeout.Done():
+			break Loop
 
-	for _, client := range sfu.GetClients() {
-		for _, receiver := range client.GetPeerConnection().GetReceivers() {
-			if receiver.Track() != nil {
-				leftTracks++
+		case <-trackChan:
+			trackReceived++
+			glog.Info("Tracks received: ", trackReceived, " from expected: ", expectedTracks, "or after added: ", expectedTracksAfterAdded)
+			if trackReceived == expectedTracks {
+				go func() {
+					// add more tracks to each clients
+					for _, pair := range pairs {
+						newTrack, _ := testhelper.GetStaticVideoTrack(timeout, testhelper.GenerateSecureToken(), testhelper.GenerateSecureToken(), true)
+						_, err := pair.pc.AddTrack(newTrack)
+						require.NoError(t, err, "error adding track: %v", err)
+						negotiate(t, pair.pc, pair.client)
+					}
+				}()
+			}
+
+			if trackReceived == expectedTracksAfterAdded {
+				break Loop
 			}
 		}
 	}
 
-	currentTrack = 0
-
-	for _, peer := range peers {
-		for _, transceiver := range peer.PeerConnection.GetTransceivers() {
-			if transceiver != nil && transceiver.Receiver().Track() != nil {
-				currentTrack++
-			}
-		}
-	}
-
-	glog.Info("current tracks count: ", currentTrack)
-
-	glog.Info("left tracks: ", leftTracks, "from clients: ", len(sfu.GetClients()))
-	glog.Info("expected left tracks: ", expectedLeftTracks)
-	require.Equal(t, expectedLeftTracks, leftTracks)
-
-	glog.Info("test adding extra tracks")
-	// reset track count and expected tracks
-	trackCount = 0
-	expectedTracks = (peerCount * 2) * (peerCount - 1)
-
-	// Test adding extra 2 tracks for each peer
-	for _, peer := range peers {
-		peer.InRenegotiation = true
-		newTracks, _, _ := testhelper.GetStaticTracks(ctx, testhelper.GenerateSecureToken(), true)
-
-		// renegotiate after adding tracks
-		allowRenegotiate := peer.RelayClient.IsAllowNegotiation()
-		if allowRenegotiate {
-			for _, track := range newTracks {
-				_, err := peer.PeerConnection.AddTrack(track)
-				require.NoError(t, err)
-			}
-			glog.Info("test: renegotiating", peer.ID)
-			offer, _ := peer.PeerConnection.CreateOffer(nil)
-			err := peer.PeerConnection.SetLocalDescription(offer)
-			require.NoError(t, err)
-			answer, err := peer.RelayClient.Negotiate(*peer.PeerConnection.LocalDescription())
-			require.NoError(t, err)
-			err = peer.PeerConnection.SetRemoteDescription(*answer)
-			require.NoError(t, err)
-		} else {
-			glog.Info("not renegotiating", peer.ID)
-
-			peer.PendingTracks = append(peer.PendingTracks, newTracks...)
-		}
-
-		peer.InRenegotiation = false
-	}
-
-	timeoutt, cancellTimeout := context.WithTimeout(ctx, 50*time.Second)
-	defer cancellTimeout()
-
-	select {
-	case <-timeoutt.Done():
-		require.Fail(t, "timeout")
-	case <-continueChan:
-		require.Equal(t, expectedTracks, trackCount)
-	}
+	require.Equal(t, expectedTracksAfterAdded, trackReceived)
 }
