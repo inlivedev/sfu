@@ -79,6 +79,9 @@ func (t *TrackList) Reset() {
 }
 
 func (t *TrackList) GetTracks() map[string]*Track {
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+
 	return t.tracks
 }
 
