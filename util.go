@@ -6,8 +6,13 @@ import (
 	"strings"
 
 	"github.com/pion/interceptor/pkg/stats"
+	"github.com/pion/sdp/v3"
 	"github.com/pion/webrtc/v3"
 	"github.com/speps/go-hashids"
+)
+
+const (
+	SdesRepairRTPStreamIDURI = "urn:ietf:params:rtp-hdrext:sdes:repaired-rtp-stream-id"
 )
 
 func GetUfragAndPass(sdp string) (ufrag, pass string) {
@@ -78,4 +83,16 @@ func GetSenderStats(pc *webrtc.PeerConnection, statsGetter stats.Getter) map[web
 	}
 
 	return stats
+}
+
+func RegisterSimulcastHeaderExtensions(m *webrtc.MediaEngine, codecType webrtc.RTPCodecType) {
+	for _, extension := range []string{
+		sdp.SDESMidURI,
+		sdp.SDESRTPStreamIDURI,
+		SdesRepairRTPStreamIDURI,
+	} {
+		if err := m.RegisterHeaderExtension(webrtc.RTPHeaderExtensionCapability{URI: extension}, codecType); err != nil {
+			panic(err)
+		}
+	}
 }

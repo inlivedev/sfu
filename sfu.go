@@ -110,11 +110,11 @@ func (s *SFU) NewClient(id string, opts ClientOptions) *Client {
 
 				// trigger available tracks from other clients
 				if client.OnTracksAvailable != nil {
-					availableTracks := make([]*Track, 0)
+					availableTracks := make([]ITrack, 0)
 
 					for _, c := range s.clients {
 						for _, track := range c.tracks.GetTracks() {
-							if track.ClientID != client.ID {
+							if track.ClientID() != client.ID {
 								availableTracks = append(availableTracks, track)
 							}
 						}
@@ -150,7 +150,7 @@ func (s *SFU) NewClient(id string, opts ClientOptions) *Client {
 		}
 	})
 
-	client.onTrack = func(ctx context.Context, track *Track) {
+	client.onTrack = func(track ITrack) {
 		if err := client.pendingPublishedTracks.Add(track); err != nil {
 			glog.Error("client: failed to add pending published track ", err)
 			return
@@ -164,7 +164,7 @@ func (s *SFU) NewClient(id string, opts ClientOptions) *Client {
 			return
 		}
 
-		availableTracks := make([]*Track, 0)
+		availableTracks := make([]ITrack, 0)
 		for _, track := range client.pendingPublishedTracks.GetTracks() {
 			availableTracks = append(availableTracks, track)
 		}
@@ -192,7 +192,7 @@ func (s *SFU) NewClient(id string, opts ClientOptions) *Client {
 	return client
 }
 
-func (s *SFU) removeTracks(tracks []*Track) {
+func (s *SFU) removeTracks(tracks []ITrack) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -211,7 +211,7 @@ func (s *SFU) SyncTrack(client *Client) bool {
 	for _, clientPeer := range s.clients {
 		for _, track := range clientPeer.tracks.GetTracks() {
 			if client.ID != clientPeer.ID {
-				if _, ok := currentTracks[track.LocalStaticRTP.StreamID()+"-"+track.LocalStaticRTP.ID()]; !ok {
+				if _, ok := currentTracks[track.ID()]; !ok {
 					isNeedRenegotiation := client.addTrack(track)
 
 					// request the keyframe from track publisher after added
@@ -227,8 +227,8 @@ func (s *SFU) SyncTrack(client *Client) bool {
 	return needRenegotiation
 }
 
-func (s *SFU) GetTracks() []*Track {
-	tracks := make([]*Track, 0)
+func (s *SFU) GetTracks() []ITrack {
+	tracks := make([]ITrack, 0)
 	for _, client := range s.clients {
 		for _, track := range client.tracks.GetTracks() {
 			tracks = append(tracks, track)
@@ -285,13 +285,13 @@ func (s *SFU) onClientRemoved(client *Client) {
 	}
 }
 
-func (s *SFU) onTracksAvailable(tracks []*Track) {
+func (s *SFU) onTracksAvailable(tracks []ITrack) {
 	for _, client := range s.clients {
 		if !client.IsSubscribeAllTracks && client.OnTracksAvailable != nil {
 			// filter out tracks from the same client
-			filteredTracks := make([]*Track, 0)
+			filteredTracks := make([]ITrack, 0)
 			for _, track := range tracks {
-				if track.ClientID != client.ID {
+				if track.ClientID() != client.ID {
 					filteredTracks = append(filteredTracks, track)
 				}
 			}
@@ -303,13 +303,12 @@ func (s *SFU) onTracksAvailable(tracks []*Track) {
 	}
 }
 
-func (s *SFU) broadcastTracksToAutoSubscribeClients(tracks []*Track) {
+func (s *SFU) broadcastTracksToAutoSubscribeClients(tracks []ITrack) {
 	trackReq := make([]SubscribeTrackRequest, 0)
 	for _, track := range tracks {
 		trackReq = append(trackReq, SubscribeTrackRequest{
-			ClientID: track.ClientID,
-			StreamID: track.LocalStaticRTP.StreamID(),
-			TrackID:  track.LocalStaticRTP.ID(),
+			ClientID: track.ClientID(),
+			TrackID:  track.ID(),
 		})
 	}
 

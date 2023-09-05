@@ -116,10 +116,10 @@ func clientHandler(conn *websocket.Conn, messageChan chan Request, r *sfu.Room) 
 
 	client.SubscribeAllTracks()
 
-	client.OnTracksAdded = func(tracks []*sfu.Track) {
+	client.OnTracksAdded = func(tracks []sfu.ITrack) {
 		tracksAdded := map[string]map[string]string{}
 		for _, track := range tracks {
-			tracksAdded[track.ID()] = map[string]string{"id": track.LocalStaticRTP.ID(), "stream_id": track.LocalStaticRTP.StreamID()}
+			tracksAdded[track.ID()] = map[string]string{"id": track.ID()}
 		}
 		resp := Respose{
 			Status: true,

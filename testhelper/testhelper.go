@@ -6,6 +6,7 @@ import (
 	"os"
 	"path"
 	"runtime"
+	"testing"
 	"time"
 
 	"github.com/google/uuid"
@@ -14,8 +15,10 @@ import (
 	"github.com/pion/mediadevices/pkg/codec/x264"
 	"github.com/pion/mediadevices/pkg/frame"
 	"github.com/pion/mediadevices/pkg/prop"
+	"github.com/pion/sdp/v3"
 	"github.com/pion/webrtc/v3"
 	"github.com/pion/webrtc/v3/pkg/media"
+	"github.com/stretchr/testify/assert"
 
 	//nolint:blank-imports // Importing drivers
 	_ "github.com/pion/mediadevices/pkg/driver/audiotest"
@@ -29,10 +32,13 @@ import (
 var mediaEngine *webrtc.MediaEngine
 
 const (
-	videoFileName     = "./media/output.h264"
-	audioFileName     = "./media/output.ogg"
-	oggPageDuration   = time.Millisecond * 20
-	h264FrameDuration = time.Millisecond * 33
+	videoFileName            = "./media/output.h264"
+	videoHalfFileName        = "./media/output-half.h264"
+	videoQuarterFileName     = "./media/output-quarter.h264"
+	audioFileName            = "./media/output.ogg"
+	oggPageDuration          = time.Millisecond * 20
+	h264FrameDuration        = time.Millisecond * 33
+	SdesRepairRTPStreamIDURI = "urn:ietf:params:rtp-hdrext:sdes:repaired-rtp-stream-id"
 )
 
 func GetTestTracks() ([]mediadevices.Track, *webrtc.MediaEngine) {
@@ -68,30 +74,14 @@ func GetTestTracks() ([]mediadevices.Track, *webrtc.MediaEngine) {
 	return s.GetTracks(), mediaEngine
 }
 
-func GetStaticTracks(ctx context.Context, streamID string, loop bool) ([]*webrtc.TrackLocalStaticSample, *webrtc.MediaEngine, chan bool) {
-	x264Params, _ := x264.NewParams()
-
-	opusParams, _ := opus.NewParams()
-
-	codecSelector := mediadevices.NewCodecSelector(
-		mediadevices.WithVideoEncoders(&x264Params),
-		mediadevices.WithAudioEncoders(&opusParams),
-	)
-
-	mediaEngine = &webrtc.MediaEngine{}
-	if err := mediaEngine.RegisterDefaultCodecs(); err != nil {
-		panic(err)
-	}
-
+func GetStaticTracks(ctx context.Context, streamID string, loop bool) ([]*webrtc.TrackLocalStaticSample, chan bool) {
 	audioTrackID := GenerateSecureToken()
 	videoTrackID := GenerateSecureToken()
-
-	codecSelector.Populate(mediaEngine)
 
 	staticTracks := make([]*webrtc.TrackLocalStaticSample, 0)
 	audioTrack, audioDoneChan := GetStaticAudioTrack(ctx, audioTrackID, streamID, loop)
 	staticTracks = append(staticTracks, audioTrack)
-	videoTrack, videoDoneChan := GetStaticVideoTrack(ctx, videoTrackID, streamID, loop)
+	videoTrack, videoDoneChan := GetStaticVideoTrack(ctx, videoTrackID, streamID, loop, "")
 	staticTracks = append(staticTracks, videoTrack)
 
 	allDone := make(chan bool)
@@ -117,7 +107,7 @@ func GetStaticTracks(ctx context.Context, streamID string, loop bool) ([]*webrtc
 		}
 	}()
 
-	return staticTracks, mediaEngine, allDone
+	return staticTracks, allDone
 }
 
 func GetVideoTrack() (mediadevices.Track, *webrtc.MediaEngine) {
@@ -151,13 +141,27 @@ func GetVideoTrack() (mediadevices.Track, *webrtc.MediaEngine) {
 	return s.GetTracks()[0], &mediaEngine
 }
 
-func GetStaticVideoTrack(ctx context.Context, trackID, streamID string, loop bool) (*webrtc.TrackLocalStaticSample, chan bool) {
+func GetStaticVideoTrack(ctx context.Context, trackID, streamID string, loop bool, quality string) (*webrtc.TrackLocalStaticSample, chan bool) {
 	_, filename, _, ok := runtime.Caller(0)
 	if !ok {
 		panic("No caller information")
 	}
 
-	videoFileName := path.Join(path.Dir(filename), videoFileName)
+	var videoFile, rid string
+
+	switch quality {
+	case "mid":
+		videoFile = videoHalfFileName
+		rid = "mid"
+	case "low":
+		videoFile = videoQuarterFileName
+		rid = "low"
+	default:
+		videoFile = videoFileName
+		rid = "high"
+	}
+
+	videoFileName := path.Join(path.Dir(filename), videoFile)
 	_, err := os.Stat(videoFileName)
 	haveVideoFile := !os.IsNotExist(err)
 
@@ -165,9 +169,16 @@ func GetStaticVideoTrack(ctx context.Context, trackID, streamID string, loop boo
 		panic("no video file")
 	}
 
-	videoTrack, videoTrackErr := webrtc.NewTrackLocalStaticSample(webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264}, trackID, streamID)
-	if videoTrackErr != nil {
-		panic(videoTrackErr)
+	var videoTrack *webrtc.TrackLocalStaticSample
+
+	if quality == "" {
+		if videoTrack, err = webrtc.NewTrackLocalStaticSample(webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264}, trackID, streamID); err != nil {
+			panic(err)
+		}
+	} else {
+		if videoTrack, err = webrtc.NewTrackLocalStaticSample(webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264}, trackID, streamID, webrtc.WithRTPStreamID(rid)); err != nil {
+			panic(err)
+		}
 	}
 
 	done := make(chan bool)
@@ -336,4 +347,79 @@ func SetPeerConnectionTracks(ctx context.Context, peerConnection *webrtc.PeerCon
 
 func GenerateSecureToken() string {
 	return uuid.New().String()
+}
+
+func AddSimulcastVideoTracks(t *testing.T, ctx context.Context, pc *webrtc.PeerConnection, trackID, streamID string) error {
+	t.Helper()
+
+	videoHigh, _ := GetStaticVideoTrack(ctx, trackID, streamID, true, "high")
+	sender, err := pc.AddTrack(videoHigh)
+	if err != nil {
+		return err
+	}
+
+	videoMid, _ := GetStaticVideoTrack(ctx, trackID, streamID, true, "mid")
+	sender.AddEncoding(videoMid)
+	videoLow, _ := GetStaticVideoTrack(ctx, trackID, streamID, true, "low")
+	sender.AddEncoding(videoLow)
+
+	// read outgoing packet to enable NACK
+	go func() {
+		rtcpBuf := make([]byte, 1500)
+		localCtx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		for {
+			select {
+			case <-localCtx.Done():
+				return
+			default:
+				if _, _, rtcpErr := sender.Read(rtcpBuf); rtcpErr != nil {
+					return
+				}
+
+			}
+		}
+	}()
+
+	parameters := sender.GetParameters()
+	assert.Equal(t, "high", parameters.Encodings[0].RID)
+	assert.Equal(t, "mid", parameters.Encodings[1].RID)
+	assert.Equal(t, "low", parameters.Encodings[2].RID)
+
+	var midID, ridID, rsidID uint8
+	for _, extension := range parameters.HeaderExtensions {
+		switch extension.URI {
+		case sdp.SDESMidURI:
+			midID = uint8(extension.ID)
+		case sdp.SDESRTPStreamIDURI:
+			ridID = uint8(extension.ID)
+		case SdesRepairRTPStreamIDURI:
+			rsidID = uint8(extension.ID)
+		}
+	}
+	assert.NotZero(t, midID)
+	assert.NotZero(t, ridID)
+	assert.NotZero(t, rsidID)
+
+	return nil
+}
+
+func GetMediaEngine() *webrtc.MediaEngine {
+	x264Params, _ := x264.NewParams()
+
+	opusParams, _ := opus.NewParams()
+
+	codecSelector := mediadevices.NewCodecSelector(
+		mediadevices.WithVideoEncoders(&x264Params),
+		mediadevices.WithAudioEncoders(&opusParams),
+	)
+
+	mediaEngine = &webrtc.MediaEngine{}
+	// if err := mediaEngine.RegisterDefaultCodecs(); err != nil {
+	// 	panic(err)
+	// }
+
+	codecSelector.Populate(mediaEngine)
+
+	return mediaEngine
 }
