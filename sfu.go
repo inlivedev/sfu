@@ -114,7 +114,7 @@ func (s *SFU) NewClient(id string, opts ClientOptions) *Client {
 
 					for _, c := range s.clients {
 						for _, track := range c.tracks.GetTracks() {
-							if track.ClientID() != client.ID {
+							if track.Client().ID != client.ID {
 								availableTracks = append(availableTracks, track)
 							}
 						}
@@ -151,18 +151,20 @@ func (s *SFU) NewClient(id string, opts ClientOptions) *Client {
 	})
 
 	client.onTrack = func(track ITrack) {
-		if err := client.pendingPublishedTracks.Add(track); err != nil {
-			glog.Error("client: failed to add pending published track ", err)
+		if err := client.pendingPublishedTracks.Add(track); err == ErrTrackExists {
+			// not an error could be because a simulcast track already added
 			return
 		}
 
 		// don't publish track when not all the tracks are received
 		// TODO:
-		// 1. figure out how to handle this when doing a screensharing
-		// 2. the renegotiation not triggered when new track after negotiation is done
+		// 1. need to handle simulcast track because  it will be counted as single track
 		if client.GetType() == ClientTypePeer && client.initialTracksCount > client.pendingPublishedTracks.Length() {
+			glog.Infof("client: not all tracks are received, skip publish track %d %d", client.initialTracksCount, client.pendingPublishedTracks.Length())
 			return
 		}
+
+		glog.Info("publish tracks")
 
 		availableTracks := make([]ITrack, 0)
 		for _, track := range client.pendingPublishedTracks.GetTracks() {
@@ -291,7 +293,7 @@ func (s *SFU) onTracksAvailable(tracks []ITrack) {
 			// filter out tracks from the same client
 			filteredTracks := make([]ITrack, 0)
 			for _, track := range tracks {
-				if track.ClientID() != client.ID {
+				if track.Client().ID != client.ID {
 					filteredTracks = append(filteredTracks, track)
 				}
 			}
@@ -307,7 +309,7 @@ func (s *SFU) broadcastTracksToAutoSubscribeClients(tracks []ITrack) {
 	trackReq := make([]SubscribeTrackRequest, 0)
 	for _, track := range tracks {
 		trackReq = append(trackReq, SubscribeTrackRequest{
-			ClientID: track.ClientID(),
+			ClientID: track.Client().ID,
 			TrackID:  track.ID(),
 		})
 	}

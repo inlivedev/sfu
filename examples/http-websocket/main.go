@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"flag"
 	"log"
 	"net/http"
 	"time"
@@ -31,15 +32,19 @@ const (
 	TypeCandidate          = "candidate"
 	TypeError              = "error"
 	TypeAllowRenegotiation = "allow_renegotiation"
-	TypeTrackAdded         = "track_added"
+	TypeTrackAdded         = "tracks_added"
+	TypeTrackAvailable     = "tracks_available"
 )
 
 func main() {
+	flag.Set("logtostderr", "true")
+	flag.Set("stderrthreshold", "INFO")
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	// create room manager first before create new room
-	roomManager := sfu.NewManager(ctx, "server-name-here", sfu.Options{})
+	roomManager := sfu.NewManager(ctx, "server-name-here", sfu.DefaultOptions())
 
 	// generate a new room id. You can extend this example into a multiple room by use this in it's own API endpoint
 	roomID := roomManager.CreateRoomID()
@@ -131,6 +136,29 @@ func clientHandler(conn *websocket.Conn, messageChan chan Request, r *sfu.Room) 
 
 		_, _ = conn.Write(trackAddedResp)
 	}
+
+	// client.OnTracksAvailable = func(tracks []sfu.ITrack) {
+	// 	tracksAvailable := map[string]map[string]interface{}{}
+	// 	for _, track := range tracks {
+
+	// 		tracksAvailable[track.ID()] = map[string]interface{}{
+	// 			"id":           track.ID(),
+	// 			"client_id":    track.ClientID(),
+	// 			"source_type":  track.SourceType().String(),
+	// 			"kind":         track.Kind().String(),
+	// 			"is_simulcast": track.IsSimulcast(),
+	// 		}
+	// 	}
+	// 	resp := Respose{
+	// 		Status: true,
+	// 		Type:   TypeTrackAdded,
+	// 		Data:   tracksAvailable,
+	// 	}
+
+	// 	trackAddedResp, _ := json.Marshal(resp)
+
+	// 	_, _ = conn.Write(trackAddedResp)
+	// }
 
 	client.OnRenegotiation = func(ctx context.Context, offer webrtc.SessionDescription) (webrtc.SessionDescription, error) {
 		// SFU request a renegotiation, send the offer to client
@@ -250,6 +278,14 @@ func clientHandler(conn *websocket.Conn, messageChan chan Request, r *sfu.Room) 
 					}
 				}
 				client.SetTracksSourceType(setTracks)
+			} else if req.Type == TypeTrackAvailable {
+				subTracks, ok := req.Data.([]sfu.SubscribeTrackRequest)
+				if ok {
+					client.SubscribeTracks(subTracks)
+				} else {
+					glog.Error("error on subscribe tracks wrong data format ", req.Data)
+				}
+
 			} else {
 				glog.Error("unknown message type", req)
 			}

@@ -24,10 +24,12 @@
         }
 
         main {
-            display: flex;
+            display: grid;
             justify-content: center;
-            align-items: stretch;
-            flex-grow: 1;
+            align-items: center;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            grid-template-rows: repeat(auto-fit, minmax(240px, 1fr));
+            grid-gap: 0.5rem;
         }
 
         aside {
@@ -37,8 +39,13 @@
             padding: 1em;
         }
         video {
-            aspect-ratio:4/3;
             background-color: black;
+            align-self: center;
+            justify-self: center;
+            width: auto;
+            min-width: 320px;
+            min-height: 0;
+            height: auto;
         }
     </style>
 </head>
@@ -55,12 +62,7 @@
           const peerConnection = new RTCPeerConnection({
                     iceServers: [
                         {
-                            urls: "turn:turn.inlive.app:3478",
-                            username: "inlive",
-                            credential: "inlivesdkturn"
-                        },
-                        {
-                            urls: "stun:turn.inlive.app:3478",
+                            urls: "stun:stun.l.google.com:19302"
                         },
                     ]
                 });
@@ -84,7 +86,7 @@
                     await peerConnection.addIceCandidate(msg.data);
                 } else if (msg.type == 'allow_renegotiation') {
                     // use this event to retry renegotation when doing renegotation was not allowed
-                } else if (msg.type == 'track_added') {
+                } else if (msg.type == 'tracks_added') {
                     const trackType = {}
                     const tracksAdded = msg.data
                     Object.keys(tracksAdded).forEach(uid => {
@@ -92,7 +94,24 @@
                         trackType[uid] = "media"
                     });
 
-                    ws.send(JSON.stringify({type:'track_added',data:trackType}));
+                    ws.send(JSON.stringify({type:'tracks_added',data:trackType}));
+                } else if (msg.type == 'tracks_available') {
+                    const subTracks = []
+                    const availableTracks = msg.data
+                    Object.keys(availaleTracks).forEach(uid => {
+                        // we suppose to check tracksAdded[key].id and compare it with current track id from  navigator.mediaDevices.getUserMedia() to know the source is media 
+                        // ClientID string `json:"client_id"`
+                        // StreamID string `json:"stream_id"`
+                        // TrackID  string `json:"track_id"`
+                        // RID      string `json:"rid"`
+                        const track = availableTracks[uid]
+                        subTracks.push({
+                            client_id: track.client_id,
+                            track_id: track.id,
+                        })
+                    });
+
+                    ws.send(JSON.stringify({type:'tracks_available',data:trackType}));
                 }
             } catch (error) {
                 console.log(error);
@@ -105,9 +124,15 @@
         async function start() {
             document.querySelector("button").disabled = true;
             var localVideo = document.getElementById("localVideo");
+            const video = {
+                '1080p': {width: 1920, height: 1080},
+                '720p': {width: 1280, height: 720},
+                '360p': {width: 640, height: 360},
+                };
             var constraints = {
                 audio: true,
-                video: true
+                video: video
+                // video: true
             };
             
             stream = await navigator.mediaDevices.getUserMedia(constraints)
@@ -138,8 +163,33 @@
                 };
             };
 
-            stream.getTracks().forEach(track => peerConnection.addTrack(track, stream));
+            // peerConnection.addTrack(stream.getAudioTracks()[0], stream);
+            // peerConnection.addTrack(stream.getVideoTracks()[0], stream);
 
+            peerConnection.addTransceiver(stream.getAudioTracks()[0], {
+                direction: 'sendrecv',
+                streams: [stream]
+            })
+
+            peerConnection.addTransceiver(stream.getVideoTracks()[0], {
+                direction: 'sendrecv',
+                streams: [stream],
+                sendEncodings: [
+                    // for firefox order matters... first high resolution, then scaled resolutions...
+                    {
+                        rid: 'high'
+                    },
+                    {
+                        rid: 'mid',
+                        scaleResolutionDownBy: 2.0
+                    },
+                    {
+                        rid: 'low',
+                        scaleResolutionDownBy: 4.0
+                    }
+                ]
+            })
+  
             const offer=await peerConnection.createOffer()
             await peerConnection.setLocalDescription(offer)
             ws.send(JSON.stringify({type:'offer',data:offer.sdp}));

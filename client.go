@@ -9,6 +9,8 @@ import (
 
 	"github.com/golang/glog"
 	"github.com/pion/interceptor"
+	"github.com/pion/interceptor/pkg/cc"
+	"github.com/pion/interceptor/pkg/gcc"
 	"github.com/pion/interceptor/pkg/intervalpli"
 	"github.com/pion/interceptor/pkg/stats"
 	"github.com/pion/rtcp"
@@ -31,6 +33,10 @@ const (
 	ClientQualityHigh = "high"
 	ClientQualityMid  = "mid"
 	ClientQualityLow  = "low"
+
+	lowBitrate  = 300_000
+	medBitrate  = 1_000_000
+	highBitrate = 2_500_000
 )
 
 var (
@@ -56,6 +62,7 @@ type Client struct {
 	Cancel                            context.CancelFunc
 	canAddCandidate                   bool
 	clientStats                       *ClientStats
+	estimatorChan                     chan cc.BandwidthEstimator
 	initialTracksCount                int
 	isInRenegotiation                 bool
 	isInRemoteNegotiation             bool
@@ -136,6 +143,21 @@ func NewClient(s *SFU, id string, peerConnectionConfig webrtc.Configuration, opt
 
 	i.Add(statsInterceptorFactory)
 
+	// add congestion control interceptor
+	congestionController, err := cc.NewInterceptor(func() (cc.BandwidthEstimator, error) {
+		return gcc.NewSendSideBWE(gcc.SendSideBWEInitialBitrate(lowBitrate))
+	})
+	if err != nil {
+		panic(err)
+	}
+
+	estimatorChan := make(chan cc.BandwidthEstimator, 1)
+	congestionController.OnNewPeerConnection(func(id string, estimator cc.BandwidthEstimator) {
+		estimatorChan <- estimator
+	})
+
+	i.Add(congestionController)
+
 	// Use the default set of Interceptors
 	if err := webrtc.RegisterDefaultInterceptors(m, i); err != nil {
 		panic(err)
@@ -171,9 +193,10 @@ func NewClient(s *SFU, id string, peerConnectionConfig webrtc.Configuration, opt
 	localCtx, cancel := context.WithCancel(s.context)
 
 	client := &Client{
-		ID:      id,
-		Context: localCtx,
-		Cancel:  cancel,
+		ID:            id,
+		estimatorChan: estimatorChan,
+		Context:       localCtx,
+		Cancel:        cancel,
 		clientStats: &ClientStats{
 			mutex:    sync.Mutex{},
 			Sender:   make(map[webrtc.SSRC]stats.Stats),
@@ -205,48 +228,39 @@ func NewClient(s *SFU, id string, peerConnectionConfig webrtc.Configuration, opt
 	// to connected peers
 	peerConnection.OnTrack(func(remoteTrack *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
 		var track ITrack
-
+		glog.Infof("client: ontrack %s %s %s", remoteTrack.Msid(), remoteTrack.Kind(), remoteTrack.RID())
 		if remoteTrack.RID() == "" {
 			// not simulcast
-			track = NewTrack(client.ID, remoteTrack)
+			track = NewTrack(client, remoteTrack)
+			if err := client.tracks.Add(track); err != nil {
+				glog.Error("client: error add track ", err)
+			}
 		} else {
 			// simulcast
-			track, err = client.tracks.Get(remoteTrack.Msid())
+			id := remoteTrack.Msid()
+			glog.Infof("client: simulcast track %s %s %s", id, remoteTrack.Kind(), remoteTrack.RID())
+			track, err = client.tracks.Get(id) // not found because the track is not added yet due to race condition
 			if err != nil {
+				glog.Infof("client: track not found %s", id)
 				// if track not found, add it
-				track = NewSimulcastTrack(client.ID, remoteTrack)
+				track = NewSimulcastTrack(client.Context, client, remoteTrack)
+				if err := client.tracks.Add(track); err != nil {
+					glog.Error("client: error add track ", err)
+				}
 			} else if simulcast, ok := track.(*SimulcastTrack); ok {
+				glog.Infof("client: track found %s", id)
 				simulcast.AddRemoteTrack(remoteTrack)
 			}
+
+			// only add tracks after complete
+			glog.Infof("client: total simulcast tracks %d", track.TotalTracks())
 		}
 
-		if err := client.tracks.Add(track); err != nil {
-			glog.Error("client: error add track ", err)
+		if !track.IsProcessed() {
+			client.onTrack(track)
+			track.SetAsProcessed()
 		}
 
-		track.OnTrackEnded(func(track *webrtc.TrackRemote) {
-			client.tracks.Remove(track.ID())
-			tracks := make([]ITrack, 0)
-			tracks = append(tracks, &Track{
-				clientID:    client.ID,
-				remoteTrack: track,
-			})
-
-			s.removeTracks(tracks)
-		})
-
-		track.OnTrackRead(func(remoteTrack *webrtc.TrackRemote) {
-			// this will update the bandwidth stats everytime we receive packet from the remote track
-			go client.updateReceiverStats(remoteTrack)
-		})
-
-		track.OnTrackWrite(func(track *webrtc.TrackLocalStaticRTP) {
-			// this can be use to update the bandwidth stats everytime we send packet to the remote peer
-			// TODO: figure out the best use case for this callback
-
-		})
-
-		client.onTrack(track)
 	})
 
 	peerConnection.OnICECandidate(func(candidate *webrtc.ICECandidate) {
@@ -839,10 +853,61 @@ func (c *Client) SubscribeAllTracks() {
 }
 
 func (c *Client) SetQuality(quality string) {
-	c.quality = quality
+	// TODO:
+	// - if quality changes we should send PLI request to the remote peer
+	// - check the target bitrate is it only for receiving or also for sending
+	if c.quality != quality {
+		c.quality = quality
+		for _, track := range c.publishedTracks.tracks {
+			if track.IsSimulcast() {
+				track.(*SimulcastTrack).SwitchQuality(quality) // send PLI on simulcast track
+			}
+
+		}
+	}
 }
 
 // this should check the current available bandwidth and return the most optimal quality
 func (c *Client) GetQuality() string {
+	if c.quality == "" {
+		return ClientQualityLow
+	}
+
 	return c.quality
+}
+
+func (c *Client) EnableEstimator() {
+	go func() {
+		ctxx, cancel := context.WithCancel(c.Context)
+		defer cancel()
+
+		select {
+		case <-ctxx.Done():
+			return
+		case estimator := <-c.estimatorChan:
+			ticker := time.NewTicker(3 * time.Second)
+			tickerCtx, cancelTicker := context.WithCancel(ctxx)
+			defer cancelTicker()
+			for {
+				select {
+				case <-tickerCtx.Done():
+					return
+				case <-ticker.C:
+					if estimator == nil {
+						continue
+					}
+
+					targetBitrate := estimator.GetTargetBitrate()
+
+					if targetBitrate > highBitrate {
+						c.SetQuality(ClientQualityHigh)
+					} else if targetBitrate > medBitrate {
+						c.SetQuality(ClientQualityMid)
+					} else {
+						c.SetQuality(ClientQualityLow)
+					}
+				}
+			}
+		}
+	}()
 }

@@ -44,7 +44,7 @@ func TestTracksManualSubscribe(t *testing.T) {
 			tracksReq := make([]SubscribeTrackRequest, 0)
 			for _, track := range availableTracks {
 				tracksReq = append(tracksReq, SubscribeTrackRequest{
-					ClientID: track.ClientID(),
+					ClientID: track.Client().ID,
 					TrackID:  track.ID(),
 				})
 			}
@@ -222,7 +222,7 @@ func addSimulcastPair(t *testing.T, ctx context.Context, room *Room, peerName st
 		tracksReq := make([]SubscribeTrackRequest, 0)
 		for _, track := range availableTracks {
 			tracksReq = append(tracksReq, SubscribeTrackRequest{
-				ClientID: track.ClientID(),
+				ClientID: track.Client().ID,
 				TrackID:  track.ID(),
 			})
 		}
