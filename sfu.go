@@ -8,8 +8,64 @@ import (
 	"github.com/pion/webrtc/v3"
 )
 
+type SFUClients struct {
+	clients map[string]*Client
+	mutex   sync.Mutex
+}
+
+func (s *SFUClients) GetClients() map[string]*Client {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	return s.clients
+}
+
+func (s *SFUClients) GetClient(id string) (*Client, error) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	if client, ok := s.clients[id]; ok {
+		return client, nil
+	}
+
+	return nil, ErrClientNotFound
+}
+
+func (s *SFUClients) Length() int {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	return len(s.clients)
+}
+
+func (s *SFUClients) Add(client *Client) error {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	if _, ok := s.clients[client.ID]; ok {
+		return ErrClientExists
+	}
+
+	s.clients[client.ID] = client
+
+	return nil
+}
+
+func (s *SFUClients) Remove(client *Client) error {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	if _, ok := s.clients[client.ID]; !ok {
+		return ErrClientNotFound
+	}
+
+	delete(s.clients, client.ID)
+
+	return nil
+}
+
 type SFU struct {
-	clients                  map[string]*Client
+	clients                  *SFUClients
 	context                  context.Context
 	cancel                   context.CancelFunc
 	callbacksOnClientRemoved []func(*Client)
@@ -35,7 +91,7 @@ func New(ctx context.Context, iceServers []webrtc.ICEServer, mux *UDPMux) *SFU {
 	localCtx, cancel := context.WithCancel(ctx)
 
 	sfu := &SFU{
-		clients:             make(map[string]*Client),
+		clients:             &SFUClients{clients: make(map[string]*Client), mutex: sync.Mutex{}},
 		Counter:             0,
 		context:             localCtx,
 		cancel:              cancel,
@@ -70,11 +126,10 @@ func (s *SFU) addClient(client *Client) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	if _, ok := s.clients[client.ID]; ok {
-		panic("client already exists")
+	if err := s.clients.Add(client); err != nil {
+		glog.Error("sfu: failed to add client ", err)
+		return
 	}
-
-	s.clients[client.ID] = client
 
 	s.onClientAdded(client)
 }
@@ -112,7 +167,7 @@ func (s *SFU) NewClient(id string, opts ClientOptions) *Client {
 				if client.OnTracksAvailable != nil {
 					availableTracks := make([]ITrack, 0)
 
-					for _, c := range s.clients {
+					for _, c := range s.clients.GetClients() {
 						for _, track := range c.tracks.GetTracks() {
 							if track.Client().ID != client.ID {
 								availableTracks = append(availableTracks, track)
@@ -194,12 +249,12 @@ func (s *SFU) NewClient(id string, opts ClientOptions) *Client {
 	return client
 }
 
-func (s *SFU) removeTracks(tracks []ITrack) {
+func (s *SFU) removeTracks(trackIDs []string) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	for _, client := range s.clients {
-		client.removePublishedTrack(tracks)
+	for _, client := range s.clients.GetClients() {
+		client.removePublishedTrack(trackIDs)
 	}
 }
 
@@ -210,7 +265,7 @@ func (s *SFU) SyncTrack(client *Client) bool {
 
 	needRenegotiation := false
 
-	for _, clientPeer := range s.clients {
+	for _, clientPeer := range s.clients.GetClients() {
 		for _, track := range clientPeer.tracks.GetTracks() {
 			if client.ID != clientPeer.ID {
 				if _, ok := currentTracks[track.ID()]; !ok {
@@ -231,7 +286,7 @@ func (s *SFU) SyncTrack(client *Client) bool {
 
 func (s *SFU) GetTracks() []ITrack {
 	tracks := make([]ITrack, 0)
-	for _, client := range s.clients {
+	for _, client := range s.clients.GetClients() {
 		for _, track := range client.tracks.GetTracks() {
 			tracks = append(tracks, track)
 		}
@@ -241,7 +296,7 @@ func (s *SFU) GetTracks() []ITrack {
 }
 
 func (s *SFU) Stop() {
-	for _, client := range s.clients {
+	for _, client := range s.clients.GetClients() {
 		client.GetPeerConnection().Close()
 	}
 
@@ -258,7 +313,7 @@ func (s *SFU) OnStopped(callback func()) {
 }
 
 func (s *SFU) requestKeyFrameFromClient(clientID string) {
-	if client, ok := s.clients[clientID]; ok {
+	if client, err := s.clients.GetClient(clientID); err == nil {
 		client.requestKeyFrame()
 	}
 }
@@ -288,7 +343,7 @@ func (s *SFU) onClientRemoved(client *Client) {
 }
 
 func (s *SFU) onTracksAvailable(tracks []ITrack) {
-	for _, client := range s.clients {
+	for _, client := range s.clients.GetClients() {
 		if !client.IsSubscribeAllTracks && client.OnTracksAvailable != nil {
 			// filter out tracks from the same client
 			filteredTracks := make([]ITrack, 0)
@@ -314,7 +369,7 @@ func (s *SFU) broadcastTracksToAutoSubscribeClients(tracks []ITrack) {
 		})
 	}
 
-	for _, client := range s.clients {
+	for _, client := range s.clients.GetClients() {
 		if client.IsSubscribeAllTracks {
 			if err := client.SubscribeTracks(trackReq); err != nil {
 				glog.Error("client: failed to subscribe tracks ", err)
@@ -324,25 +379,18 @@ func (s *SFU) broadcastTracksToAutoSubscribeClients(tracks []ITrack) {
 }
 
 func (s *SFU) GetClients() map[string]*Client {
-	return s.clients
+	return s.clients.GetClients()
 }
 
 func (s *SFU) GetClient(id string) (*Client, error) {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
-
-	if client, ok := s.clients[id]; ok {
-		return client, nil
-	}
-
-	return nil, ErrClientNotFound
+	return s.clients.GetClient(id)
 }
 
-func (s *SFU) removeClient(client *Client) {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
+func (s *SFU) removeClient(client *Client) error {
+	if err := s.clients.Remove(client); err != nil {
+		glog.Error("sfu: failed to remove client ", err)
+		return err
+	}
 
-	delete(s.clients, client.ID)
-
-	s.onClientRemoved(client)
+	return nil
 }

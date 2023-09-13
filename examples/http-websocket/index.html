@@ -7,7 +7,9 @@
             margin: 0;
             padding: 0;
             font-family: sans-serif;
-            display: flex;
+            display: grid;
+            grid-template-rows: 1fr 10fr 1fr;
+            grid-template-columns: 8fr 2fr;
             align-items: stretch;
             flex-direction: column;
             height: 100vh;
@@ -21,31 +23,90 @@
 
         header{
            text-align: center;
+           height: 20%;
+           grid-column: 1/span 2;
+        }
+
+        aside{
+            grid-row:2/2;
+            grid-column: 2/2;
+        }
+
+        footer {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100%;
+            grid-column: 1/span 2;
+            gap: 1rem;
         }
 
         main {
+            grid-row: 2/2;
+            grid-column: 1/1;
+            align-items: center;
+            justify-items: center;
             display: grid;
             justify-content: center;
             align-items: center;
             grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
             grid-template-rows: repeat(auto-fit, minmax(240px, 1fr));
             grid-gap: 0.5rem;
+            height:100%;
+            width: 100%;
+        }
+
+        main .container{
+            position: relative;
+            width: 100%;
+            height: auto;
+        }
+
+        .container .stats {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            color: white;
+            background-color: rgba(0,0,0,0.2);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            gap: 1rem;
         }
 
         aside {
             display: flex;
+            flex-direction: column;
             justify-content: center;
             align-items: center;
             padding: 1em;
+            background-color:#f0f0f0;
+            font-size: 0.8rem;
         }
-        video {
-            background-color: black;
+
+        main>div {
             align-self: center;
             justify-self: center;
-            width: auto;
-            min-width: 320px;
+            width: 100%;
             min-height: 0;
-            height: auto;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;    
+            overflow: hidden;
+        }
+
+        video {
+            background-color: black;
+            min-width: 320px;
+            width: auto;
+            height: 100%;
+            min-height: 240px;
+            object-fit: contain;
         }
     </style>
 </head>
@@ -55,9 +116,23 @@
         <p>Open the console to see the output.</p>
     </header>
     <main>
-        <video id="localVideo"></video>
+        <div id="local">
+            <video id="localVideo"></video>
+        </div>
     </main>
-    <aside><button onclick="start()" disabled>Start</button></aside>
+    <aside>
+        <h3>Outbound Video</h3>
+        <div id="stats-local"></div>
+    </aside>
+    <footer>
+        <button onclick="start()">Start</button>
+        <button onclick="toggleStats()">Toggle Stats</button>
+        <span><label>Quality</label> <select id="selectQuality" onchange="switchQuality()">
+            <option selected value="high">high</option>
+            <option value="mid">mid</option>
+            <option value="low">low</option>
+        </select></span>
+    </footer>
     <script>
           const peerConnection = new RTCPeerConnection({
                     iceServers: [
@@ -66,69 +141,82 @@
                         },
                     ]
                 });
-        const ws = new WebSocket("ws://localhost:8000/ws");
-        ws.onopen = function() {
-            console.log("websocket open");
-            document.querySelector("button").disabled = false;
-        };
-        ws.onmessage = async function(e) {
 
-            const msg = JSON.parse(e.data);
-            try {
-                if (msg.type == 'offer') {
-                    await peerConnection.setRemoteDescription(msg.data);
-                    var answer = await peerConnection.createAnswer();
-                    await peerConnection.setLocalDescription(answer);
-                    ws.send(JSON.stringify({type:'answer',data:answer.sdp}));
-                } else if (msg.type == 'answer') {
-                    await peerConnection.setRemoteDescription(msg.data);
-                } else if (msg.type == 'candidate') {
-                    await peerConnection.addIceCandidate(msg.data);
-                } else if (msg.type == 'allow_renegotiation') {
-                    // use this event to retry renegotation when doing renegotation was not allowed
-                } else if (msg.type == 'tracks_added') {
-                    const trackType = {}
-                    const tracksAdded = msg.data
-                    Object.keys(tracksAdded).forEach(uid => {
-                        // we suppose to check tracksAdded[key].id and compare it with current track id from  navigator.mediaDevices.getUserMedia() to know the source is media 
-                        trackType[uid] = "media"
-                    });
+        let ws = null;
 
-                    ws.send(JSON.stringify({type:'tracks_added',data:trackType}));
-                } else if (msg.type == 'tracks_available') {
-                    const subTracks = []
-                    const availableTracks = msg.data
-                    Object.keys(availaleTracks).forEach(uid => {
-                        // we suppose to check tracksAdded[key].id and compare it with current track id from  navigator.mediaDevices.getUserMedia() to know the source is media 
-                        // ClientID string `json:"client_id"`
-                        // StreamID string `json:"stream_id"`
-                        // TrackID  string `json:"track_id"`
-                        // RID      string `json:"rid"`
-                        const track = availableTracks[uid]
-                        subTracks.push({
-                            client_id: track.client_id,
-                            track_id: track.id,
-                        })
-                    });
+        let videoTranscv = null
 
-                    ws.send(JSON.stringify({type:'tracks_available',data:trackType}));
+        const startWs = ()=>{
+            ws = new WebSocket(`ws://${window.location.host}/ws`);
+            ws.onopen = function() {
+                console.log("websocket open");
+                document.querySelector("button").disabled = true;
+            };
+            ws.onmessage = async function(e) {
+
+                const msg = JSON.parse(e.data);
+                try {
+                    if (msg.type == 'offer') {
+                        await peerConnection.setRemoteDescription(msg.data);
+                        var answer = await peerConnection.createAnswer();
+                        await peerConnection.setLocalDescription(answer);
+                        ws.send(JSON.stringify({type:'answer',data:answer.sdp}));
+                    } else if (msg.type == 'answer') {
+                        await peerConnection.setRemoteDescription(msg.data);
+                    } else if (msg.type == 'candidate') {
+                        await peerConnection.addIceCandidate(msg.data);
+                    } else if (msg.type == 'allow_renegotiation') {
+                        // use this event to retry renegotation when doing renegotation was not allowed
+                    } else if (msg.type == 'tracks_added') {
+                        const trackType = {}
+                        const tracksAdded = msg.data
+                        Object.keys(tracksAdded).forEach(uid => {
+                            // we suppose to check tracksAdded[key].id and compare it with current track id from  navigator.mediaDevices.getUserMedia() to know the source is media 
+                            trackType[uid] = "media"
+                        });
+
+                        ws.send(JSON.stringify({type:'tracks_added',data:trackType}));
+                    } else if (msg.type == 'tracks_available') {
+                        const subTracks = []
+                        const availableTracks = msg.data
+                        Object.keys(availaleTracks).forEach(uid => {
+                            // we suppose to check tracksAdded[key].id and compare it with current track id from  navigator.mediaDevices.getUserMedia() to know the source is media 
+                            // ClientID string `json:"client_id"`
+                            // StreamID string `json:"stream_id"`
+                            // TrackID  string `json:"track_id"`
+                            // RID      string `json:"rid"`
+                            const track = availableTracks[uid]
+                            subTracks.push({
+                                client_id: track.client_id,
+                                track_id: track.id,
+                            })
+                        });
+
+                        ws.send(JSON.stringify({type:'tracks_available',data:trackType}));
+                    }
+                } catch (error) {
+                    console.log(error);
                 }
-            } catch (error) {
-                console.log(error);
-            }
-        };
-        ws.onclose = function() {
-            console.log("websocket close");
+            };
+            ws.onclose = function() {
+                console.log("websocket close");
+            };
         };
 
         async function start() {
+            startWs()
             document.querySelector("button").disabled = true;
             var localVideo = document.getElementById("localVideo");
+           
             const video = {
-                '1080p': {width: 1920, height: 1080},
-                '720p': {width: 1280, height: 720},
-                '360p': {width: 640, height: 360},
-                };
+                width: {
+                    ideal: 1280
+                },
+                height: {
+                    ideal: 720
+                },
+            };
+
             var constraints = {
                 audio: true,
                 video: video
@@ -144,15 +232,34 @@
                     return
                 }
 
-                const streamid = e.streams[0].id;
+                const trackid = e.track.id;
                 console.log("ontrack");
-                let remoteVideo = document.querySelector("video-"+streamid);
+                
+                let container = document.getElementById("container-"+trackid);
+                if (!container) {
+                    container = document.createElement("div");
+                    container.className = "container";
+                    container.id = "container-"+trackid;
+                    document.querySelector('main').appendChild(container);
+                }
+
+                let remoteVideo = document.getElementById("video-"+trackid);
                 if (!remoteVideo) {
                     remoteVideo = document.createElement("video");
-                    remoteVideo.id = "video-"+streamid;
+                    remoteVideo.id = "video-"+trackid;
                     remoteVideo.autoplay = true;
-                    document.querySelector('main').appendChild(remoteVideo);
+                    container.appendChild(remoteVideo);
                 }
+
+                let stats = document.getElementById("stats-"+trackid)
+                if (!stats){
+                    stats = document.createElement("div");
+                    stats.className = "stats";
+                    stats.id = "stats-"+trackid
+                    container.append(stats)
+                }
+
+                
 
                 remoteVideo.srcObject = e.streams[0];
 
@@ -160,37 +267,48 @@
                     console.log("onremovetrack");
                     remoteVideo.srcObject = null;
                     remoteVideo.remove();
+                    container.remove();
                 };
             };
 
             // peerConnection.addTrack(stream.getAudioTracks()[0], stream);
             // peerConnection.addTrack(stream.getVideoTracks()[0], stream);
 
+ 
             peerConnection.addTransceiver(stream.getAudioTracks()[0], {
-                direction: 'sendrecv',
-                streams: [stream]
+                direction: 'sendonly',
+                streams: [stream],
+                sendEncodings: [{priority: 'high'}],
             })
 
-            peerConnection.addTransceiver(stream.getVideoTracks()[0], {
-                direction: 'sendrecv',
+            transceiver = peerConnection.addTransceiver(stream.getVideoTracks()[0], {
+                direction: 'sendonly',
                 streams: [stream],
                 sendEncodings: [
                     // for firefox order matters... first high resolution, then scaled resolutions...
                     {
-                        rid: 'high'
+                        rid: 'high',
+                        maxBitrate: 700*1000,
+                        maxFramerate: 30,
                     },
                     {
                         rid: 'mid',
-                        scaleResolutionDownBy: 2.0
+                        scaleResolutionDownBy: 2.0,
+                        maxFramerate: 30,
+                        maxBitrate: 300*1000,
                     },
                     {
                         rid: 'low',
-                        scaleResolutionDownBy: 4.0
+                        scaleResolutionDownBy: 4.0,
+                        maxBitrate: 100*1000,
+                        maxFramerate:15,
                     }
                 ]
             })
+            
   
             const offer=await peerConnection.createOffer()
+          
             await peerConnection.setLocalDescription(offer)
             ws.send(JSON.stringify({type:'offer',data:offer.sdp}));
 
@@ -199,6 +317,240 @@
                     ws.send(JSON.stringify({type:'candidate',data:e.candidate.candidate}));
                 }
             };
+            
+            peerConnection.onconnectionstatechange = function(e) {
+                console.log("onconnectionstatechange", peerConnection.connectionState);
+                if (peerConnection.connectionState == "connected") {
+                    monitorStats()
+                    monitorBw()
+                }
+            };
+        }
+
+       const sleep = (delay) => new Promise((resolve) => setTimeout(resolve, delay))
+
+       let prevBytesReceived = 0
+
+        let prevHighBytesSent = 0
+        let prevMidBytesSent = 0
+        let prevLowBytesSent = 0
+
+        const bwController = {
+            low:0,
+            mid:0,
+            high:0,
+            available:0,
+        }
+
+        const monitorBw = async()=>{
+            const maxBw = 2500*1000
+            while (peerConnection.connectionState =="connected") {
+                const totalBw = bwController.low + bwController.mid + bwController.high
+
+                if (bwController.available == 0 || bwController.low==0 || bwController.mid==0 || bwController.high==0){
+                    await sleep(5000)
+                    continue
+                }
+                
+                const ratio = bwController.available/totalBw
+
+
+                peerConnection.getSenders().forEach(sender => {
+                    if (sender.track!= null && sender.track.kind == "video") {
+                        const params = sender.getParameters()
+
+                        if (params.encodings.length == 1) {
+                            return
+                        }
+                       
+
+                        params.encodings.forEach((encoding,i) => {
+                            
+
+                        const maxBitrate = encoding.maxBitrate*ratio
+                        
+                     
+                        params.encodings[i].maxBitrate = Math.floor(maxBitrate)
+
+                        updatedParams = true
+                    });
+
+                    const nextTotalBw = params.encodings.reduce((acc,encoding) => {
+                        return acc + encoding.maxBitrate
+                    },0)
+
+                    if(nextTotalBw<maxBw){
+                        console.log("ratio, nextTotalBw : totalBw = ",ratio, nextTotalBw, totalBw)
+                        sender.setParameters(params)
+                    }
+                       
+                    }
+                })
+
+                await sleep(5000)
+            }
+        }
+
+       const monitorStats =  async() => {
+            while (peerConnection.connectionState =="connected") {
+                const stats = await peerConnection.getStats()
+                stats.forEach(report => {
+                    if (report.type === 'inbound-rtp' && report.kind === 'video') {
+                        const statsEl = document.getElementById("stats-"+report.trackIdentifier)
+                        if (!statsEl){
+                            return
+                        }
+
+                        if (typeof bwController[report.trackIdentifier] =="undefined"){
+                            bwController[report.trackIdentifier] = {
+                                prevBytesReceived:0,
+                            }
+                        }
+
+                        if (bwController[report.trackIdentifier].prevBytesReceived == 0 ||report.bytesReceived == 0) {
+                            bwController[report.trackIdentifier].prevBytesReceived = report.bytesReceived
+                            return
+                        }
+
+                        const deltaBytes = report.bytesReceived - bwController[report.trackIdentifier].prevBytesReceived
+                        bwController[report.trackIdentifier].prevBytesReceived = report.bytesReceived
+
+                        const statsText = `
+                            <p>FrameRate: ${report.framesPerSecond}</p>
+                            <p>Bitrate: ${deltaBytes*8/1000} kbps</p>
+                            <p>Resolution: ${report.frameWidth}x${report.frameHeight}</p>
+                        `
+                        statsEl.innerHTML = statsText
+                    }
+
+                    const statsEl = document.getElementById("stats-local")
+
+                    if (report.type === 'candidate-pair' && typeof report.availableOutgoingBitrate!=="undefined"){
+                        let bwStatsEl = document.getElementById("stats-local-bandwidth")
+                            if (!bwStatsEl){
+                                bwStatsEl = document.createElement("div");
+                                bwStatsEl.id = "stats-local-bandwidth"
+                                statsEl.append(bwStatsEl)
+                            }
+
+                            bwStatsEl.innerHTML = `
+                            <p>available bandwidth: ${(report.availableOutgoingBitrate/1000)} kbps</p>
+                            <p>current bitrate: ${(bwController.low+bwController.mid+bwController.high)/1000} kbps</p>
+                            `;
+
+                            bwController.available = report.availableOutgoingBitrate
+                    }
+
+                    if (report.type === 'outbound-rtp' && report.kind === 'video'){
+                        
+
+                        if (report.rid === 'high' || typeof report.rid === 'undefined'){
+                            if (prevHighBytesSent===0 || report.bytesSent == 0){
+                                prevHighBytesSent = report.bytesSent
+                                return
+                            }
+
+                            let highStatsEl = document.getElementById("stats-local-high")
+                            if (!highStatsEl){
+                                highStatsEl = document.createElement("div");
+                                highStatsEl.id = "stats-local-high"
+                                statsEl.append(highStatsEl)
+                            }
+
+                            const deltaBytes = report.bytesSent - prevHighBytesSent
+                            prevHighBytesSent = report.bytesSent
+                            const bitrate = deltaBytes*8
+                            bwController.high = bitrate
+
+                            highStatsEl.innerHTML = `
+                            <h3>High</h3>
+                            <p>FrameRate: ${report.framesPerSecond}</p>
+                            <p>Bitrate: ${bitrate/1000} kbps</p>
+                            <p>Resolution: ${report.frameWidth}x${report.frameHeight}</p>
+                            <p>Quality Limitation Reason: ${report.qualityLimitationReason}</p>
+                        `
+                        }
+
+                        
+
+                        if (report.rid === 'mid'){
+                            if (prevMidBytesSent===0 || report.bytesSent == 0){
+                                prevMidBytesSent = report.bytesSent
+                                return
+                            }
+                            
+                            let midStatsEl = document.getElementById("stats-local-mid")
+                            if (!midStatsEl){
+                                midStatsEl = document.createElement("div");
+                                midStatsEl.id = "stats-local-mid"
+                                statsEl.append(midStatsEl)
+                            }
+
+                            const deltaBytes = report.bytesSent - prevMidBytesSent
+                            prevMidBytesSent = report.bytesSent
+                            const bitrate = deltaBytes*8
+                            bwController.mid = bitrate
+
+                            midStatsEl.innerHTML = `
+                            <h3>Mid</h3>
+                            <p>FrameRate: ${report.framesPerSecond}</p>
+                            <p>Bitrate: ${bitrate/1000} kbps</p>
+                            <p>Resolution: ${report.frameWidth}x${report.frameHeight}</p>
+                            <p>Quality Limitation Reason: ${report.qualityLimitationReason}</p>
+                        `
+                        }
+
+                        if (report.rid === 'low'){
+                            if (prevLowBytesSent===0 || report.bytesSent == 0){
+                                prevLowBytesSent = report.bytesSent
+                                return
+                            }
+
+                            let lowStatsEl = document.getElementById("stats-local-low")
+                            if (!lowStatsEl){
+                                lowStatsEl = document.createElement("div");
+                                lowStatsEl.id = "stats-local-low"
+                                statsEl.append(lowStatsEl)
+                            }
+                        
+
+                            const deltaBytes = report.bytesSent - prevLowBytesSent
+                            prevLowBytesSent = report.bytesSent
+                            const bitrate = deltaBytes*8
+                            bwController.low = bitrate
+
+                            lowStatsEl.innerHTML = `
+                            <h3>Low</h3>
+                            <p>FrameRate: ${report.framesPerSecond}</p>
+                            <p>Bitrate: ${bitrate/1000} kbps</p>
+                            <p>Resolution: ${report.frameWidth}x${report.frameHeight}</p>
+                            <p>Quality Limitation Reason: ${report.qualityLimitationReason}</p>
+                        `
+                        }
+                        
+                       
+                    }
+                })
+
+                await sleep(1000)
+            }
+           
+        };
+
+        const toggleStats = () => {
+            const statsEls = document.querySelectorAll(".stats")
+            statsEls.forEach(el => {
+                if (el.style.display === "none") {
+                    el.style.display = "flex"
+                } else {
+                    el.style.display = "none"
+                }
+            })
+        }
+
+        const switchQuality= () =>{
+            const quality = document.getElementById("selectQuality").value
+            ws.send(JSON.stringify({type:'switch_quality',data:quality}));
         }
         </script>
 </body>

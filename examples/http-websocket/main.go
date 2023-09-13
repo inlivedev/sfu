@@ -34,6 +34,7 @@ const (
 	TypeAllowRenegotiation = "allow_renegotiation"
 	TypeTrackAdded         = "tracks_added"
 	TypeTrackAvailable     = "tracks_available"
+	TypeSwitchQuality      = "switch_quality"
 )
 
 func main() {
@@ -107,7 +108,9 @@ func clientHandler(conn *websocket.Conn, messageChan chan Request, r *sfu.Room) 
 
 	// add a new client to room
 	// you can also get the client by using r.GetClient(clientID)
-	client, err := r.AddClient(clientID, sfu.DefaultClientOptions())
+	opts := sfu.DefaultClientOptions()
+	opts.EnableCongestionController = true
+	client, err := r.AddClient(clientID, opts)
 	if err != nil {
 		log.Panic(err)
 		return
@@ -284,6 +287,20 @@ func clientHandler(conn *websocket.Conn, messageChan chan Request, r *sfu.Room) 
 					client.SubscribeTracks(subTracks)
 				} else {
 					glog.Error("error on subscribe tracks wrong data format ", req.Data)
+				}
+
+			} else if req.Type == TypeSwitchQuality {
+				quality := req.Data.(string)
+				switch quality {
+				case "low":
+					log.Println("switch to low quality")
+					client.SetQuality(sfu.QualityLow)
+				case "mid":
+					log.Println("switch to mid quality")
+					client.SetQuality(sfu.QualityMid)
+				case "high":
+					log.Println("switch to high quality")
+					client.SetQuality(sfu.QualityHigh)
 				}
 
 			} else {
