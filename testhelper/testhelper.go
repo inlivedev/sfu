@@ -318,7 +318,7 @@ func GetStaticAudioTrack(ctx context.Context, trackID, streamID string, loop boo
 
 func SetPeerConnectionTracks(ctx context.Context, peerConnection *webrtc.PeerConnection, tracks []*webrtc.TrackLocalStaticSample) {
 	for _, track := range tracks {
-		rtpSender, trackErr := peerConnection.AddTrack(track)
+		rtpTranscv, trackErr := peerConnection.AddTransceiverFromTrack(track)
 		if trackErr != nil {
 			panic(trackErr)
 		}
@@ -335,7 +335,7 @@ func SetPeerConnectionTracks(ctx context.Context, peerConnection *webrtc.PeerCon
 				case <-ctxx.Done():
 					return
 				default:
-					if _, _, rtcpErr := rtpSender.Read(rtcpBuf); rtcpErr != nil {
+					if _, _, rtcpErr := rtpTranscv.Sender().Read(rtcpBuf); rtcpErr != nil {
 						return
 					}
 				}
