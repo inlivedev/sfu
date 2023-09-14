@@ -240,7 +240,7 @@ func (t *ClientLocalTrack) GetAllowedQuality(kind webrtc.RTPCodecType) QualityLe
 	var estimatedQuality QualityLevel
 
 	if kind == webrtc.RTPCodecTypeAudio {
-		estimatedQuality = QualityHigh
+		return QualityHigh
 	}
 
 	if maxAllowedVideoBitrate < lowBitrate {

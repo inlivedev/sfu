@@ -191,7 +191,7 @@ Loop:
 					// add more tracks to each clients
 					for _, pair := range pairs {
 						newTrack, _ := testhelper.GetStaticVideoTrack(timeout, testhelper.GenerateSecureToken(), testhelper.GenerateSecureToken(), true, "")
-						_, err := pair.pc.AddTrack(newTrack)
+						_, err := pair.pc.AddTransceiverFromTrack(newTrack)
 						require.NoError(t, err, "error adding track: %v", err)
 						negotiate(t, pair.pc, pair.client)
 					}

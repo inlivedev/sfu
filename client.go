@@ -645,11 +645,11 @@ func (c *Client) afterClosed() {
 		}
 	}
 
-	go c.sfu.removeTracks(removeTrackIDs)
+	c.sfu.removeTracks(removeTrackIDs)
 
-	go c.Cancel()
+	c.Cancel()
 
-	go c.sfu.onAfterClientStopped(c)
+	c.sfu.onAfterClientStopped(c)
 }
 
 func (c *Client) Stop() error {
@@ -664,7 +664,7 @@ func (c *Client) Stop() error {
 		return err
 	}
 
-	go c.afterClosed()
+	c.afterClosed()
 
 	return nil
 }

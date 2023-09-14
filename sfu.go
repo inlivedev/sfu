@@ -392,5 +392,7 @@ func (s *SFU) removeClient(client *Client) error {
 		return err
 	}
 
+	s.onClientRemoved(client)
+
 	return nil
 }
