@@ -84,9 +84,6 @@ func TestRoomJoinLeftEvent(t *testing.T) {
 		joinChan <- true
 		glog.Info("client join", client.ID)
 		clients[client.ID] = client
-		err := client.Stop()
-		require.NoError(t, err, "error stopping client: %v", err)
-		glog.Info("client stop", client.ID)
 	})
 
 	_, client1, _, _ := createPeerPair(t, ctx, testRoom, "peer1", false, false)
