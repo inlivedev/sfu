@@ -40,13 +40,13 @@ func TestLeaveRoom(t *testing.T) {
 
 	for i := 0; i < peerCount; i++ {
 		go func() {
-			pc, client, _, _ := createPeerPair(t, ctx, testRoom, fmt.Sprintf("peer-%d", i), true)
+			pc, client, _, _ := createPeerPair(t, ctx, testRoom, fmt.Sprintf("peer-%d", i), true, false)
 
 			clients = append(clients, client)
 
 			client.SubscribeAllTracks()
 
-			client.OnTracksAdded = func(addedTracks []*Track) {
+			client.OnTracksAdded = func(addedTracks []ITrack) {
 				setTracks := make(map[string]TrackType, 0)
 				for _, track := range addedTracks {
 					setTracks[track.ID()] = TrackTypeMedia
@@ -153,11 +153,11 @@ func TestRenegotiation(t *testing.T) {
 	pairs := make([]Pair, 0)
 
 	for i := 0; i < peerCount; i++ {
-		pc, client, _, _ := createPeerPair(t, ctx, testRoom, fmt.Sprintf("peer-%d", i), true)
+		pc, client, _, _ := createPeerPair(t, ctx, testRoom, fmt.Sprintf("peer-%d", i), true, false)
 		client.SubscribeAllTracks()
 		pairs = append(pairs, Pair{pc, client})
 
-		client.OnTracksAdded = func(addedTracks []*Track) {
+		client.OnTracksAdded = func(addedTracks []ITrack) {
 			setTracks := make(map[string]TrackType, 0)
 			for _, track := range addedTracks {
 				setTracks[track.ID()] = TrackTypeMedia
@@ -190,8 +190,8 @@ Loop:
 				go func() {
 					// add more tracks to each clients
 					for _, pair := range pairs {
-						newTrack, _ := testhelper.GetStaticVideoTrack(timeout, testhelper.GenerateSecureToken(), testhelper.GenerateSecureToken(), true)
-						_, err := pair.pc.AddTrack(newTrack)
+						newTrack, _ := testhelper.GetStaticVideoTrack(timeout, testhelper.GenerateSecureToken(), testhelper.GenerateSecureToken(), true, "")
+						_, err := pair.pc.AddTransceiverFromTrack(newTrack)
 						require.NoError(t, err, "error adding track: %v", err)
 						negotiate(t, pair.pc, pair.client)
 					}

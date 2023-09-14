@@ -113,7 +113,8 @@ func TestExtension(t *testing.T) {
 	joinChan := make(chan bool)
 	peerCount := 0
 
-	tracks, mediaEngine, _ := testhelper.GetStaticTracks(ctx, "test", true)
+	tracks, _ := testhelper.GetStaticTracks(ctx, "test", true)
+	mediaEngine := testhelper.GetMediaEngine()
 
 	testRoom.OnClientLeft(func(client *Client) {
 		leftChan <- true

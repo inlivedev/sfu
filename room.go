@@ -140,12 +140,12 @@ func (r *Room) AddClient(id string, opts ClientOptions) (*Client, error) {
 		}
 	}
 
-	_, ok := r.sfu.clients[id]
-	if ok {
+	client, _ := r.sfu.GetClient(id)
+	if client != nil {
 		return nil, ErrClientExists
 	}
 
-	client := r.sfu.NewClient(id, opts)
+	client = r.sfu.NewClient(id, opts)
 
 	client.OnJoined(func() {
 		r.onClientJoined(client)

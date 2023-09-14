@@ -23,15 +23,20 @@ type PeerClient struct {
 	InRenegotiation bool
 }
 
-type RemoteTrack struct {
+type RemoteTrackTest struct {
 	Track  *webrtc.TrackRemote
 	Client *PeerClient
 }
 
-func createPeerPair(t *testing.T, ctx context.Context, testRoom *Room, peerName string, loop bool) (*webrtc.PeerConnection, *Client, stats.Getter, chan bool) {
+func createPeerPair(t *testing.T, ctx context.Context, testRoom *Room, peerName string, loop, simulcast bool) (*webrtc.PeerConnection, *Client, stats.Getter, chan bool) {
 	t.Helper()
 	clientContext, cancelClient := context.WithCancel(ctx)
-	var client *Client
+	var (
+		client      *Client
+		mediaEngine *webrtc.MediaEngine = testhelper.GetMediaEngine()
+		done        chan bool
+		tracks      []*webrtc.TrackLocalStaticSample
+	)
 
 	iceServers := []webrtc.ICEServer{
 		{
@@ -41,7 +46,6 @@ func createPeerPair(t *testing.T, ctx context.Context, testRoom *Room, peerName 
 			CredentialType: webrtc.ICECredentialTypePassword,
 		},
 	}
-	tracks, mediaEngine, done := testhelper.GetStaticTracks(clientContext, peerName, loop)
 
 	i := &interceptor.Registry{}
 
@@ -63,6 +67,10 @@ func createPeerPair(t *testing.T, ctx context.Context, testRoom *Room, peerName 
 		panic(err)
 	}
 
+	if simulcast {
+		RegisterSimulcastHeaderExtensions(mediaEngine, webrtc.RTPCodecTypeVideo)
+	}
+
 	webrtcAPI := webrtc.NewAPI(webrtc.WithMediaEngine(mediaEngine), webrtc.WithInterceptorRegistry(i))
 
 	pc, err := webrtcAPI.NewPeerConnection(webrtc.Configuration{
@@ -71,7 +79,13 @@ func createPeerPair(t *testing.T, ctx context.Context, testRoom *Room, peerName 
 
 	require.NoErrorf(t, err, "error creating peer connection: %v", err)
 
-	testhelper.SetPeerConnectionTracks(ctx, pc, tracks)
+	if simulcast {
+		err = testhelper.AddSimulcastVideoTracks(t, ctx, pc, testhelper.GenerateSecureToken(), peerName)
+		require.NoErrorf(t, err, "error adding video tracks: %v", err)
+	} else {
+		tracks, done = testhelper.GetStaticTracks(clientContext, peerName, loop)
+		testhelper.SetPeerConnectionTracks(ctx, pc, tracks)
+	}
 
 	allDone := make(chan bool)
 

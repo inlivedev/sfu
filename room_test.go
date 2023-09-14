@@ -86,7 +86,7 @@ func TestRoomJoinLeftEvent(t *testing.T) {
 		clients[client.ID] = client
 	})
 
-	_, client1, _, _ := createPeerPair(t, ctx, testRoom, "peer1", false)
+	_, client1, _, _ := createPeerPair(t, ctx, testRoom, "peer1", false, false)
 
 	timeout, cancelTimeout := context.WithTimeout(ctx, 20*time.Second)
 	defer cancelTimeout()
@@ -151,10 +151,10 @@ func TestRoomStats(t *testing.T) {
 		clients[client.ID] = client
 	})
 
-	pc1, client1, statsGetter1, done1 := createPeerPair(t, ctx, testRoom, "peer1", false)
+	pc1, client1, statsGetter1, done1 := createPeerPair(t, ctx, testRoom, "peer1", false, false)
 	client1.SubscribeAllTracks()
 
-	client1.OnTracksAdded = func(addedTracks []*Track) {
+	client1.OnTracksAdded = func(addedTracks []ITrack) {
 		setTracks := make(map[string]TrackType, 0)
 		for _, track := range addedTracks {
 			setTracks[track.ID()] = TrackTypeMedia
@@ -162,10 +162,10 @@ func TestRoomStats(t *testing.T) {
 		client1.SetTracksSourceType(setTracks)
 	}
 
-	pc2, client2, statsGetter2, done2 := createPeerPair(t, ctx, testRoom, "peer2", false)
+	pc2, client2, statsGetter2, done2 := createPeerPair(t, ctx, testRoom, "peer2", false, false)
 	client2.SubscribeAllTracks()
 
-	client2.OnTracksAdded = func(addedTracks []*Track) {
+	client2.OnTracksAdded = func(addedTracks []ITrack) {
 		setTracks := make(map[string]TrackType, 0)
 		for _, track := range addedTracks {
 			setTracks[track.ID()] = TrackTypeMedia

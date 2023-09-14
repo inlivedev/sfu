@@ -4,12 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"sync"
 	"time"
 
 	"github.com/golang/glog"
 	"github.com/pion/interceptor"
+	"github.com/pion/interceptor/pkg/cc"
+	"github.com/pion/interceptor/pkg/gcc"
 	"github.com/pion/interceptor/pkg/intervalpli"
 	"github.com/pion/interceptor/pkg/stats"
 	"github.com/pion/rtcp"
@@ -28,7 +29,17 @@ const (
 	ClientTypePeer       = "peer"
 	ClientTypeUpBridge   = "upbridge"
 	ClientTypeDownBridge = "downbridge"
+
+	QualityHigh = 3
+	QualityMid  = 2
+	QualityLow  = 1
+
+	lowBitrate  = 150_000
+	midBitrate  = 500_000
+	highBitrate = 2_500_000
 )
+
+type QualityLevel int
 
 var (
 	ErrNegotiationIsNotRequested = errors.New("client: error negotiation is called before requested")
@@ -36,9 +47,10 @@ var (
 )
 
 type ClientOptions struct {
-	Direction   webrtc.RTPTransceiverDirection
-	IdleTimeout time.Duration
-	Type        string
+	Direction                  webrtc.RTPTransceiverDirection
+	IdleTimeout                time.Duration
+	Type                       string
+	EnableCongestionController bool
 }
 
 type ClientStats struct {
@@ -53,6 +65,7 @@ type Client struct {
 	Cancel                            context.CancelFunc
 	canAddCandidate                   bool
 	clientStats                       *ClientStats
+	estimatorChan                     chan cc.BandwidthEstimator
 	initialTracksCount                int
 	isInRenegotiation                 bool
 	isInRemoteNegotiation             bool
@@ -76,28 +89,36 @@ type Client struct {
 	OnBeforeRenegotiation             func(context.Context) bool
 	OnRenegotiation                   func(context.Context, webrtc.SessionDescription) (webrtc.SessionDescription, error)
 	OnAllowedRemoteRenegotiation      func()
-	OnTracksAvailable                 func([]*Track)
+	OnTracksAvailable                 func([]ITrack)
 	// onTrack is used by SFU to take action when a new track is added to the client
-	onTrack                 func(context.Context, *Track)
-	OnTracksAdded           func([]*Track)
+	onTrack                 func(ITrack)
+	OnTracksAdded           func([]ITrack)
 	options                 ClientOptions
 	statsGetter             stats.Getter
 	tracks                  *TrackList
 	NegotiationNeeded       bool
 	pendingRemoteCandidates []webrtc.ICECandidateInit
 	pendingLocalCandidates  []*webrtc.ICECandidate
+	quality                 QualityLevel
+	estimatedBandwidth      uint64
 }
 
 func DefaultClientOptions() ClientOptions {
 	return ClientOptions{
-		Direction:   webrtc.RTPTransceiverDirectionSendrecv,
-		IdleTimeout: 30 * time.Second,
-		Type:        ClientTypePeer,
+		Direction:                  webrtc.RTPTransceiverDirectionSendrecv,
+		IdleTimeout:                30 * time.Second,
+		Type:                       ClientTypePeer,
+		EnableCongestionController: true,
 	}
 }
 
 func NewClient(s *SFU, id string, peerConnectionConfig webrtc.Configuration, opts ClientOptions) *Client {
 	m := &webrtc.MediaEngine{}
+
+	// if err := m.RegisterDefaultCodecs(); err != nil {
+	// 	panic(err)
+	// }
+
 	if err := m.RegisterCodec(webrtc.RTPCodecParameters{
 		RTPCodecCapability: webrtc.RTPCodecCapability{MimeType: webrtc.MimeTypeH264, ClockRate: 90000, Channels: 0, SDPFmtpLine: "", RTCPFeedback: nil},
 		PayloadType:        96,
@@ -112,16 +133,7 @@ func NewClient(s *SFU, id string, peerConnectionConfig webrtc.Configuration, opt
 		panic(err)
 	}
 
-	// Enable simulcast in SDP
-	for _, extension := range []string{
-		"urn:ietf:params:rtp-hdrext:sdes:mid",
-		"urn:ietf:params:rtp-hdrext:sdes:rtp-stream-id",
-		"urn:ietf:params:rtp-hdrext:sdes:repaired-rtp-stream-id",
-	} {
-		if err := m.RegisterHeaderExtension(webrtc.RTPHeaderExtensionCapability{URI: extension}, webrtc.RTPCodecTypeVideo); err != nil {
-			panic(err)
-		}
-	}
+	RegisterSimulcastHeaderExtensions(m, webrtc.RTPCodecTypeVideo)
 
 	// // Create a InterceptorRegistry. This is the user configurable RTP/RTCP Pipeline.
 	// // This provides NACKs, RTCP Reports and other features. If you use `webrtc.NewPeerConnection`
@@ -141,10 +153,40 @@ func NewClient(s *SFU, id string, peerConnectionConfig webrtc.Configuration, opt
 
 	i.Add(statsInterceptorFactory)
 
+	// add congestion control interceptor
+	congestionController, err := cc.NewInterceptor(func() (cc.BandwidthEstimator, error) {
+		return gcc.NewSendSideBWE(gcc.SendSideBWEInitialBitrate(lowBitrate))
+	})
+	if err != nil {
+		panic(err)
+	}
+
+	var estimatorChan chan cc.BandwidthEstimator
+
+	if opts.EnableCongestionController {
+		estimatorChan = make(chan cc.BandwidthEstimator, 1)
+		congestionController.OnNewPeerConnection(func(id string, estimator cc.BandwidthEstimator) {
+			estimatorChan <- estimator
+		})
+
+		i.Add(congestionController)
+		if err = webrtc.ConfigureTWCCHeaderExtensionSender(m, i); err != nil {
+			panic(err)
+		}
+	}
+
 	// Use the default set of Interceptors
 	if err := webrtc.RegisterDefaultInterceptors(m, i); err != nil {
 		panic(err)
 	}
+
+	// if err = webrtc.ConfigureNack(m, i); err != nil {
+	// 	panic(err)
+	// }
+
+	// if err = webrtc.ConfigureRTCPReports(i); err != nil {
+	// 	panic(err)
+	// }
 
 	// Register a intervalpli factory
 	// This interceptor sends a PLI every 3 seconds. A PLI causes a video keyframe to be generated by the sender.
@@ -176,9 +218,10 @@ func NewClient(s *SFU, id string, peerConnectionConfig webrtc.Configuration, opt
 	localCtx, cancel := context.WithCancel(s.context)
 
 	client := &Client{
-		ID:      id,
-		Context: localCtx,
-		Cancel:  cancel,
+		ID:            id,
+		estimatorChan: estimatorChan,
+		Context:       localCtx,
+		Cancel:        cancel,
 		clientStats: &ClientStats{
 			mutex:    sync.Mutex{},
 			Sender:   make(map[webrtc.SSRC]stats.Stats),
@@ -209,60 +252,44 @@ func NewClient(s *SFU, id string, peerConnectionConfig webrtc.Configuration, opt
 	// Set a handler for when a new remote track starts, this just distributes all our packets
 	// to connected peers
 	peerConnection.OnTrack(func(remoteTrack *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
-		trackCtx, trackCancel := context.WithCancel(client.Context)
-
-		// Create a local track, all our SFU clients will be fed via this track
-		localTrack, newTrackErr := webrtc.NewTrackLocalStaticRTP(remoteTrack.Codec().RTPCodecCapability, remoteTrack.ID(), remoteTrack.StreamID())
-		if newTrackErr != nil {
-			panic(newTrackErr)
-		}
-
-		newTrack := &Track{ClientID: id, LocalStaticRTP: localTrack}
-
-		if err := client.tracks.Add(newTrack); err != nil {
-			glog.Error("client: error add track ", err)
-		}
-
-		rtpBuf := make([]byte, 1450)
-
-		go func() {
-			defer trackCancel()
-
-			for {
-				select {
-				case <-trackCtx.Done():
-
-					return
-				default:
-					i, _, readErr := remoteTrack.Read(rtpBuf)
-					if readErr == io.EOF {
-						client.tracks.Remove(localTrack)
-						tracks := make([]*Track, 0)
-						tracks = append(tracks, &Track{
-							ClientID:       client.ID,
-							LocalStaticRTP: localTrack,
-						})
-
-						s.removeTracks(tracks)
-
-						return
-					}
-
-					go client.updateReceiverStats(remoteTrack)
-
-					if readErr != nil {
-						glog.Error("client: remote track read error ", readErr)
-					}
-
-					// ErrClosedPipe means we don't have any subscribers, this is ok if no peers have connected yet
-					if _, err := localTrack.Write(rtpBuf[:i]); err != nil && !errors.Is(err, io.ErrClosedPipe) {
-						glog.Error("client: local track write error ", err)
-					}
-				}
+		var track ITrack
+		glog.Infof("client: ontrack %s %s %s", remoteTrack.Msid(), remoteTrack.Kind(), remoteTrack.RID())
+		if remoteTrack.RID() == "" {
+			// not simulcast
+			track = NewTrack(client, remoteTrack)
+			if err := client.tracks.Add(track); err != nil {
+				glog.Error("client: error add track ", err)
 			}
-		}()
+		} else {
+			// simulcast
+			id := remoteTrack.Msid()
+			glog.Infof("client: simulcast track %s %s %s", id, remoteTrack.Kind(), remoteTrack.RID())
+			track, err = client.tracks.Get(id) // not found because the track is not added yet due to race condition
+			if err != nil {
+				glog.Infof("client: track not found %s", id)
+				// if track not found, add it
+				track = NewSimulcastTrack(client.Context, client, remoteTrack)
+				if err := client.tracks.Add(track); err != nil {
+					glog.Error("client: error add track ", err)
+				}
 
-		client.onTrack(trackCtx, newTrack)
+				track.(*SimulcastTrack).OnTrackComplete(func() {
+					glog.Info("client: track complete ", id)
+				})
+			} else if simulcast, ok := track.(*SimulcastTrack); ok {
+				glog.Infof("client: track found %s", id)
+				simulcast.AddRemoteTrack(remoteTrack)
+			}
+
+			// only add tracks after complete
+			glog.Infof("client: total simulcast tracks %d", track.TotalTracks())
+		}
+
+		if !track.IsProcessed() {
+			client.onTrack(track)
+			track.SetAsProcessed()
+		}
+
 	})
 
 	peerConnection.OnICECandidate(func(candidate *webrtc.ICECandidate) {
@@ -277,6 +304,10 @@ func NewClient(s *SFU, id string, peerConnectionConfig webrtc.Configuration, opt
 			client.pendingLocalCandidates = append(client.pendingLocalCandidates, candidate)
 		}
 	})
+
+	if opts.EnableCongestionController {
+		client.EnableEstimator()
+	}
 
 	return client
 }
@@ -482,7 +513,7 @@ func (c *Client) allowRemoteRenegotiationQueuOp() {
 }
 
 // return boolean if need a renegotiation after track added
-func (c *Client) addTrack(track *Track) bool {
+func (c *Client) addTrack(track ITrack) bool {
 	// if the client is not connected, we wait until it's connected in go routine
 	if c.peerConnection.ICEConnectionState() != webrtc.ICEConnectionStateConnected {
 		if err := c.pendingReceivedTracks.Add(track); err != nil {
@@ -495,41 +526,52 @@ func (c *Client) addTrack(track *Track) bool {
 	return c.setClientTrack(track)
 }
 
-func (c *Client) setClientTrack(track *Track) bool {
+func (c *Client) setClientTrack(track ITrack) bool {
+	var outputTrack webrtc.TrackLocal
 
 	err := c.publishedTracks.Add(track)
 	if err != nil {
 		return false
 	}
 
-	rtpSender, err := c.peerConnection.AddTrack(track.LocalStaticRTP)
+	if track.IsSimulcast() {
+		simulcastTrack := track.(*SimulcastTrack)
+		outputTrack = simulcastTrack.Subscribe(c)
+
+	} else {
+		singleTrack := track.(*Track)
+		outputTrack = singleTrack.Subscribe()
+	}
+
+	transc, err := c.peerConnection.AddTransceiverFromTrack(outputTrack, webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionSendonly})
 	if err != nil {
 		glog.Error("client: error on adding track ", err)
 		return false
 	}
 
-	go c.readRTCP(c.Context, rtpSender)
+	// enable RTCP report and stats
+	c.enableReportAndStats(c.Context, transc.Sender())
 
 	return true
 }
 
-func (c *Client) removePublishedTrack(removeTracks []*Track) {
+func (c *Client) removePublishedTrack(trackIDs []string) {
 	removed := false
 
 	if c.peerConnection.ConnectionState() == webrtc.PeerConnectionStateClosed {
 		return
 	}
 
-	for _, removeTrack := range removeTracks {
+	for _, id := range trackIDs {
 		for _, sender := range c.peerConnection.GetSenders() {
 			track := sender.Track()
-			if track != nil && track.ID() == removeTrack.LocalStaticRTP.ID() && track.StreamID() == removeTrack.LocalStaticRTP.StreamID() && c.peerConnection.ConnectionState() != webrtc.PeerConnectionStateClosed {
+			if track != nil && track.ID() == id && c.peerConnection.ConnectionState() != webrtc.PeerConnectionStateClosed {
 				if err := c.peerConnection.RemoveTrack(sender); err != nil {
 					glog.Error("client: error remove track ", err)
 				}
 				removed = true
 
-				c.publishedTracks.Remove(removeTrack.LocalStaticRTP)
+				c.publishedTracks.Remove(id)
 			}
 		}
 	}
@@ -539,35 +581,39 @@ func (c *Client) removePublishedTrack(removeTracks []*Track) {
 	}
 }
 
-func (c *Client) readRTCP(ctx context.Context, rtpSender *webrtc.RTPSender) {
-	rtcpBuf := make([]byte, 1500)
-	localCtx, cancel := context.WithCancel(ctx)
+func (c *Client) enableReportAndStats(ctx context.Context, rtpSender *webrtc.RTPSender) {
+	go func() {
+		rtcpBuf := make([]byte, 1460)
 
-	defer cancel()
+		localCtx, cancel := context.WithCancel(ctx)
 
-	for {
-		select {
-		case <-localCtx.Done():
-			err := rtpSender.Stop()
-			if err != nil {
-				glog.Error("client: error stop rtp sender ", err)
-			}
+		defer cancel()
 
-			return
-		default:
-			if _, _, rtcpErr := rtpSender.Read(rtcpBuf); rtcpErr != nil {
+		for {
+			select {
+			case <-localCtx.Done():
+				err := rtpSender.Stop()
+				if err != nil {
+					glog.Error("client: error stop rtp sender ", err)
+				}
+
 				return
-			}
+			default:
+				if _, _, rtcpErr := rtpSender.Read(rtcpBuf); rtcpErr != nil {
+					return
+				}
 
-			go c.updateSenderStats(rtpSender)
+				go c.updateSenderStats(rtpSender)
+			}
 		}
-	}
+	}()
 }
 
 func (c *Client) processPendingTracks() bool {
 	trackAdded := false
 
 	for _, track := range c.pendingReceivedTracks.tracks {
+
 		isTrackAdded := c.setClientTrack(track)
 		if isTrackAdded {
 			trackAdded = true
@@ -579,7 +625,7 @@ func (c *Client) processPendingTracks() bool {
 	return trackAdded
 }
 
-func (c *Client) GetCurrentTracks() map[string]*Track {
+func (c *Client) GetCurrentTracks() map[string]ITrack {
 	return c.publishedTracks.GetTracks()
 }
 
@@ -588,13 +634,18 @@ func (c *Client) afterClosed() {
 		c.State = ClientStateEnded
 	}
 
-	removeTracks := make([]*Track, 0)
+	removeTrackIDs := make([]string, 0)
 
 	for _, track := range c.tracks.GetTracks() {
-		removeTracks = append(removeTracks, track)
+		if track.IsSimulcast() {
+			track = track.(*SimulcastTrack)
+			removeTrackIDs = append(removeTrackIDs, track.RemoteTrack().track.ID())
+		} else {
+			removeTrackIDs = append(removeTrackIDs, track.(*Track).remoteTrack.track.ID())
+		}
 	}
 
-	c.sfu.removeTracks(removeTracks)
+	c.sfu.removeTracks(removeTrackIDs)
 
 	c.Cancel()
 
@@ -722,7 +773,7 @@ func (c *Client) GetDirection() webrtc.RTPTransceiverDirection {
 	return c.options.Direction
 }
 
-func (c *Client) GetTracks() map[string]*Track {
+func (c *Client) GetTracks() map[string]ITrack {
 	return c.tracks.GetTracks()
 }
 
@@ -734,7 +785,7 @@ func (c *Client) GetStats() *ClientStats {
 	return c.clientStats
 }
 
-func (c *Client) updateReceiverStats(remoteTrack *webrtc.TrackRemote) {
+func (c *Client) updateReceiverStats(track ITrack, remoteTrack *webrtc.TrackRemote) {
 	if c.statsGetter == nil {
 		return
 	}
@@ -751,6 +802,8 @@ func (c *Client) updateReceiverStats(remoteTrack *webrtc.TrackRemote) {
 	defer c.clientStats.mutex.Unlock()
 
 	c.clientStats.Receiver[remoteTrack.SSRC()] = *c.statsGetter.Get(uint32(remoteTrack.SSRC()))
+
+	track.UpdateStats(remoteTrack, c.clientStats.Receiver[remoteTrack.SSRC()])
 }
 
 func (c *Client) updateSenderStats(sender *webrtc.RTPSender) {
@@ -775,15 +828,15 @@ func (c *Client) updateSenderStats(sender *webrtc.RTPSender) {
 }
 
 func (c *Client) SetTracksSourceType(trackTypes map[string]TrackType) {
-	availableTracks := make([]*Track, 0)
+	availableTracks := make([]ITrack, 0)
 	tracks := c.pendingPublishedTracks.GetTracks()
 	for id, trackType := range trackTypes {
 		if track, ok := tracks[id]; ok {
-			track.SourceType = trackType
+			track.SetSourceType(trackType)
 			availableTracks = append(availableTracks, track)
 
 			// remove it from pending published once it published available to other clients
-			c.pendingPublishedTracks.Remove(track.LocalStaticRTP)
+			c.pendingPublishedTracks.Remove(track.ID())
 		}
 	}
 
@@ -803,23 +856,18 @@ func (c *Client) SubscribeTracks(req []SubscribeTrackRequest) error {
 			continue
 		}
 
-		if client, ok := c.sfu.clients[r.ClientID]; ok {
+		if client, err := c.sfu.clients.GetClient(r.ClientID); err == nil {
 			for _, track := range client.GetTracks() {
-				if track.LocalStaticRTP.StreamID() == r.StreamID &&
-					track.LocalStaticRTP.ID() == r.TrackID {
-					if c.addTrack(&Track{
-						ClientID:       client.ID,
-						LocalStaticRTP: track.LocalStaticRTP,
-						SourceType:     track.SourceType,
-					}) {
+				if track.ID() == r.TrackID {
+					if c.addTrack(track) {
 						negotiationNeeded = true
 					}
 
 					trackFound = true
 				}
 			}
-		} else if !ok {
-			return fmt.Errorf("client %s not found", r.ClientID)
+		} else if err != nil {
+			return err
 		}
 
 		if !trackFound {
@@ -842,4 +890,113 @@ func (c *Client) SubscribeAllTracks() {
 	if negotiateNeeded {
 		c.renegotiate()
 	}
+}
+
+func (c *Client) SetQuality(quality QualityLevel) {
+	if c.quality == quality {
+		return
+	}
+
+	glog.Infof("client: %s switch quality to %s", c.ID, quality)
+	c.quality = quality
+}
+
+// This function is to calculate maximum bitrate allowed per audio or video track.
+// The bitrate is calculated based on the estimated bandwidth and the number of tracks.
+// Because we prioritize audio tracks, then the audio tracks will get the maximum bitrate allowed per track. TODO: this should be configurable
+// The video tracks will get the rest of the bandwidth.
+// TODO:
+// - This should pass the track as parameter to it's maximum allowed bitrate, so we can check the priority of the track compare with the others.
+// - For example if the track is speaking, then it should get the maximum bitrate allowed together with the other tracks in the same stream_id.
+// - Check if the client has a manual overide quality, then use it instead of the estimated quality
+
+// Currently the audio max bitrate has no affect, but we might able to control it with RTCP report
+// return audio and video max bitrate allowed per track
+func (c *Client) getMaxPerTrackQuality() (uint64, uint64) {
+	audioTracks := 0
+	videoTracks := 0
+	simulcastVideoTracks := 0
+	audioTotalBitrates := uint64(0)
+	videoTotalBitrates := uint64(0)
+	maxAudioBitrates := uint64(0)
+	maxVideoBitrates := uint64(0)
+	for _, track := range c.publishedTracks.GetTracks() {
+		var currentBitrate uint64
+		if track.Kind() == webrtc.RTPCodecTypeAudio {
+			audioTracks++
+			currentBitrate = track.RemoteTrack().GetCurrentBitrate()
+			audioTotalBitrates += currentBitrate
+			if currentBitrate > maxAudioBitrates {
+				maxAudioBitrates = currentBitrate
+			}
+
+		}
+
+		if track.Kind() == webrtc.RTPCodecTypeVideo {
+			if track.IsSimulcast() {
+				simulcastVideoTracks++
+				simulcastTracks := track.(*SimulcastTrack)
+
+				switch c.quality {
+				case QualityHigh:
+					currentBitrate = simulcastTracks.remoteTrackHigh.GetCurrentBitrate()
+				case QualityMid:
+					currentBitrate = simulcastTracks.remoteTrackMid.GetCurrentBitrate()
+				case QualityLow:
+					currentBitrate = simulcastTracks.remoteTrackLow.GetCurrentBitrate()
+				}
+
+				videoTotalBitrates += currentBitrate
+				if currentBitrate > maxVideoBitrates {
+					maxVideoBitrates = currentBitrate
+				}
+
+			} else {
+				videoTracks++
+				videoTotalBitrates += track.RemoteTrack().GetCurrentBitrate()
+			}
+		}
+
+	}
+
+	if maxAudioBitrates < 24_000 {
+		maxAudioBitrates = 48_000
+	}
+
+	// make sure the max audio bitrate is not more than the estimated bandwidth
+	if maxAudioBitrates*uint64(audioTracks) > c.estimatedBandwidth {
+		maxAudioBitrates = c.estimatedBandwidth / uint64(audioTracks)
+	}
+
+	totalAudioBandwidth := maxAudioBitrates * uint64(audioTracks)
+
+	return c.estimatedBandwidth / uint64(audioTracks), c.estimatedBandwidth - totalAudioBandwidth/uint64(videoTracks+simulcastVideoTracks)
+}
+
+func (c *Client) EnableEstimator() {
+	go func() {
+		ctxx, cancel := context.WithCancel(c.Context)
+		defer cancel()
+
+		select {
+		case <-ctxx.Done():
+			return
+		case estimator := <-c.estimatorChan:
+			ticker := time.NewTicker(3 * time.Second)
+			tickerCtx, cancelTicker := context.WithCancel(ctxx)
+			defer cancelTicker()
+			for {
+				select {
+				case <-tickerCtx.Done():
+					return
+				case <-ticker.C:
+					if estimator == nil {
+						continue
+					}
+
+					c.estimatedBandwidth = uint64(estimator.GetTargetBitrate())
+				}
+			}
+		}
+	}()
 }

@@ -10,6 +10,12 @@
             "request": "launch",
             "mode": "auto",
             "program": "${workspaceFolder}/examples/http-websocket/main.go",
+            "env": {
+                // "PIONS_LOG_DEBUG":"all",
+                // "PIONS_LOG_TRACE":"all",
+                // "PIONS_LOG_INFO":"all",
+            },
+
         }
     ]
 }
