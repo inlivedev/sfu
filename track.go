@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/golang/glog"
+	"github.com/pion/interceptor/pkg/stats"
 	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v3"
@@ -34,8 +35,8 @@ type BaseTrack struct {
 	client       *Client
 	isProcessed  bool
 	onTrackEnded func(*webrtc.TrackRemote)
-	onTrackRead  func(*webrtc.TrackRemote)
-	onTrackWrite func(*webrtc.TrackLocalStaticRTP)
+	onTrackRead  func(ITrack, *webrtc.TrackRemote)
+	onTrackWrite func(ITrack, *webrtc.TrackLocalStaticRTP)
 	kind         webrtc.RTPCodecType
 	sourceType   TrackType // source of the track, can be media or screen
 }
@@ -45,19 +46,51 @@ type ITrack interface {
 	IsSimulcast() bool
 	IsProcessed() bool
 	OnTrackEnded(func(*webrtc.TrackRemote))
-	OnTrackRead(func(*webrtc.TrackRemote))
-	OnTrackWrite(func(*webrtc.TrackLocalStaticRTP))
+	OnTrackRead(func(ITrack, *webrtc.TrackRemote))
+	OnTrackWrite(func(ITrack, *webrtc.TrackLocalStaticRTP))
 	SetSourceType(TrackType)
+	UpdateStats(*webrtc.TrackRemote, stats.Stats)
 	SetAsProcessed()
 	SourceType() TrackType
 	Kind() webrtc.RTPCodecType
-	RemoteTrack() *webrtc.TrackRemote
+	RemoteTrack() *RemoteTrack
 	TotalTracks() int
+}
+
+type RemoteTrack struct {
+	track                 *webrtc.TrackRemote
+	previousBytesReceived uint64
+	currentBytesReceived  uint64
+	latestUpdatedTS       time.Time
+}
+
+func (t *RemoteTrack) updateStats(s stats.Stats) {
+	if t.latestUpdatedTS.IsZero() {
+		t.latestUpdatedTS = s.LastPacketReceivedTimestamp
+		return
+	}
+
+	// don't update the stats if the last update was less than 1 second
+	if s.LastPacketReceivedTimestamp.Sub(t.latestUpdatedTS) < time.Second {
+		return
+	}
+
+	t.latestUpdatedTS = s.LastPacketReceivedTimestamp
+	t.previousBytesReceived = t.currentBytesReceived
+	t.currentBytesReceived = s.BytesReceived
+}
+
+func (t *RemoteTrack) GetCurrentBitrate() uint64 {
+	if t.currentBytesReceived == 0 {
+		return 0
+	}
+
+	return (t.currentBytesReceived - t.previousBytesReceived) * 8
 }
 
 type Track struct {
 	base        BaseTrack
-	remoteTrack *webrtc.TrackRemote
+	remoteTrack *RemoteTrack
 	localTrack  *webrtc.TrackLocalStaticRTP
 }
 
@@ -68,7 +101,9 @@ func NewTrack(client *Client, track *webrtc.TrackRemote) ITrack {
 			client: client,
 			kind:   track.Kind(),
 		},
-		remoteTrack: track,
+		remoteTrack: &RemoteTrack{
+			track: track,
+		},
 	}
 
 	t.createLocalTrack()
@@ -80,7 +115,7 @@ func NewTrack(client *Client, track *webrtc.TrackRemote) ITrack {
 
 func (t *Track) createLocalTrack() {
 	// Create a local track, all our SFU clients will be fed via this track
-	localTrack, newTrackErr := webrtc.NewTrackLocalStaticRTP(t.remoteTrack.Codec().RTPCodecCapability, t.remoteTrack.ID(), t.remoteTrack.StreamID())
+	localTrack, newTrackErr := webrtc.NewTrackLocalStaticRTP(t.remoteTrack.track.Codec().RTPCodecCapability, t.remoteTrack.track.ID(), t.remoteTrack.track.StreamID())
 	if newTrackErr != nil {
 		panic(newTrackErr)
 	}
@@ -100,21 +135,21 @@ func (t *Track) createLocalTrack() {
 
 				return
 			default:
-				i, _, readErr := t.remoteTrack.Read(rtpBuf)
+				i, _, readErr := t.remoteTrack.track.Read(rtpBuf)
 				if readErr == io.EOF {
-					t.base.onTrackEnded(t.remoteTrack)
+					t.base.onTrackEnded(t.remoteTrack.track)
 
 					return
 				}
 
-				t.base.onTrackRead(t.remoteTrack)
+				t.base.onTrackRead(t, t.remoteTrack.track)
 
 				if _, err := localTrack.Write(rtpBuf[:i]); err != nil && !errors.Is(err, io.ErrClosedPipe) {
 					glog.Error("client: local track write error ", err)
 					return
 				}
 
-				t.base.onTrackWrite(t.localTrack)
+				t.base.onTrackWrite(t, t.localTrack)
 			}
 		}
 	}()
@@ -128,7 +163,7 @@ func (t *Track) Client() *Client {
 	return t.base.client
 }
 
-func (t *Track) RemoteTrack() *webrtc.TrackRemote {
+func (t *Track) RemoteTrack() *RemoteTrack {
 	return t.remoteTrack
 }
 
@@ -148,11 +183,11 @@ func (t *Track) Kind() webrtc.RTPCodecType {
 	return t.base.kind
 }
 
-func (t *Track) OnTrackRead(f func(track *webrtc.TrackRemote)) {
+func (t *Track) OnTrackRead(f func(ITrack, *webrtc.TrackRemote)) {
 	t.base.onTrackRead = f
 }
 
-func (t *Track) OnTrackWrite(f func(track *webrtc.TrackLocalStaticRTP)) {
+func (t *Track) OnTrackWrite(f func(ITrack, *webrtc.TrackLocalStaticRTP)) {
 	t.base.onTrackWrite = f
 }
 
@@ -178,12 +213,16 @@ func (t *Track) SetAsProcessed() {
 
 func (t *Track) SendPLI() error {
 	return t.base.client.peerConnection.WriteRTCP([]rtcp.Packet{
-		&rtcp.PictureLossIndication{MediaSSRC: uint32(t.remoteTrack.SSRC())},
+		&rtcp.PictureLossIndication{MediaSSRC: uint32(t.remoteTrack.track.SSRC())},
 	})
 }
 
 func (t *Track) GetSourceType() TrackType {
 	return t.base.sourceType
+}
+
+func (t *Track) UpdateStats(track *webrtc.TrackRemote, s stats.Stats) {
+	t.remoteTrack.updateStats(s)
 }
 
 type ClientLocalTrack struct {
@@ -195,9 +234,34 @@ type ClientLocalTrack struct {
 	lastQuality    QualityLevel
 }
 
+func (t *ClientLocalTrack) GetAllowedQuality(kind webrtc.RTPCodecType) QualityLevel {
+	_, maxAllowedVideoBitrate := t.Client.getMaxPerTrackQuality()
+
+	var estimatedQuality QualityLevel
+
+	if kind == webrtc.RTPCodecTypeAudio {
+		estimatedQuality = QualityHigh
+	}
+
+	if maxAllowedVideoBitrate < lowBitrate {
+		estimatedQuality = QualityLow
+	} else if maxAllowedVideoBitrate < midBitrate {
+		estimatedQuality = QualityMid
+	} else {
+		estimatedQuality = QualityHigh
+	}
+
+	if t.Client.quality != 0 && estimatedQuality > t.Client.quality {
+		return t.Client.quality
+	}
+
+	return estimatedQuality
+
+}
+
 func (t *ClientLocalTrack) GetQuality() QualityLevel {
 	prevQuality := t.currentQuality
-	quality := t.Client.GetQuality()
+	quality := t.GetAllowedQuality(t.SimulcastTrack.Kind())
 
 	if prevQuality == quality {
 		return quality
@@ -266,15 +330,15 @@ func (t *ClientLocalTrack) switchQuality(quality QualityLevel) {
 func (t *ClientLocalTrack) sendPLI(quality QualityLevel) {
 	switch quality {
 	case QualityHigh:
-		if err := t.SimulcastTrack.SendPLI(t.SimulcastTrack.remoteTrackHigh); err != nil {
+		if err := t.SimulcastTrack.SendPLI(t.SimulcastTrack.remoteTrackHigh.track); err != nil {
 			glog.Error("client: error sending PLI ", err)
 		}
 	case QualityMid:
-		if err := t.SimulcastTrack.SendPLI(t.SimulcastTrack.remoteTrackMid); err != nil {
+		if err := t.SimulcastTrack.SendPLI(t.SimulcastTrack.remoteTrackMid.track); err != nil {
 			glog.Error("client: error sending PLI ", err)
 		}
 	case QualityLow:
-		if err := t.SimulcastTrack.SendPLI(t.SimulcastTrack.remoteTrackLow); err != nil {
+		if err := t.SimulcastTrack.SendPLI(t.SimulcastTrack.remoteTrackLow.track); err != nil {
 			glog.Error("client: error sending PLI ", err)
 		}
 	}
@@ -341,11 +405,11 @@ type SimulcastTrack struct {
 	baseTS                uint32
 	context               context.Context
 	onTrackComplete       func()
-	remoteTrackHigh       *webrtc.TrackRemote
+	remoteTrackHigh       *RemoteTrack
 	remoteTrackHighBaseTS uint32
-	remoteTrackMid        *webrtc.TrackRemote
+	remoteTrackMid        *RemoteTrack
 	remoteTrackMidBaseTS  uint32
-	remoteTrackLow        *webrtc.TrackRemote
+	remoteTrackLow        *RemoteTrack
 	remoteTrackLowBaseTS  uint32
 	localTracks           []*ClientLocalTrack
 	lastReadHighTimestamp time.Time
@@ -369,11 +433,11 @@ func NewSimulcastTrack(ctx context.Context, client *Client, track *webrtc.TrackR
 	return t
 }
 
-func (t *SimulcastTrack) OnTrackRead(f func(track *webrtc.TrackRemote)) {
+func (t *SimulcastTrack) OnTrackRead(f func(track ITrack, trackRemote *webrtc.TrackRemote)) {
 	t.base.onTrackRead = f
 }
 
-func (t *SimulcastTrack) OnTrackWrite(f func(track *webrtc.TrackLocalStaticRTP)) {
+func (t *SimulcastTrack) OnTrackWrite(f func(ITrack, *webrtc.TrackLocalStaticRTP)) {
 	t.base.onTrackWrite = f
 }
 
@@ -410,11 +474,11 @@ func (t *SimulcastTrack) AddRemoteTrack(track *webrtc.TrackRemote) {
 	quality := RIDToQuality(track.RID())
 	switch quality {
 	case QualityHigh:
-		t.remoteTrackHigh = track
+		t.remoteTrackHigh = &RemoteTrack{track: track}
 	case QualityMid:
-		t.remoteTrackMid = track
+		t.remoteTrackMid = &RemoteTrack{track: track}
 	case QualityLow:
-		t.remoteTrackLow = track
+		t.remoteTrackLow = &RemoteTrack{track: track}
 	default:
 		glog.Warning("client: unknown track quality ", track.RID())
 
@@ -468,7 +532,7 @@ func (t *SimulcastTrack) AddRemoteTrack(track *webrtc.TrackRemote) {
 				t.onRTPRead(rtp, quality)
 
 				if t.base.onTrackRead != nil {
-					t.base.onTrackRead(track)
+					t.base.onTrackRead(t, track)
 				}
 
 			}
@@ -512,13 +576,13 @@ func (t *SimulcastTrack) onRTPRead(packet *rtp.Packet, quality QualityLevel) {
 
 	if isWritten {
 		// TODO: check this parameter, not sure if it is correct
-		go t.base.onTrackWrite(t.localTracks[0].Track)
+		go t.base.onTrackWrite(t, t.localTracks[0].Track)
 	}
 }
 
 func (t *SimulcastTrack) Subscribe(client *Client) *webrtc.TrackLocalStaticRTP {
 	// Create a local track, all our SFU clients will be fed via this track
-	remoteTrack := t.RemoteTrack()
+	remoteTrack := t.RemoteTrack().track
 	localTrack, newTrackErr := webrtc.NewTrackLocalStaticRTP(remoteTrack.Codec().RTPCodecCapability, remoteTrack.ID(), remoteTrack.StreamID())
 	if newTrackErr != nil {
 		panic(newTrackErr)
@@ -555,7 +619,7 @@ func (t *SimulcastTrack) SendPLI(currentTrack *webrtc.TrackRemote) error {
 	})
 }
 
-func (t *SimulcastTrack) RemoteTrack() *webrtc.TrackRemote {
+func (t *SimulcastTrack) RemoteTrack() *RemoteTrack {
 	if t.remoteTrackHigh != nil {
 		return t.remoteTrackHigh
 	}
@@ -633,6 +697,18 @@ func (t *SimulcastTrack) isTrackActive(quality QualityLevel) bool {
 	}
 
 	return false
+}
+
+func (t *SimulcastTrack) UpdateStats(track *webrtc.TrackRemote, s stats.Stats) {
+	quality := RIDToQuality(track.RID())
+	switch quality {
+	case QualityHigh:
+		t.remoteTrackHigh.updateStats(s)
+	case QualityMid:
+		t.remoteTrackMid.updateStats(s)
+	case QualityLow:
+		t.remoteTrackLow.updateStats(s)
+	}
 }
 
 type SubscribeTrackRequest struct {
@@ -715,12 +791,12 @@ func setTrackCallback(track ITrack) {
 		client.sfu.removeTracks(trackIDs)
 	})
 
-	track.OnTrackRead(func(remoteTrack *webrtc.TrackRemote) {
+	track.OnTrackRead(func(t ITrack, remoteTrack *webrtc.TrackRemote) {
 		// this will update the bandwidth stats everytime we receive packet from the remote track
-		go client.updateReceiverStats(remoteTrack)
+		go client.updateReceiverStats(t, remoteTrack)
 	})
 
-	track.OnTrackWrite(func(track *webrtc.TrackLocalStaticRTP) {
+	track.OnTrackWrite(func(t ITrack, track *webrtc.TrackLocalStaticRTP) {
 		// this can be use to update the bandwidth stats everytime we send packet to the remote peer
 		// TODO: figure out the best use case for this callback
 

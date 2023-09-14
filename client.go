@@ -34,8 +34,8 @@ const (
 	QualityMid  = 2
 	QualityLow  = 1
 
-	lowBitrate  = 300_000
-	medBitrate  = 1_000_000
+	lowBitrate  = 150_000
+	midBitrate  = 500_000
 	highBitrate = 2_500_000
 )
 
@@ -100,7 +100,7 @@ type Client struct {
 	pendingRemoteCandidates []webrtc.ICECandidateInit
 	pendingLocalCandidates  []*webrtc.ICECandidate
 	quality                 QualityLevel
-	estimatedQuality        QualityLevel
+	estimatedBandwidth      uint64
 }
 
 func DefaultClientOptions() ClientOptions {
@@ -549,7 +549,8 @@ func (c *Client) setClientTrack(track ITrack) bool {
 		return false
 	}
 
-	go c.readRTCP(c.Context, transc.Sender())
+	// enable RTCP report and stats
+	c.enableReportAndStats(c.Context, transc.Sender())
 
 	return true
 }
@@ -580,29 +581,32 @@ func (c *Client) removePublishedTrack(trackIDs []string) {
 	}
 }
 
-func (c *Client) readRTCP(ctx context.Context, rtpSender *webrtc.RTPSender) {
-	rtcpBuf := make([]byte, 1460)
-	localCtx, cancel := context.WithCancel(ctx)
+func (c *Client) enableReportAndStats(ctx context.Context, rtpSender *webrtc.RTPSender) {
+	go func() {
+		rtcpBuf := make([]byte, 1460)
 
-	defer cancel()
+		localCtx, cancel := context.WithCancel(ctx)
 
-	for {
-		select {
-		case <-localCtx.Done():
-			err := rtpSender.Stop()
-			if err != nil {
-				glog.Error("client: error stop rtp sender ", err)
-			}
+		defer cancel()
 
-			return
-		default:
-			if _, _, rtcpErr := rtpSender.Read(rtcpBuf); rtcpErr != nil {
+		for {
+			select {
+			case <-localCtx.Done():
+				err := rtpSender.Stop()
+				if err != nil {
+					glog.Error("client: error stop rtp sender ", err)
+				}
+
 				return
-			}
+			default:
+				if _, _, rtcpErr := rtpSender.Read(rtcpBuf); rtcpErr != nil {
+					return
+				}
 
-			go c.updateSenderStats(rtpSender)
+				go c.updateSenderStats(rtpSender)
+			}
 		}
-	}
+	}()
 }
 
 func (c *Client) processPendingTracks() bool {
@@ -635,9 +639,9 @@ func (c *Client) afterClosed() {
 	for _, track := range c.tracks.GetTracks() {
 		if track.IsSimulcast() {
 			track = track.(*SimulcastTrack)
-			removeTrackIDs = append(removeTrackIDs, track.RemoteTrack().ID())
+			removeTrackIDs = append(removeTrackIDs, track.RemoteTrack().track.ID())
 		} else {
-			removeTrackIDs = append(removeTrackIDs, track.(*Track).remoteTrack.ID())
+			removeTrackIDs = append(removeTrackIDs, track.(*Track).remoteTrack.track.ID())
 		}
 	}
 
@@ -781,7 +785,7 @@ func (c *Client) GetStats() *ClientStats {
 	return c.clientStats
 }
 
-func (c *Client) updateReceiverStats(remoteTrack *webrtc.TrackRemote) {
+func (c *Client) updateReceiverStats(track ITrack, remoteTrack *webrtc.TrackRemote) {
 	if c.statsGetter == nil {
 		return
 	}
@@ -798,6 +802,8 @@ func (c *Client) updateReceiverStats(remoteTrack *webrtc.TrackRemote) {
 	defer c.clientStats.mutex.Unlock()
 
 	c.clientStats.Receiver[remoteTrack.SSRC()] = *c.statsGetter.Get(uint32(remoteTrack.SSRC()))
+
+	track.UpdateStats(remoteTrack, c.clientStats.Receiver[remoteTrack.SSRC()])
 }
 
 func (c *Client) updateSenderStats(sender *webrtc.RTPSender) {
@@ -887,9 +893,6 @@ func (c *Client) SubscribeAllTracks() {
 }
 
 func (c *Client) SetQuality(quality QualityLevel) {
-	// TODO:
-	// - if quality changes we should send PLI request to the remote peer
-	// - check the target bitrate is it only for receiving or also for sending
 	if c.quality == quality {
 		return
 	}
@@ -898,25 +901,76 @@ func (c *Client) SetQuality(quality QualityLevel) {
 	c.quality = quality
 }
 
-// this should check the current available bandwidth and return the most optimal quality
-func (c *Client) GetQuality() QualityLevel {
-	if c.quality == 0 && c.estimatedQuality == 0 {
-		return QualityLow
+// This function is to calculate maximum bitrate allowed per audio or video track.
+// The bitrate is calculated based on the estimated bandwidth and the number of tracks.
+// Because we prioritize audio tracks, then the audio tracks will get the maximum bitrate allowed per track. TODO: this should be configurable
+// The video tracks will get the rest of the bandwidth.
+// TODO:
+// - This should pass the track as parameter to it's maximum allowed bitrate, so we can check the priority of the track compare with the others.
+// - For example if the track is speaking, then it should get the maximum bitrate allowed together with the other tracks in the same stream_id.
+// - Check if the client has a manual overide quality, then use it instead of the estimated quality
+
+// Currently the audio max bitrate has no affect, but we might able to control it with RTCP report
+// return audio and video max bitrate allowed per track
+func (c *Client) getMaxPerTrackQuality() (uint64, uint64) {
+	audioTracks := 0
+	videoTracks := 0
+	simulcastVideoTracks := 0
+	audioTotalBitrates := uint64(0)
+	videoTotalBitrates := uint64(0)
+	maxAudioBitrates := uint64(0)
+	maxVideoBitrates := uint64(0)
+	for _, track := range c.publishedTracks.GetTracks() {
+		var currentBitrate uint64
+		if track.Kind() == webrtc.RTPCodecTypeAudio {
+			audioTracks++
+			currentBitrate = track.RemoteTrack().GetCurrentBitrate()
+			audioTotalBitrates += currentBitrate
+			if currentBitrate > maxAudioBitrates {
+				maxAudioBitrates = currentBitrate
+			}
+
+		}
+
+		if track.Kind() == webrtc.RTPCodecTypeVideo {
+			if track.IsSimulcast() {
+				simulcastVideoTracks++
+				simulcastTracks := track.(*SimulcastTrack)
+
+				switch c.quality {
+				case QualityHigh:
+					currentBitrate = simulcastTracks.remoteTrackHigh.GetCurrentBitrate()
+				case QualityMid:
+					currentBitrate = simulcastTracks.remoteTrackMid.GetCurrentBitrate()
+				case QualityLow:
+					currentBitrate = simulcastTracks.remoteTrackLow.GetCurrentBitrate()
+				}
+
+				videoTotalBitrates += currentBitrate
+				if currentBitrate > maxVideoBitrates {
+					maxVideoBitrates = currentBitrate
+				}
+
+			} else {
+				videoTracks++
+				videoTotalBitrates += track.RemoteTrack().GetCurrentBitrate()
+			}
+		}
+
 	}
 
-	if c.quality > 0 && c.estimatedQuality == 0 {
-		return c.quality
+	if maxAudioBitrates < 24_000 {
+		maxAudioBitrates = 48_000
 	}
 
-	if c.quality == 0 && c.estimatedQuality > 0 {
-		return c.estimatedQuality
+	// make sure the max audio bitrate is not more than the estimated bandwidth
+	if maxAudioBitrates*uint64(audioTracks) > c.estimatedBandwidth {
+		maxAudioBitrates = c.estimatedBandwidth / uint64(audioTracks)
 	}
 
-	if c.quality < c.estimatedQuality {
-		return c.quality
-	}
+	totalAudioBandwidth := maxAudioBitrates * uint64(audioTracks)
 
-	return c.estimatedQuality
+	return c.estimatedBandwidth / uint64(audioTracks), c.estimatedBandwidth - totalAudioBandwidth/uint64(videoTracks+simulcastVideoTracks)
 }
 
 func (c *Client) EnableEstimator() {
@@ -940,15 +994,7 @@ func (c *Client) EnableEstimator() {
 						continue
 					}
 
-					targetBitrate := estimator.GetTargetBitrate()
-
-					if targetBitrate > highBitrate {
-						c.estimatedQuality = QualityHigh
-					} else if targetBitrate > medBitrate {
-						c.estimatedQuality = QualityMid
-					} else {
-						c.estimatedQuality = QualityLow
-					}
+					c.estimatedBandwidth = uint64(estimator.GetTargetBitrate())
 				}
 			}
 		}

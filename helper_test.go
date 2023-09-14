@@ -23,7 +23,7 @@ type PeerClient struct {
 	InRenegotiation bool
 }
 
-type RemoteTrack struct {
+type RemoteTrackTest struct {
 	Track  *webrtc.TrackRemote
 	Client *PeerClient
 }
