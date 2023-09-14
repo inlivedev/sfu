@@ -187,14 +187,12 @@ func (t *Track) GetSourceType() TrackType {
 }
 
 type ClientLocalTrack struct {
-	Client           *Client
-	currentTimestamp uint32
-	currentQuality   QualityLevel
-	Track            *webrtc.TrackLocalStaticRTP
-	SimulcastTrack   *SimulcastTrack
-	sequenceNumber   uint16
-	lastTimestamp    uint32
-	lastQuality      QualityLevel
+	Client         *Client
+	currentQuality QualityLevel
+	Track          *webrtc.TrackLocalStaticRTP
+	SimulcastTrack *SimulcastTrack
+	sequenceNumber uint16
+	lastQuality    QualityLevel
 }
 
 func (t *ClientLocalTrack) GetQuality() QualityLevel {
@@ -272,7 +270,7 @@ func (t *ClientLocalTrack) sendPLI(quality QualityLevel) {
 			glog.Error("client: error sending PLI ", err)
 		}
 	case QualityMid:
-		if err := t.SimulcastTrack.SendPLI(t.SimulcastTrack.remoteTrackMedium); err != nil {
+		if err := t.SimulcastTrack.SendPLI(t.SimulcastTrack.remoteTrackMid); err != nil {
 			glog.Error("client: error sending PLI ", err)
 		}
 	case QualityLow:
@@ -286,74 +284,68 @@ func (t *ClientLocalTrack) sendPLI(quality QualityLevel) {
 // even we have 3 remote track (high, mid, low), we only have 1 local track to write, which remote track packet will be written to the local track is based on the quality
 // this is to make sure the timestamp and sequence number is consistent from the previous packet even it is not the same track
 func (t *ClientLocalTrack) writeRTP(wg *sync.WaitGroup, rtp *rtp.Packet, quality QualityLevel) {
+	var trackQuality QualityLevel
+
 	defer wg.Done()
 
 	if t.Client.peerConnection.ConnectionState() != webrtc.PeerConnectionStateConnected {
 		return
 	}
 
-	// trackQuality := t.GetQuality()
-	// if trackQuality == quality {
-	if QualityLow == quality {
-		// test
-		// something wrong on this why the video still delay
-		if err := t.Track.WriteRTP(rtp); err != nil && !errors.Is(err, io.ErrClosedPipe) {
-			glog.Error("client: local track write error ", err)
-		}
+	isKeyframe := IsKeyframe(t.Track.Codec().MimeType, rtp)
+
+	// prevent the packet to be written to the new local track if the packet is not a keyframe
+	// this is to avoid broken or froze video on client side
+	if !isKeyframe && t.lastQuality == 0 {
+		trackQuality = t.GetQuality()
+		t.sendPLI(trackQuality)
+
 		return
+	}
 
-		//end test
+	if !isKeyframe {
+		trackQuality = t.lastQuality
+	} else {
+		trackQuality = t.GetQuality()
+	}
 
-		// // make sure the timestamp and sequence number is consistent from the previous packet even it is not the same track
-		oldTimestamp := rtp.Timestamp
-		oldSequenceNumber := rtp.SequenceNumber
+	if trackQuality == quality {
+		// make sure the timestamp and sequence number is consistent from the previous packet even it is not the same track
 
-		if t.lastTimestamp != 0 && t.sequenceNumber != 0 {
-			if t.lastTimestamp <= rtp.Timestamp {
-				deltaTs := rtp.Timestamp - t.lastTimestamp
-				t.currentTimestamp += deltaTs
-			} else {
-				t.currentTimestamp += 1
-				glog.Warningf("track %s: client %s timestamp broken with last timestamp %d and incoming RTP timestamp %d", t.SimulcastTrack.ID(), t.Client.ID, t.lastTimestamp, rtp.Timestamp)
-			}
-
-			rtp.Timestamp = t.currentTimestamp
-
-			if t.sequenceNumber <= rtp.SequenceNumber {
-				deltaSeq := rtp.SequenceNumber - t.sequenceNumber
-				t.sequenceNumber += deltaSeq
-			} else {
-				t.sequenceNumber++
-				glog.Warningf("track %s: client %s sequence number broken, the current sequence %d and incoming RTP sequence %d \n\n", t.SimulcastTrack.ID(), t.Client.ID, t.sequenceNumber, rtp.SequenceNumber)
-			}
-
-			rtp.SequenceNumber = t.sequenceNumber
+		switch quality {
+		case QualityHigh:
+			rtp.Timestamp = t.SimulcastTrack.baseTS + ((rtp.Timestamp - t.SimulcastTrack.remoteTrackHighBaseTS) - t.SimulcastTrack.remoteTrackHighBaseTS)
+		case QualityMid:
+			rtp.Timestamp = t.SimulcastTrack.baseTS + ((rtp.Timestamp - t.SimulcastTrack.remoteTrackMidBaseTS) - t.SimulcastTrack.remoteTrackMidBaseTS)
+		case QualityLow:
+			rtp.Timestamp = t.SimulcastTrack.baseTS + ((rtp.Timestamp - t.SimulcastTrack.remoteTrackLowBaseTS) - t.SimulcastTrack.remoteTrackLowBaseTS)
 		}
 
-		t.lastTimestamp = oldTimestamp
-		t.sequenceNumber = oldSequenceNumber
+		t.sequenceNumber++
+		rtp.SequenceNumber = t.sequenceNumber
 
 		if t.lastQuality != quality {
 			t.sendPLI(quality)
 			t.lastQuality = quality
 		}
 
-		glog.Infof("track %s: client %s write quality %d rtp timestamp %d sequence %d", t.SimulcastTrack.ID(), t.Client.ID, quality, rtp.Timestamp, rtp.SequenceNumber)
-
 		if err := t.Track.WriteRTP(rtp); err != nil && !errors.Is(err, io.ErrClosedPipe) {
 			glog.Error("client: local track write error ", err)
 		}
 	}
-
 }
 
 type SimulcastTrack struct {
 	base                  BaseTrack
+	baseTS                uint32
 	context               context.Context
 	onTrackComplete       func()
 	remoteTrackHigh       *webrtc.TrackRemote
-	remoteTrackMedium     *webrtc.TrackRemote
+	remoteTrackHighBaseTS uint32
+	remoteTrackMid        *webrtc.TrackRemote
+	remoteTrackMidBaseTS  uint32
 	remoteTrackLow        *webrtc.TrackRemote
+	remoteTrackLowBaseTS  uint32
 	localTracks           []*ClientLocalTrack
 	lastReadHighTimestamp time.Time
 	lastReadMidTimestamp  time.Time
@@ -419,7 +411,7 @@ func (t *SimulcastTrack) AddRemoteTrack(track *webrtc.TrackRemote) {
 	case QualityHigh:
 		t.remoteTrackHigh = track
 	case QualityMid:
-		t.remoteTrackMedium = track
+		t.remoteTrackMid = track
 	case QualityLow:
 		t.remoteTrackLow = track
 	default:
@@ -448,13 +440,20 @@ func (t *SimulcastTrack) AddRemoteTrack(track *webrtc.TrackRemote) {
 					return
 				}
 
-				readTime := time.Now()
-
-				t.onRTPRead(rtp, quality)
-
-				if t.base.onTrackRead != nil {
-					t.base.onTrackRead(track)
+				// set the base timestamp for the track if it is not set yet
+				if t.baseTS == 0 {
+					t.baseTS = rtp.Timestamp
 				}
+
+				if quality == QualityHigh && t.remoteTrackHighBaseTS == 0 {
+					t.remoteTrackHighBaseTS = rtp.Timestamp
+				} else if quality == QualityMid && t.remoteTrackMidBaseTS == 0 {
+					t.remoteTrackMidBaseTS = rtp.Timestamp
+				} else if quality == QualityLow && t.remoteTrackLowBaseTS == 0 {
+					t.remoteTrackLowBaseTS = rtp.Timestamp
+				}
+
+				readTime := time.Now()
 
 				switch quality {
 				case QualityHigh:
@@ -465,12 +464,18 @@ func (t *SimulcastTrack) AddRemoteTrack(track *webrtc.TrackRemote) {
 					t.lastReadLowTimestamp = readTime
 				}
 
+				t.onRTPRead(rtp, quality)
+
+				if t.base.onTrackRead != nil {
+					t.base.onTrackRead(track)
+				}
+
 			}
 		}
 	}()
 
 	// check if all simulcast tracks are available
-	if t.onTrackComplete != nil && t.remoteTrackHigh != nil && t.remoteTrackMedium != nil && t.remoteTrackLow != nil {
+	if t.onTrackComplete != nil && t.remoteTrackHigh != nil && t.remoteTrackMid != nil && t.remoteTrackLow != nil {
 		t.onTrackComplete()
 	}
 }
@@ -554,8 +559,8 @@ func (t *SimulcastTrack) RemoteTrack() *webrtc.TrackRemote {
 		return t.remoteTrackHigh
 	}
 
-	if t.remoteTrackMedium != nil {
-		return t.remoteTrackMedium
+	if t.remoteTrackMid != nil {
+		return t.remoteTrackMid
 	}
 
 	return t.remoteTrackLow
@@ -567,7 +572,7 @@ func (t *SimulcastTrack) TotalTracks() int {
 		total++
 	}
 
-	if t.remoteTrackMedium != nil {
+	if t.remoteTrackMid != nil {
 		total++
 	}
 
@@ -599,7 +604,7 @@ func (t *SimulcastTrack) isTrackActive(quality QualityLevel) bool {
 
 		return true
 	case QualityMid:
-		if t.remoteTrackMedium == nil {
+		if t.remoteTrackMid == nil {
 			glog.Warning("track: remote track medium is nil")
 			return false
 		}

@@ -549,12 +549,6 @@ func (c *Client) setClientTrack(track ITrack) bool {
 		return false
 	}
 
-	// rtpSender, err := c.peerConnection.AddTrack(outputTrack)
-	// if err != nil {
-	// 	glog.Error("client: error on adding track ", err)
-	// 	return false
-	// }
-
 	go c.readRTCP(c.Context, transc.Sender())
 
 	return true
