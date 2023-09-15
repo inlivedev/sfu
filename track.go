@@ -80,6 +80,10 @@ func (t *RemoteTrack) updateStats(s stats.Stats) {
 	t.currentBytesReceived = s.BytesReceived
 }
 
+func (t *RemoteTrack) Track() *webrtc.TrackRemote {
+	return t.track
+}
+
 func (t *RemoteTrack) GetCurrentBitrate() uint64 {
 	if t.currentBytesReceived == 0 {
 		return 0
