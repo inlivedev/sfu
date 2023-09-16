@@ -109,7 +109,7 @@ func clientHandler(conn *websocket.Conn, messageChan chan Request, r *sfu.Room) 
 	// add a new client to room
 	// you can also get the client by using r.GetClient(clientID)
 	opts := sfu.DefaultClientOptions()
-	opts.EnableCongestionController = true
+	opts.EnableCongestionController = false
 	client, err := r.AddClient(clientID, opts)
 	if err != nil {
 		log.Panic(err)

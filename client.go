@@ -108,7 +108,7 @@ func DefaultClientOptions() ClientOptions {
 		Direction:                  webrtc.RTPTransceiverDirectionSendrecv,
 		IdleTimeout:                30 * time.Second,
 		Type:                       ClientTypePeer,
-		EnableCongestionController: true,
+		EnableCongestionController: false,
 	}
 }
 
@@ -140,16 +140,19 @@ func NewClient(s *SFU, id string, peerConnectionConfig webrtc.Configuration, opt
 	i.Add(statsInterceptorFactory)
 
 	// add congestion control interceptor
-	congestionController, err := cc.NewInterceptor(func() (cc.BandwidthEstimator, error) {
-		return gcc.NewSendSideBWE(gcc.SendSideBWEInitialBitrate(lowBitrate))
-	})
-	if err != nil {
-		panic(err)
-	}
+	var congestionController *cc.InterceptorFactory
 
 	var estimatorChan chan cc.BandwidthEstimator
 
 	if opts.EnableCongestionController {
+		glog.Info("client: enable congestion controller")
+		congestionController, err = cc.NewInterceptor(func() (cc.BandwidthEstimator, error) {
+			return gcc.NewSendSideBWE(gcc.SendSideBWEInitialBitrate(lowBitrate))
+		})
+		if err != nil {
+			panic(err)
+		}
+
 		estimatorChan = make(chan cc.BandwidthEstimator, 1)
 		congestionController.OnNewPeerConnection(func(id string, estimator cc.BandwidthEstimator) {
 			estimatorChan <- estimator
@@ -590,19 +593,21 @@ func (c *Client) enableReportAndStats(rtpSender *webrtc.RTPSender) {
 		}
 	}()
 
-	go func() {
-		localCtx, cancel := context.WithCancel(c.context)
-		tick := time.NewTicker(3 * time.Second)
-		defer cancel()
-		for {
-			select {
-			case <-localCtx.Done():
-				return
-			case <-tick.C:
-				c.updateSenderStats(rtpSender)
+	if c.options.EnableCongestionController {
+		go func() {
+			localCtx, cancel := context.WithCancel(c.context)
+			tick := time.NewTicker(3 * time.Second)
+			defer cancel()
+			for {
+				select {
+				case <-localCtx.Done():
+					return
+				case <-tick.C:
+					c.updateSenderStats(rtpSender)
+				}
 			}
-		}
-	}()
+		}()
+	}
 }
 
 func (c *Client) processPendingTracks() bool {

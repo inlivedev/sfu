@@ -233,6 +233,37 @@ func GetStaticVideoTrack(ctx context.Context, trackID, streamID string, loop boo
 	return videoTrack, done
 }
 
+func WriteSampeToRTP(s *webrtc.TrackLocalStaticSample, sample media.Sample) {
+	s.rtpTrack.mu.RLock()
+	p := s.packetizer
+	clockRate := s.clockRate
+	s.rtpTrack.mu.RUnlock()
+
+	if p == nil {
+		return nil
+	}
+
+	// skip packets by the number of previously dropped packets
+	for i := uint16(0); i < sample.PrevDroppedPackets; i++ {
+		s.sequencer.NextSequenceNumber()
+	}
+
+	samples := uint32(sample.Duration.Seconds() * clockRate)
+	if sample.PrevDroppedPackets > 0 {
+		p.SkipSamples(samples * uint32(sample.PrevDroppedPackets))
+	}
+	packets := p.Packetize(sample.Data, samples)
+
+	writeErrs := []error{}
+	for _, p := range packets {
+		if err := s.rtpTrack.WriteRTP(p); err != nil {
+			writeErrs = append(writeErrs, err)
+		}
+	}
+
+	return util.FlattenErrs(writeErrs)
+}
+
 func GetStaticAudioTrack(ctx context.Context, trackID, streamID string, loop bool) (*webrtc.TrackLocalStaticSample, chan bool) {
 	_, filename, _, ok := runtime.Caller(0)
 	if !ok {
@@ -397,6 +428,17 @@ func AddSimulcastVideoTracks(t *testing.T, ctx context.Context, pc *webrtc.PeerC
 			rsidID = uint8(extension.ID)
 		}
 	}
+
+	// parameters := sender.GetParameters()
+	// var midID, ridID uint8
+	// for _, extension := range parameters.HeaderExtensions {
+	// 	switch extension.URI {
+	// 	case sdp.SDESMidURI:
+	// 		midID = uint8(extension.ID)
+	// 	case sdp.SDESRTPStreamIDURI:
+	// 		ridID = uint8(extension.ID)
+	// 	}
+	// }
 	assert.NotZero(t, midID)
 	assert.NotZero(t, ridID)
 	assert.NotZero(t, rsidID)
