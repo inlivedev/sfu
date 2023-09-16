@@ -24,6 +24,42 @@ var (
 	ErrTrackIsNotExists = errors.New("client: error track is not exists")
 )
 
+var (
+	VP8KeyFrame8x8 = []byte{
+		0x10, 0x02, 0x00, 0x9d, 0x01, 0x2a, 0x08, 0x00,
+		0x08, 0x00, 0x00, 0x47, 0x08, 0x85, 0x85, 0x88,
+		0x85, 0x84, 0x88, 0x02, 0x02, 0x00, 0x0c, 0x0d,
+		0x60, 0x00, 0xfe, 0xff, 0xab, 0x50, 0x80,
+	}
+
+	H264KeyFrame2x2SPS = []byte{
+		0x67, 0x42, 0xc0, 0x1f, 0x0f, 0xd9, 0x1f, 0x88,
+		0x88, 0x84, 0x00, 0x00, 0x03, 0x00, 0x04, 0x00,
+		0x00, 0x03, 0x00, 0xc8, 0x3c, 0x60, 0xc9, 0x20,
+	}
+	H264KeyFrame2x2PPS = []byte{
+		0x68, 0x87, 0xcb, 0x83, 0xcb, 0x20,
+	}
+	H264KeyFrame2x2IDR = []byte{
+		0x65, 0x88, 0x84, 0x0a, 0xf2, 0x62, 0x80, 0x00,
+		0xa7, 0xbe,
+	}
+	H264KeyFrame2x2 = [][]byte{H264KeyFrame2x2SPS, H264KeyFrame2x2PPS, H264KeyFrame2x2IDR}
+
+	OpusSilenceFrame = []byte{
+		0xf8, 0xff, 0xfe, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	}
+)
+
 type TrackType string
 
 func (t TrackType) String() string {
@@ -58,6 +94,8 @@ type ITrack interface {
 }
 
 type RemoteTrack struct {
+	context               context.Context
+	cancel                context.CancelFunc
 	track                 *webrtc.TrackRemote
 	previousBytesReceived uint64
 	currentBytesReceived  uint64
@@ -80,6 +118,10 @@ func (t *RemoteTrack) updateStats(s stats.Stats) {
 	t.currentBytesReceived = s.BytesReceived
 }
 
+func (t *RemoteTrack) Context() context.Context {
+	return t.context
+}
+
 func (t *RemoteTrack) Track() *webrtc.TrackRemote {
 	return t.track
 }
@@ -99,6 +141,7 @@ type Track struct {
 }
 
 func NewTrack(client *Client, track *webrtc.TrackRemote) ITrack {
+	ctx, cancel := context.WithCancel(client.Context())
 	t := &Track{
 		base: BaseTrack{
 			id:     track.Msid(),
@@ -106,7 +149,9 @@ func NewTrack(client *Client, track *webrtc.TrackRemote) ITrack {
 			kind:   track.Kind(),
 		},
 		remoteTrack: &RemoteTrack{
-			track: track,
+			track:   track,
+			context: ctx,
+			cancel:  cancel,
 		},
 	}
 
@@ -129,7 +174,7 @@ func (t *Track) createLocalTrack() {
 	rtpBuf := make([]byte, 1450)
 
 	go func() {
-		ctxx, cancel := context.WithCancel(t.Client().Context)
+		ctxx, cancel := context.WithCancel(t.remoteTrack.context)
 
 		defer cancel()
 
@@ -407,7 +452,6 @@ func (t *ClientLocalTrack) writeRTP(wg *sync.WaitGroup, rtp *rtp.Packet, quality
 type SimulcastTrack struct {
 	base                  BaseTrack
 	baseTS                uint32
-	context               context.Context
 	onTrackComplete       func()
 	remoteTrackHigh       *RemoteTrack
 	remoteTrackHighBaseTS uint32
@@ -421,14 +465,13 @@ type SimulcastTrack struct {
 	lastReadLowTimestamp  time.Time
 }
 
-func NewSimulcastTrack(ctx context.Context, client *Client, track *webrtc.TrackRemote) ITrack {
+func NewSimulcastTrack(client *Client, track *webrtc.TrackRemote) ITrack {
 	t := &SimulcastTrack{
 		base: BaseTrack{
 			id:     track.Msid(),
 			client: client,
 			kind:   track.Kind(),
 		},
-		context: ctx,
 	}
 
 	t.AddRemoteTrack(track)
@@ -475,14 +518,16 @@ func (t *SimulcastTrack) Kind() webrtc.RTPCodecType {
 }
 
 func (t *SimulcastTrack) AddRemoteTrack(track *webrtc.TrackRemote) {
+	ctx, cancel := context.WithCancel(t.base.client.Context())
+
 	quality := RIDToQuality(track.RID())
 	switch quality {
 	case QualityHigh:
-		t.remoteTrackHigh = &RemoteTrack{track: track}
+		t.remoteTrackHigh = &RemoteTrack{track: track, context: ctx, cancel: cancel}
 	case QualityMid:
-		t.remoteTrackMid = &RemoteTrack{track: track}
+		t.remoteTrackMid = &RemoteTrack{track: track, context: ctx, cancel: cancel}
 	case QualityLow:
-		t.remoteTrackLow = &RemoteTrack{track: track}
+		t.remoteTrackLow = &RemoteTrack{track: track, context: ctx, cancel: cancel}
 	default:
 		glog.Warning("client: unknown track quality ", track.RID())
 
@@ -490,8 +535,9 @@ func (t *SimulcastTrack) AddRemoteTrack(track *webrtc.TrackRemote) {
 	}
 
 	go func() {
-		ctxx, cancel := context.WithCancel(t.context)
+		ctxx, cancell := context.WithCancel(ctx)
 
+		defer cancell()
 		defer cancel()
 
 		for {
@@ -533,7 +579,7 @@ func (t *SimulcastTrack) AddRemoteTrack(track *webrtc.TrackRemote) {
 					t.lastReadLowTimestamp = readTime
 				}
 
-				t.onRTPRead(rtp, quality)
+				t.onRTPRead(ctxx, rtp, quality)
 
 				if t.base.onTrackRead != nil {
 					t.base.onTrackRead(t, track)
@@ -549,7 +595,7 @@ func (t *SimulcastTrack) AddRemoteTrack(track *webrtc.TrackRemote) {
 	}
 }
 
-func (t *SimulcastTrack) onRTPRead(packet *rtp.Packet, quality QualityLevel) {
+func (t *SimulcastTrack) onRTPRead(ctx context.Context, packet *rtp.Packet, quality QualityLevel) {
 	isWritten := false
 	wg := &sync.WaitGroup{}
 	wg.Add(len(t.localTracks))
@@ -568,7 +614,7 @@ func (t *SimulcastTrack) onRTPRead(packet *rtp.Packet, quality QualityLevel) {
 			wg.Wait()
 		}()
 
-		ctx, cancel := context.WithCancel(t.context)
+		ctx, cancel := context.WithCancel(ctx)
 		defer cancel()
 		select {
 		case <-ctx.Done():

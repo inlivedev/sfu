@@ -42,11 +42,11 @@ func (s *SFUClients) Add(client *Client) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	if _, ok := s.clients[client.ID]; ok {
+	if _, ok := s.clients[client.ID()]; ok {
 		return ErrClientExists
 	}
 
-	s.clients[client.ID] = client
+	s.clients[client.ID()] = client
 
 	return nil
 }
@@ -55,11 +55,11 @@ func (s *SFUClients) Remove(client *Client) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	if _, ok := s.clients[client.ID]; !ok {
+	if _, ok := s.clients[client.ID()]; !ok {
 		return ErrClientNotFound
 	}
 
-	delete(s.clients, client.ID)
+	delete(s.clients, client.ID())
 
 	return nil
 }
@@ -156,7 +156,7 @@ func (s *SFU) NewClient(id string, opts ClientOptions) *Client {
 	client := s.createClient(id, peerConnectionConfig, opts)
 
 	client.OnConnectionStateChanged(func(connectionState webrtc.PeerConnectionState) {
-		glog.Info("client: connection state changed ", client.ID, connectionState)
+		glog.Info("client: connection state changed ", client.ID(), connectionState)
 		switch connectionState {
 		case webrtc.PeerConnectionStateConnected:
 			if client.State == ClientStateNew {
@@ -169,7 +169,7 @@ func (s *SFU) NewClient(id string, opts ClientOptions) *Client {
 
 					for _, c := range s.clients.GetClients() {
 						for _, track := range c.tracks.GetTracks() {
-							if track.Client().ID != client.ID {
+							if track.Client().ID() != client.ID() {
 								availableTracks = append(availableTracks, track)
 							}
 						}
@@ -189,7 +189,7 @@ func (s *SFU) NewClient(id string, opts ClientOptions) *Client {
 			}
 
 			if needRenegotiation {
-				glog.Info("call renegotiate after sync ", client.ID)
+				glog.Info("call renegotiate after sync ", client.ID())
 
 				client.renegotiate()
 			}
@@ -214,7 +214,7 @@ func (s *SFU) NewClient(id string, opts ClientOptions) *Client {
 		// don't publish track when not all the tracks are received
 		// TODO:
 		// 1. need to handle simulcast track because  it will be counted as single track
-		if client.GetType() == ClientTypePeer && client.initialTracksCount > client.pendingPublishedTracks.Length() {
+		if client.Type() == ClientTypePeer && client.initialTracksCount > client.pendingPublishedTracks.Length() {
 			glog.Infof("client: not all tracks are received, skip publish track %d %d", client.initialTracksCount, client.pendingPublishedTracks.Length())
 			return
 		}
@@ -267,12 +267,12 @@ func (s *SFU) SyncTrack(client *Client) bool {
 
 	for _, clientPeer := range s.clients.GetClients() {
 		for _, track := range clientPeer.tracks.GetTracks() {
-			if client.ID != clientPeer.ID {
+			if client.ID() != clientPeer.ID() {
 				if _, ok := currentTracks[track.ID()]; !ok {
 					isNeedRenegotiation := client.addTrack(track)
 
 					// request the keyframe from track publisher after added
-					s.requestKeyFrameFromClient(clientPeer.ID)
+					s.requestKeyFrameFromClient(clientPeer.ID())
 					if isNeedRenegotiation {
 						needRenegotiation = true
 					}
@@ -297,7 +297,7 @@ func (s *SFU) GetTracks() []ITrack {
 
 func (s *SFU) Stop() {
 	for _, client := range s.clients.GetClients() {
-		client.GetPeerConnection().Close()
+		client.PeerConnection().Close()
 	}
 
 	if s.onStop != nil {
@@ -348,7 +348,7 @@ func (s *SFU) onTracksAvailable(tracks []ITrack) {
 			// filter out tracks from the same client
 			filteredTracks := make([]ITrack, 0)
 			for _, track := range tracks {
-				if track.Client().ID != client.ID {
+				if track.Client().ID() != client.ID() {
 					filteredTracks = append(filteredTracks, track)
 				}
 			}
@@ -364,7 +364,7 @@ func (s *SFU) broadcastTracksToAutoSubscribeClients(tracks []ITrack) {
 	trackReq := make([]SubscribeTrackRequest, 0)
 	for _, track := range tracks {
 		trackReq = append(trackReq, SubscribeTrackRequest{
-			ClientID: track.Client().ID,
+			ClientID: track.Client().ID(),
 			TrackID:  track.ID(),
 		})
 	}

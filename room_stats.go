@@ -29,7 +29,7 @@ func generateCurrentStats(r *Room) RoomStats {
 	)
 	clients := r.GetSFU().GetClients()
 	for _, c := range clients {
-		stats := c.GetStats()
+		stats := c.Stats()
 		for _, stat := range stats.Receiver {
 			bytesReceived += stat.InboundRTPStreamStats.BytesReceived
 			packet_lost += stat.InboundRTPStreamStats.PacketsLost
@@ -53,7 +53,7 @@ func calculateActiveSessions(clients map[string]*Client) int {
 	count := 0
 
 	for _, c := range clients {
-		if c.GetPeerConnection().ConnectionState() == webrtc.PeerConnectionStateConnected {
+		if c.PeerConnection().ConnectionState() == webrtc.PeerConnectionStateConnected {
 			count++
 		}
 	}

@@ -122,7 +122,7 @@ func (r *Room) StopClient(id string) error {
 
 func (r *Room) StopAllClients() {
 	for _, client := range r.sfu.GetClients() {
-		client.GetPeerConnection().Close()
+		client.PeerConnection().Close()
 	}
 }
 
@@ -180,7 +180,7 @@ func (r *Room) onClientLeft(client *Client) {
 	}
 
 	// update the latest stats from client before they left
-	r.stats[client.ID] = *client.GetStats()
+	r.stats[client.ID()] = *client.Stats()
 }
 
 func (r *Room) onClientJoined(client *Client) {
@@ -243,6 +243,6 @@ func (r *Room) GetStats() RoomStats {
 
 func (r *Room) updateStats() {
 	for _, client := range r.sfu.GetClients() {
-		r.stats[client.ID] = *client.GetStats()
+		r.stats[client.ID()] = *client.Stats()
 	}
 }

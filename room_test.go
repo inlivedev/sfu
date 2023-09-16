@@ -33,7 +33,7 @@ func TestRoomCreateAndClose(t *testing.T) {
 	require.NoErrorf(t, err, "error adding client to room: %v", err)
 
 	// stop client
-	err = testRoom.StopClient(client1.ID)
+	err = testRoom.StopClient(client1.ID())
 	require.NoErrorf(t, err, "error stopping client: %v", err)
 
 	client2, err := testRoom.AddClient(testRoom.CreateClientID(testRoom.GetSFU().Counter), DefaultClientOptions())
@@ -44,7 +44,7 @@ func TestRoomCreateAndClose(t *testing.T) {
 	require.EqualError(t, err, ErrRoomIsNotEmpty.Error(), "expecting error room is not empty: %v", err)
 
 	// stop other client
-	err = testRoom.StopClient(client2.ID)
+	err = testRoom.StopClient(client2.ID())
 	require.NoErrorf(t, err, "error stopping client: %v", err)
 
 	err = testRoom.Close()
@@ -76,14 +76,14 @@ func TestRoomJoinLeftEvent(t *testing.T) {
 
 	testRoom.OnClientLeft(func(client *Client) {
 		leftChan <- true
-		glog.Info("client left", client.ID)
-		delete(clients, client.ID)
+		glog.Info("client left", client.ID())
+		delete(clients, client.ID())
 	})
 
 	testRoom.OnClientJoined(func(client *Client) {
 		joinChan <- true
-		glog.Info("client join", client.ID)
-		clients[client.ID] = client
+		glog.Info("client join", client.ID())
+		clients[client.ID()] = client
 	})
 
 	_, client1, _, _ := createPeerPair(t, ctx, testRoom, "peer1", false, false)
@@ -103,7 +103,7 @@ func TestRoomJoinLeftEvent(t *testing.T) {
 			peerCount++
 			// stop client in go routine so we can receive left event
 			go func() {
-				_ = testRoom.StopClient(client1.ID)
+				_ = testRoom.StopClient(client1.ID())
 			}()
 
 		}
@@ -147,8 +147,8 @@ func TestRoomStats(t *testing.T) {
 
 	testRoom.OnClientJoined(func(client *Client) {
 		joinChan <- true
-		glog.Info("client join", client.ID)
-		clients[client.ID] = client
+		glog.Info("client join", client.ID())
+		clients[client.ID()] = client
 	})
 
 	pc1, client1, statsGetter1, done1 := createPeerPair(t, ctx, testRoom, "peer1", false, false)

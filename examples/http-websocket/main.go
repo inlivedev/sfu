@@ -178,7 +178,7 @@ func clientHandler(conn *websocket.Conn, messageChan chan Request, r *sfu.Room) 
 		_, _ = conn.Write(sdpBytes)
 
 		// wait for answer from client
-		ctxTimeout, cancelTimeout := context.WithTimeout(client.Context, 30*time.Second)
+		ctxTimeout, cancelTimeout := context.WithTimeout(client.Context(), 30*time.Second)
 
 		defer cancelTimeout()
 
@@ -188,7 +188,7 @@ func clientHandler(conn *websocket.Conn, messageChan chan Request, r *sfu.Room) 
 			glog.Error("timeout on renegotiation")
 			return webrtc.SessionDescription{}, errors.New("timeout on renegotiation")
 		case answer := <-answerChan:
-			glog.Info("received answer from client ", client.GetType(), client.ID)
+			glog.Info("received answer from client ", client.Type(), client.ID())
 			return answer, nil
 		}
 	}

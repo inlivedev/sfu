@@ -157,7 +157,7 @@ func TestExtension(t *testing.T) {
 		if candidate == nil {
 			return
 		}
-		err = client1.GetPeerConnection().AddICECandidate(candidate.ToJSON())
+		err = client1.PeerConnection().AddICECandidate(candidate.ToJSON())
 		require.NoErrorf(t, err, "error adding ice candidate: %v", err)
 
 	})
@@ -177,7 +177,7 @@ func TestExtension(t *testing.T) {
 			peerCount++
 			// stop client in go routine so we can receive left event
 			go func() {
-				_ = testRoom.StopClient(client1.ID)
+				_ = testRoom.StopClient(client1.ID())
 			}()
 
 		}

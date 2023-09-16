@@ -93,7 +93,7 @@ func createPeerPair(t *testing.T, ctx context.Context, testRoom *Room, peerName 
 		if state == webrtc.PeerConnectionStateClosed || state == webrtc.PeerConnectionStateFailed {
 			glog.Info("test: peer connection closed ", peerName)
 			if client != nil {
-				_ = testRoom.StopClient(client.ID)
+				_ = testRoom.StopClient(client.ID())
 				cancelClient()
 			}
 		}
@@ -176,7 +176,7 @@ func createPeerPair(t *testing.T, ctx context.Context, testRoom *Room, peerName 
 		if candidate == nil {
 			return
 		}
-		err = client.GetPeerConnection().AddICECandidate(candidate.ToJSON())
+		err = client.PeerConnection().AddICECandidate(candidate.ToJSON())
 		require.NoErrorf(t, err, "error adding ice candidate: %v", err)
 
 	})

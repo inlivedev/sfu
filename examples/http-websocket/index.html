@@ -281,7 +281,7 @@
                 sendEncodings: [{priority: 'high'}],
             })
 
-            transceiver = peerConnection.addTransceiver(stream.getVideoTracks()[0], {
+            peerConnection.addTransceiver(stream.getVideoTracks()[0], {
                 direction: 'sendonly',
                 streams: [stream],
                 sendEncodings: [
