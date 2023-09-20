@@ -300,6 +300,10 @@ func (t *SimulcastClientTrack) push(rtp *rtp.Packet, quality QualityLevel) {
 		trackQuality = QualityLow
 	} else if isKeyframe && t.lastTimestamp != rtp.Timestamp {
 		trackQuality = t.GetQuality()
+		// prevent to jump more than 1 quality level to avoid burst bitrates
+		if trackQuality-t.lastQuality > 1 {
+			trackQuality = t.lastQuality + 1
+		}
 	} else {
 		trackQuality = t.lastQuality
 	}
