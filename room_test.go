@@ -118,7 +118,6 @@ func TestRoomJoinLeftEvent(t *testing.T) {
 }
 
 func TestRoomStats(t *testing.T) {
-	t.Parallel()
 	var (
 		totalClientIngressBytes uint64
 		totalClientEgressBytes  uint64
