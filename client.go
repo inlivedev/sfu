@@ -33,10 +33,12 @@ const (
 	QualityHigh = 3
 	QualityMid  = 2
 	QualityLow  = 1
+	QualityNone = 0
 
-	lowBitrate  = 150_000
-	midBitrate  = 500_000
-	highBitrate = 2_500_000
+	lowBitrate           = 150_000
+	midBitrate           = 500_000
+	highBitrate          = 2_500_000
+	initialSendBandwidth = 1_000_000
 )
 
 type QualityLevel int
@@ -66,6 +68,7 @@ type Client struct {
 	canAddCandidate                   bool
 	clientStats                       *ClientStats
 	estimatorChan                     chan cc.BandwidthEstimator
+	estimator                         cc.BandwidthEstimator
 	initialTracksCount                int
 	isInRenegotiation                 bool
 	isInRemoteNegotiation             bool
@@ -86,6 +89,7 @@ type Client struct {
 	onLeftCallbacks                   []func()
 	onTrackRemovedCallbacks           []func(sourceType string, track *webrtc.TrackLocalStaticRTP)
 	OnIceCandidate                    func(context.Context, *webrtc.ICECandidate)
+	OnMaxBitrateAdjusted              func(context.Context, uint32, uint32)
 	OnBeforeRenegotiation             func(context.Context) bool
 	OnRenegotiation                   func(context.Context, webrtc.SessionDescription) (webrtc.SessionDescription, error)
 	OnAllowedRemoteRenegotiation      func()
@@ -100,7 +104,8 @@ type Client struct {
 	pendingRemoteCandidates []webrtc.ICECandidateInit
 	pendingLocalCandidates  []*webrtc.ICECandidate
 	quality                 QualityLevel
-	estimatedBandwidth      uint64
+	egressBandwidth         uint32
+	ingressBandwidth        uint32
 }
 
 func DefaultClientOptions() ClientOptions {
@@ -108,7 +113,7 @@ func DefaultClientOptions() ClientOptions {
 		Direction:                  webrtc.RTPTransceiverDirectionSendrecv,
 		IdleTimeout:                30 * time.Second,
 		Type:                       ClientTypePeer,
-		EnableCongestionController: false,
+		EnableCongestionController: true,
 	}
 }
 
@@ -147,7 +152,7 @@ func NewClient(s *SFU, id string, peerConnectionConfig webrtc.Configuration, opt
 	if opts.EnableCongestionController {
 		glog.Info("client: enable congestion controller")
 		congestionController, err = cc.NewInterceptor(func() (cc.BandwidthEstimator, error) {
-			return gcc.NewSendSideBWE(gcc.SendSideBWEInitialBitrate(lowBitrate))
+			return gcc.NewSendSideBWE(gcc.SendSideBWEInitialBitrate(initialSendBandwidth))
 		})
 		if err != nil {
 			panic(err)
@@ -209,6 +214,7 @@ func NewClient(s *SFU, id string, peerConnectionConfig webrtc.Configuration, opt
 			Receiver: make(map[webrtc.SSRC]stats.Stats),
 		},
 		mutex:                  sync.Mutex{},
+		egressBandwidth:        uint32(initialSendBandwidth),
 		peerConnection:         peerConnection,
 		State:                  ClientStateNew,
 		tracks:                 newTrackList(),
@@ -288,7 +294,9 @@ func NewClient(s *SFU, id string, peerConnectionConfig webrtc.Configuration, opt
 	})
 
 	if opts.EnableCongestionController {
-		client.EnableEstimator()
+		go func() {
+			client.estimator = <-client.estimatorChan
+		}()
 	}
 
 	return client
@@ -593,21 +601,19 @@ func (c *Client) enableReportAndStats(rtpSender *webrtc.RTPSender) {
 		}
 	}()
 
-	if c.options.EnableCongestionController {
-		go func() {
-			localCtx, cancel := context.WithCancel(c.context)
-			tick := time.NewTicker(3 * time.Second)
-			defer cancel()
-			for {
-				select {
-				case <-localCtx.Done():
-					return
-				case <-tick.C:
-					c.updateSenderStats(rtpSender)
-				}
+	go func() {
+		localCtx, cancel := context.WithCancel(c.context)
+		tick := time.NewTicker(3 * time.Second)
+		defer cancel()
+		for {
+			select {
+			case <-localCtx.Done():
+				return
+			case <-tick.C:
+				c.updateSenderStats(rtpSender)
 			}
-		}()
-	}
+		}
+	}()
 }
 
 func (c *Client) processPendingTracks() bool {
@@ -909,16 +915,20 @@ func (c *Client) SetQuality(quality QualityLevel) {
 
 // Currently the audio max bitrate has no affect, but we might able to control it with RTCP report
 // return audio and video max bitrate allowed per track
-func (c *Client) getMaxPerTrackQuality() (uint64, uint64) {
-	audioTracks := 0
-	videoTracks := 0
-	simulcastVideoTracks := 0
-	audioTotalBitrates := uint64(0)
-	videoTotalBitrates := uint64(0)
-	maxAudioBitrates := uint64(0)
-	maxVideoBitrates := uint64(0)
+func (c *Client) getMaxPerTrackQuality() (uint32, uint32) {
+	var bandwidthPerVideoTrack, bandwidthPerAudioTrack uint32
+
+	// initial track count is set 1 considering there might be a new track without a bitrate date yet
+	audioTracks := 1
+	videoTracks := 1
+	audioTotalBitrates := uint32(0)
+	videoTotalBitrates := uint32(0)
+	maxAudioBitrates := uint32(0)
+	maxVideoBitrates := uint32(0)
+
 	for _, track := range c.publishedTracks.GetTracks() {
-		var currentBitrate uint64
+		var currentBitrate uint32
+
 		if track.Kind() == webrtc.RTPCodecTypeAudio {
 			audioTracks++
 			currentBitrate = track.RemoteTrack().GetCurrentBitrate()
@@ -930,33 +940,54 @@ func (c *Client) getMaxPerTrackQuality() (uint64, uint64) {
 		}
 
 		if track.Kind() == webrtc.RTPCodecTypeVideo {
+			videoTracks++
 			if track.IsSimulcast() {
-				simulcastVideoTracks++
 				simulcastTracks := track.(*SimulcastTrack)
 
-				switch c.quality {
-				case QualityHigh:
-					if simulcastTracks.remoteTrackHigh == nil {
-						currentBitrate = simulcastTracks.remoteTrackHigh.GetCurrentBitrate()
+				for _, localTrack := range simulcastTracks.localTracks {
+					switch localTrack.lastQuality {
+					case QualityHigh:
+						if simulcastTracks.remoteTrackHigh == nil {
+							currentBitrate = localTrack.remoteTrack.remoteTrackHigh.GetCurrentBitrate()
+						}
+					case QualityMid:
+						if simulcastTracks.remoteTrackMid != nil {
+							currentBitrate = localTrack.remoteTrack.remoteTrackMid.GetCurrentBitrate()
+						}
+					case QualityLow:
+						if simulcastTracks.remoteTrackLow != nil {
+							currentBitrate = localTrack.remoteTrack.remoteTrackLow.GetCurrentBitrate()
+						}
+					case QualityNone:
+						if simulcastTracks.remoteTrackLow != nil {
+							currentBitrate = localTrack.remoteTrack.remoteTrackLow.GetCurrentBitrate()
+							if currentBitrate == 0 {
+								currentBitrate = MinBitrateUpperCap
+							}
+						}
 					}
-				case QualityMid:
-					if simulcastTracks.remoteTrackMid != nil {
-						currentBitrate = simulcastTracks.remoteTrackMid.GetCurrentBitrate()
-					}
-				case QualityLow:
-					if simulcastTracks.remoteTrackLow != nil {
-						currentBitrate = simulcastTracks.remoteTrackLow.GetCurrentBitrate()
-					}
-				}
 
-				videoTotalBitrates += currentBitrate
-				if currentBitrate > maxVideoBitrates {
-					maxVideoBitrates = currentBitrate
+					videoTotalBitrates += currentBitrate
+					if currentBitrate > maxVideoBitrates {
+						maxVideoBitrates = currentBitrate
+					}
 				}
 
 			} else {
-				videoTracks++
-				videoTotalBitrates += track.RemoteTrack().GetCurrentBitrate()
+				simpleTracks := track.(*Track)
+
+				for _, localTrack := range simpleTracks.localTracks {
+					currentBitrate = localTrack.remoteTrack.GetCurrentBitrate()
+					if currentBitrate == 0 {
+						currentBitrate = MinBitrateUpperCap
+					}
+
+					videoTotalBitrates += currentBitrate
+
+					if currentBitrate > maxVideoBitrates {
+						maxVideoBitrates = currentBitrate
+					}
+				}
 			}
 		}
 
@@ -966,40 +997,44 @@ func (c *Client) getMaxPerTrackQuality() (uint64, uint64) {
 		maxAudioBitrates = 48_000
 	}
 
+	bandwidth := c.GetEstimatedBandwidth()
+
 	// make sure the max audio bitrate is not more than the estimated bandwidth
-	if maxAudioBitrates*uint64(audioTracks) > c.estimatedBandwidth {
-		maxAudioBitrates = c.estimatedBandwidth / uint64(audioTracks)
+	if maxAudioBitrates*uint32(audioTracks) > bandwidth {
+		maxAudioBitrates = bandwidth / uint32(audioTracks)
 	}
 
-	totalAudioBandwidth := maxAudioBitrates * uint64(audioTracks)
+	totalAudioBandwidth := maxAudioBitrates * uint32(audioTracks)
 
-	return c.estimatedBandwidth / uint64(audioTracks), c.estimatedBandwidth - totalAudioBandwidth/uint64(videoTracks+simulcastVideoTracks)
+	if audioTracks == 0 {
+		bandwidthPerAudioTrack = maxAudioBitrates
+	} else {
+		bandwidthPerAudioTrack = bandwidth / uint32(audioTracks)
+	}
+
+	if videoTracks == 0 {
+		bandwidthPerVideoTrack = maxVideoBitrates
+	} else {
+		bandwidthPerVideoTrack = (bandwidth - totalAudioBandwidth) / uint32(videoTracks)
+	}
+
+	return bandwidthPerAudioTrack, bandwidthPerVideoTrack
 }
 
-func (c *Client) EnableEstimator() {
-	go func() {
-		ctxx, cancel := context.WithCancel(c.context)
-		defer cancel()
+func (c *Client) GetEstimatedBandwidth() uint32 {
+	if c.estimator == nil {
+		return uint32(initialSendBandwidth)
+	}
 
-		select {
-		case <-ctxx.Done():
-			return
-		case estimator := <-c.estimatorChan:
-			ticker := time.NewTicker(3 * time.Second)
-			tickerCtx, cancelTicker := context.WithCancel(ctxx)
-			defer cancelTicker()
-			for {
-				select {
-				case <-tickerCtx.Done():
-					return
-				case <-ticker.C:
-					if estimator == nil {
-						continue
-					}
+	c.egressBandwidth = uint32(c.estimator.GetTargetBitrate())
 
-					c.estimatedBandwidth = uint64(estimator.GetTargetBitrate())
-				}
-			}
-		}
-	}()
+	return c.egressBandwidth
+}
+
+func (c *Client) UpdatePublisherBandwidth(bitrate uint32) {
+	if bitrate == 0 {
+		return
+	}
+
+	c.ingressBandwidth = bitrate
 }

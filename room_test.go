@@ -86,7 +86,7 @@ func TestRoomJoinLeftEvent(t *testing.T) {
 		clients[client.ID()] = client
 	})
 
-	_, client1, _, _ := createPeerPair(t, ctx, testRoom, "peer1", false, false)
+	_, client1, _, _ := CreatePeerPair(ctx, testRoom, DefaultTestIceServers(), "peer1", false, false)
 
 	timeout, cancelTimeout := context.WithTimeout(ctx, 20*time.Second)
 	defer cancelTimeout()
@@ -151,7 +151,7 @@ func TestRoomStats(t *testing.T) {
 		clients[client.ID()] = client
 	})
 
-	pc1, client1, statsGetter1, done1 := createPeerPair(t, ctx, testRoom, "peer1", false, false)
+	pc1, client1, statsGetter1, done1 := CreatePeerPair(ctx, testRoom, DefaultTestIceServers(), "peer1", false, false)
 	client1.SubscribeAllTracks()
 
 	client1.OnTracksAdded = func(addedTracks []ITrack) {
@@ -162,7 +162,7 @@ func TestRoomStats(t *testing.T) {
 		client1.SetTracksSourceType(setTracks)
 	}
 
-	pc2, client2, statsGetter2, done2 := createPeerPair(t, ctx, testRoom, "peer2", false, false)
+	pc2, client2, statsGetter2, done2 := CreatePeerPair(ctx, testRoom, DefaultTestIceServers(), "peer2", false, false)
 	client2.SubscribeAllTracks()
 
 	client2.OnTracksAdded = func(addedTracks []ITrack) {

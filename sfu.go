@@ -3,9 +3,16 @@ package sfu
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/golang/glog"
 	"github.com/pion/webrtc/v3"
+)
+
+const (
+	MaxBitrateUpperCap = 4_000_000
+	MinBitrateUpperCap = 300_000
+	MinBitrateLowerCap = 100_000
 )
 
 type SFUClients struct {
@@ -118,6 +125,8 @@ func New(ctx context.Context, iceServers []webrtc.ICEServer, mux *UDPMux) *SFU {
 		cancel()
 		sfu.Stop()
 	}()
+
+	sfu.monitorAndAdjustBandwidth()
 
 	return sfu
 }
@@ -395,4 +404,51 @@ func (s *SFU) removeClient(client *Client) error {
 	s.onClientRemoved(client)
 
 	return nil
+}
+
+func (s *SFU) SetClientsMaximumBitrate(minBitrate, maxBitrate uint32) {
+	for _, client := range s.clients.GetClients() {
+		if client.OnMaxBitrateAdjusted != nil {
+			client.OnMaxBitrateAdjusted(s.context, minBitrate, maxBitrate)
+		}
+	}
+}
+
+func (s *SFU) monitorAndAdjustBandwidth() {
+	go func() {
+		ctx, cancel := context.WithCancel(s.context)
+		t := time.NewTicker(2 * time.Second)
+		defer cancel()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				maxBandwidth := uint32(initialSendBandwidth)
+				minBandwidth := uint32(MaxBitrateUpperCap)
+				for _, client := range s.clients.GetClients() {
+					bw := client.egressBandwidth
+					if maxBandwidth < bw {
+						maxBandwidth = bw
+					}
+
+					if minBandwidth > bw {
+						minBandwidth = bw
+					}
+				}
+
+				if maxBandwidth > MaxBitrateUpperCap {
+					maxBandwidth = MaxBitrateUpperCap
+				}
+
+				if minBandwidth > MinBitrateUpperCap {
+					minBandwidth = MinBitrateUpperCap
+				} else if minBandwidth < MinBitrateLowerCap {
+					minBandwidth = MinBitrateLowerCap
+				}
+
+				s.SetClientsMaximumBitrate(minBandwidth, maxBandwidth)
+			}
+		}
+	}()
 }

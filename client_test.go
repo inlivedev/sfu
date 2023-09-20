@@ -38,7 +38,7 @@ func TestTracksManualSubscribe(t *testing.T) {
 	trackChan := make(chan bool)
 
 	for i := 0; i < peerCount; i++ {
-		pc, client, _, _ := createPeerPair(t, ctx, testRoom, fmt.Sprintf("peer-%d", i), true, false)
+		pc, client, _, _ := CreatePeerPair(ctx, testRoom, DefaultTestIceServers(), fmt.Sprintf("peer-%d", i), true, false)
 		client.OnTracksAvailable = func(availableTracks []ITrack) {
 			tracksAvailableChan <- len(availableTracks)
 			tracksReq := make([]SubscribeTrackRequest, 0)
@@ -121,7 +121,7 @@ func TestAutoSubscribeTracks(t *testing.T) {
 	trackChan := make(chan bool)
 
 	for i := 0; i < peerCount; i++ {
-		pc, client, _, _ := createPeerPair(t, ctx, testRoom, fmt.Sprintf("peer-%d", i), true, false)
+		pc, client, _, _ := CreatePeerPair(ctx, testRoom, DefaultTestIceServers(), fmt.Sprintf("peer-%d", i), true, false)
 		client.SubscribeAllTracks()
 
 		client.OnTracksAdded = func(addedTracks []ITrack) {
@@ -163,62 +163,65 @@ Loop:
 
 // TODO: this is can't be work without a new SimulcastLocalTrack that can add header extension to the packet
 
-// func TestSimulcast(t *testing.T) {
-// 	t.Parallel()
+func TestSimulcastTrack(t *testing.T) {
+	t.Parallel()
 
-// 	ctx, cancel := context.WithCancel(context.Background())
-// 	defer cancel()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-// 	// create room manager first before create new room
-// 	roomManager := NewManager(ctx, "test-join-left", Options{
-// 		WebRTCPort:               40009,
-// 		ConnectRemoteRoomTimeout: 30 * time.Second,
-// 		IceServers:               DefaultTestIceServers(),
-// 	})
+	// create room manager first before create new room
+	roomManager := NewManager(ctx, "test-join-left", Options{
+		WebRTCPort:               40009,
+		ConnectRemoteRoomTimeout: 30 * time.Second,
+		IceServers:               DefaultTestIceServers(),
+	})
 
-// 	roomID := roomManager.CreateRoomID()
-// 	roomName := "test-room"
+	roomID := roomManager.CreateRoomID()
+	roomName := "test-room"
 
-// 	// create new room
-// 	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal)
-// 	require.NoError(t, err, "error creating room: %v", err)
-// 	client1, pc1 := addSimulcastPair(t, ctx, testRoom, "peer1")
-// 	client2, pc2 := addSimulcastPair(t, ctx, testRoom, "peer2")
+	// create new room
+	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal)
+	require.NoError(t, err, "error creating room: %v", err)
+	client1, pc1 := addSimulcastPair(t, ctx, testRoom, "peer1")
+	client2, pc2 := addSimulcastPair(t, ctx, testRoom, "peer2")
 
-// 	defer client1.Stop()
-// 	defer client2.Stop()
+	defer func() {
+		_ = client1.Stop()
+		_ = client2.Stop()
+	}()
 
-// 	trackChan := make(chan *webrtc.TrackRemote)
+	trackChan := make(chan *webrtc.TrackRemote)
 
-// 	pc1.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
-// 		trackChan <- track
-// 	})
+	pc1.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
+		trackChan <- track
+	})
 
-// 	pc2.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
-// 		trackChan <- track
-// 	})
+	pc2.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
+		trackChan <- track
+	})
 
-// 	// wait for track added
-// 	timeout, cancelTimeout := context.WithTimeout(ctx, 30*time.Second)
-// 	defer cancelTimeout()
+	// wait for track added
+	timeout, cancelTimeout := context.WithTimeout(ctx, 30*time.Second)
+	defer cancelTimeout()
 
-// 	trackCount := 0
-
-// 	for {
-// 		select {
-// 		case <-timeout.Done():
-// 			t.Fatal("timeout waiting for track added")
-// 		case <-trackChan:
-// 			trackCount++
-// 			if trackCount == 4 {
-// 				break
-// 			}
-// 		}
-// 	}
-// }
+	trackCount := 0
+Loop:
+	for {
+		select {
+		case <-timeout.Done():
+			t.Fatal("timeout waiting for track added")
+		case <-trackChan:
+			trackCount++
+			glog.Info("track added", trackCount)
+			if trackCount == 2 {
+				break Loop
+			}
+		}
+	}
+}
 
 func addSimulcastPair(t *testing.T, ctx context.Context, room *Room, peerName string) (*Client, *webrtc.PeerConnection) {
-	pc, client, _, _ := createPeerPair(t, ctx, room, peerName, true, true)
+	pc, client, _, _ := CreatePeerPair(ctx, room, DefaultTestIceServers(), peerName, true, true)
 	client.OnTracksAvailable = func(availableTracks []ITrack) {
 
 		tracksReq := make([]SubscribeTrackRequest, 0)

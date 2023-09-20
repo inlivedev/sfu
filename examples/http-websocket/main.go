@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"time"
 
 	"github.com/golang/glog"
 	"github.com/inlivedev/sfu"
+	"github.com/inlivedev/sfu/pkg/fakeclient"
 	"github.com/pion/webrtc/v3"
 	"golang.org/x/net/websocket"
 )
@@ -35,6 +37,8 @@ const (
 	TypeTrackAdded         = "tracks_added"
 	TypeTrackAvailable     = "tracks_available"
 	TypeSwitchQuality      = "switch_quality"
+	TypeUpdateBandwidth    = "update_bandwidth"
+	TypeMaxBitrateAdjusted = "max_bitrate_adjusted"
 )
 
 func main() {
@@ -53,6 +57,37 @@ func main() {
 
 	// create new room
 	defaultRoom, _ := roomManager.NewRoom(roomID, roomName, sfu.RoomTypeLocal)
+
+	fakeClientCount := 0
+	localIp, _ := sfu.GetLocalIp()
+	turnServer := sfu.StartTurnServer(ctx, localIp.String())
+	defer turnServer.Close()
+
+	iceServers := []webrtc.ICEServer{
+		{
+			URLs: []string{"stun:stun.l.google.com:19302"},
+		},
+		{
+			URLs:           []string{"turn:" + localIp.String() + ":3478", "stun:" + localIp.String() + ":3478"},
+			Username:       "user",
+			Credential:     "pass",
+			CredentialType: webrtc.ICECredentialTypePassword,
+		},
+	}
+
+	for i := 0; i < fakeClientCount; i++ {
+		// create a fake client
+		fc := fakeclient.Create(ctx, defaultRoom, iceServers, fmt.Sprintf("fake-client-%d", i), true)
+		fc.Client.SubscribeAllTracks()
+
+		fc.Client.OnTracksAdded = func(addedTracks []sfu.ITrack) {
+			setTracks := make(map[string]sfu.TrackType, 0)
+			for _, track := range addedTracks {
+				setTracks[track.ID()] = sfu.TrackTypeMedia
+			}
+			fc.Client.SetTracksSourceType(setTracks)
+		}
+	}
 
 	fs := http.FileServer(http.Dir("./"))
 	http.Handle("/", fs)
@@ -109,7 +144,7 @@ func clientHandler(conn *websocket.Conn, messageChan chan Request, r *sfu.Room) 
 	// add a new client to room
 	// you can also get the client by using r.GetClient(clientID)
 	opts := sfu.DefaultClientOptions()
-	opts.EnableCongestionController = false
+	opts.EnableCongestionController = true
 	client, err := r.AddClient(clientID, opts)
 	if err != nil {
 		log.Panic(err)
@@ -208,6 +243,21 @@ func clientHandler(conn *websocket.Conn, messageChan chan Request, r *sfu.Room) 
 		_, _ = conn.Write(respBytes)
 	}
 
+	type Bitrates struct {
+		Min uint32 `json:"min"`
+		Max uint32 `json:"max"`
+	}
+
+	client.OnMaxBitrateAdjusted = func(ctx context.Context, minBitrate, maxBitrate uint32) {
+		resp := Respose{
+			Status: true,
+			Type:   TypeMaxBitrateAdjusted,
+			Data:   Bitrates{Min: minBitrate, Max: maxBitrate},
+		}
+		respBytes, _ := json.Marshal(resp)
+		_, _ = conn.Write(respBytes)
+	}
+
 	client.OnIceCandidate = func(ctx context.Context, candidate *webrtc.ICECandidate) {
 		// SFU send an ICE candidate to client
 		resp := Respose{
@@ -303,6 +353,9 @@ func clientHandler(conn *websocket.Conn, messageChan chan Request, r *sfu.Room) 
 					client.SetQuality(sfu.QualityHigh)
 				}
 
+			} else if req.Type == TypeUpdateBandwidth {
+				bandwidth := uint32(req.Data.(float64))
+				client.UpdatePublisherBandwidth(bandwidth)
 			} else {
 				glog.Error("unknown message type", req)
 			}

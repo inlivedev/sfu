@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/golang/glog"
-	"github.com/inlivedev/sfu/testhelper"
 	"github.com/pion/webrtc/v3"
 	"github.com/stretchr/testify/require"
 )
@@ -113,8 +112,8 @@ func TestExtension(t *testing.T) {
 	joinChan := make(chan bool)
 	peerCount := 0
 
-	tracks, _ := testhelper.GetStaticTracks(ctx, "test", true)
-	mediaEngine := testhelper.GetMediaEngine()
+	tracks, _ := GetStaticTracks(ctx, "test", true)
+	mediaEngine := GetMediaEngine()
 
 	testRoom.OnClientLeft(func(client *Client) {
 		leftChan <- true
@@ -144,7 +143,7 @@ func TestExtension(t *testing.T) {
 	}
 
 	require.NoErrorf(t, err, "error creating peer connection: %v", err)
-	testhelper.SetPeerConnectionTracks(ctx, peer1, tracks)
+	SetPeerConnectionTracks(ctx, peer1, tracks)
 	offer, err := peer1.CreateOffer(nil)
 	require.NoErrorf(t, err, "error creating offer: %v", err)
 	err = peer1.SetLocalDescription(offer)

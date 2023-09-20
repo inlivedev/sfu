@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/golang/glog"
-	"github.com/inlivedev/sfu/testhelper"
 	"github.com/pion/webrtc/v3"
 	"github.com/stretchr/testify/require"
 )
@@ -40,7 +39,7 @@ func TestLeaveRoom(t *testing.T) {
 
 	for i := 0; i < peerCount; i++ {
 		go func() {
-			pc, client, _, _ := createPeerPair(t, ctx, testRoom, fmt.Sprintf("peer-%d", i), true, false)
+			pc, client, _, _ := CreatePeerPair(ctx, testRoom, DefaultTestIceServers(), fmt.Sprintf("peer-%d", i), true, false)
 
 			clients = append(clients, client)
 
@@ -153,7 +152,7 @@ func TestRenegotiation(t *testing.T) {
 	pairs := make([]Pair, 0)
 
 	for i := 0; i < peerCount; i++ {
-		pc, client, _, _ := createPeerPair(t, ctx, testRoom, fmt.Sprintf("peer-%d", i), true, false)
+		pc, client, _, _ := CreatePeerPair(ctx, testRoom, DefaultTestIceServers(), fmt.Sprintf("peer-%d", i), true, false)
 		client.SubscribeAllTracks()
 		pairs = append(pairs, Pair{pc, client})
 
@@ -190,10 +189,10 @@ Loop:
 				go func() {
 					// add more tracks to each clients
 					for _, pair := range pairs {
-						newTrack, _ := testhelper.GetStaticVideoTrack(timeout, testhelper.GenerateSecureToken(), testhelper.GenerateSecureToken(), true, "")
+						newTrack, _ := GetStaticVideoTrack(timeout, GenerateSecureToken(), GenerateSecureToken(), true, "")
 						_, err := pair.pc.AddTransceiverFromTrack(newTrack)
 						require.NoError(t, err, "error adding track: %v", err)
-						negotiate(t, pair.pc, pair.client)
+						negotiate(pair.pc, pair.client)
 					}
 				}()
 			}
