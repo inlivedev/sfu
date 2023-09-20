@@ -82,7 +82,7 @@ func GetStaticTracks(ctx context.Context, streamID string, loop bool) ([]*webrtc
 	staticTracks := make([]*webrtc.TrackLocalStaticSample, 0)
 	audioTrack, audioDoneChan := GetStaticAudioTrack(ctx, audioTrackID, streamID, loop)
 	staticTracks = append(staticTracks, audioTrack)
-	videoTrack, videoDoneChan := GetStaticVideoTrack(ctx, videoTrackID, streamID, loop, "")
+	videoTrack, videoDoneChan := GetStaticVideoTrack(ctx, videoTrackID, streamID, loop, "low")
 	staticTracks = append(staticTracks, videoTrack)
 
 	allDone := make(chan bool)
@@ -159,7 +159,7 @@ func GetStaticVideoTrack(ctx context.Context, trackID, streamID string, loop boo
 		rid = "low"
 	default:
 		videoFile = videoFileName
-		rid = "high"
+		rid = "low"
 	}
 
 	videoFileName := path.Join(path.Dir(filename), videoFile)
