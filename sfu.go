@@ -406,10 +406,10 @@ func (s *SFU) removeClient(client *Client) error {
 	return nil
 }
 
-func (s *SFU) SetClientsMaximumBitrate(minBitrate, maxBitrate uint32) {
+func (s *SFU) SetClientsMinMaxBitrate(minBitrate, maxBitrate uint32) {
 	for _, client := range s.clients.GetClients() {
-		if client.OnMaxBitrateAdjusted != nil {
-			client.OnMaxBitrateAdjusted(s.context, minBitrate, maxBitrate)
+		if client.OnMinMaxBitrateAdjusted != nil {
+			client.OnMinMaxBitrateAdjusted(s.context, minBitrate, maxBitrate)
 		}
 	}
 }
@@ -424,30 +424,30 @@ func (s *SFU) monitorAndAdjustBandwidth() {
 			case <-ctx.Done():
 				return
 			case <-t.C:
-				maxBandwidth := uint32(initialSendBandwidth)
-				minBandwidth := uint32(MaxBitrateUpperCap)
+				maxBitrate := uint32(highBitrate)
+				minBitrate := uint32(lowBitrate)
 				for _, client := range s.clients.GetClients() {
-					bw := client.egressBandwidth
-					if maxBandwidth < bw {
-						maxBandwidth = bw
+					_, bitrate := client.GetMaxBitratePerTrack()
+					if maxBitrate < bitrate {
+						maxBitrate = bitrate
 					}
 
-					if minBandwidth > bw {
-						minBandwidth = bw
+					if minBitrate > bitrate {
+						minBitrate = bitrate
 					}
 				}
 
-				if maxBandwidth > MaxBitrateUpperCap {
-					maxBandwidth = MaxBitrateUpperCap
+				if maxBitrate > MaxBitrateUpperCap {
+					maxBitrate = MaxBitrateUpperCap
 				}
 
-				if minBandwidth > MinBitrateUpperCap {
-					minBandwidth = MinBitrateUpperCap
-				} else if minBandwidth < MinBitrateLowerCap {
-					minBandwidth = MinBitrateLowerCap
+				if minBitrate > MinBitrateUpperCap {
+					minBitrate = MinBitrateUpperCap
+				} else if minBitrate < MinBitrateLowerCap {
+					minBitrate = MinBitrateLowerCap
 				}
 
-				s.SetClientsMaximumBitrate(minBandwidth, maxBandwidth)
+				s.SetClientsMinMaxBitrate(minBitrate, maxBitrate)
 			}
 		}
 	}()

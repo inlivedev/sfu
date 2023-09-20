@@ -195,7 +195,7 @@
                         });
 
                         ws.send(JSON.stringify({type:'tracks_available',data:trackType}));
-                    } else if (msg.type == 'max_bitrate_adjusted') {
+                    } else if (msg.type == 'bitrate_adjusted') {
                         const bitrates = msg.data
                         adjustBitrate(bitrates.min,bitrates.max)
                     }

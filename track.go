@@ -207,7 +207,7 @@ func (t *SimulcastClientTrack) GetAllowedQuality(kind webrtc.RTPCodecType) Quali
 		return QualityHigh
 	}
 
-	_, maxAllowedVideoBitrate := t.client.getMaxPerTrackQuality()
+	_, maxAllowedVideoBitrate := t.client.GetMaxBitratePerTrack()
 
 	if t.remoteTrack.isTrackActive(QualityHigh) {
 		currentHighBitrate = t.remoteTrack.remoteTrackHigh.GetCurrentBitrate()

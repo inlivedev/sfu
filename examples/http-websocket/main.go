@@ -38,7 +38,7 @@ const (
 	TypeTrackAvailable     = "tracks_available"
 	TypeSwitchQuality      = "switch_quality"
 	TypeUpdateBandwidth    = "update_bandwidth"
-	TypeMaxBitrateAdjusted = "max_bitrate_adjusted"
+	TypeBitrateAdjusted    = "bitrate_adjusted"
 )
 
 func main() {
@@ -248,10 +248,10 @@ func clientHandler(conn *websocket.Conn, messageChan chan Request, r *sfu.Room) 
 		Max uint32 `json:"max"`
 	}
 
-	client.OnMaxBitrateAdjusted = func(ctx context.Context, minBitrate, maxBitrate uint32) {
+	client.OnMinMaxBitrateAdjusted = func(ctx context.Context, minBitrate, maxBitrate uint32) {
 		resp := Respose{
 			Status: true,
-			Type:   TypeMaxBitrateAdjusted,
+			Type:   TypeBitrateAdjusted,
 			Data:   Bitrates{Min: minBitrate, Max: maxBitrate},
 		}
 		respBytes, _ := json.Marshal(resp)

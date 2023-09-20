@@ -89,7 +89,7 @@ type Client struct {
 	onLeftCallbacks                   []func()
 	onTrackRemovedCallbacks           []func(sourceType string, track *webrtc.TrackLocalStaticRTP)
 	OnIceCandidate                    func(context.Context, *webrtc.ICECandidate)
-	OnMaxBitrateAdjusted              func(context.Context, uint32, uint32)
+	OnMinMaxBitrateAdjusted           func(context.Context, uint32, uint32)
 	OnBeforeRenegotiation             func(context.Context) bool
 	OnRenegotiation                   func(context.Context, webrtc.SessionDescription) (webrtc.SessionDescription, error)
 	OnAllowedRemoteRenegotiation      func()
@@ -915,7 +915,7 @@ func (c *Client) SetQuality(quality QualityLevel) {
 
 // Currently the audio max bitrate has no affect, but we might able to control it with RTCP report
 // return audio and video max bitrate allowed per track
-func (c *Client) getMaxPerTrackQuality() (uint32, uint32) {
+func (c *Client) GetMaxBitratePerTrack() (uint32, uint32) {
 	var bandwidthPerVideoTrack, bandwidthPerAudioTrack uint32
 
 	// initial track count is set 1 considering there might be a new track without a bitrate date yet
