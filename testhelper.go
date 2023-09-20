@@ -14,17 +14,8 @@ import (
 	"github.com/inlivedev/sfu/pkg/simulcastinterceptor"
 	"github.com/pion/interceptor"
 	"github.com/pion/interceptor/pkg/stats"
-	"github.com/pion/mediadevices"
-	"github.com/pion/mediadevices/pkg/codec/opus"
-	"github.com/pion/mediadevices/pkg/codec/x264"
-	"github.com/pion/mediadevices/pkg/frame"
-	"github.com/pion/mediadevices/pkg/prop"
 	"github.com/pion/webrtc/v3"
 	"github.com/pion/webrtc/v3/pkg/media"
-
-	//nolint:blank-imports // Importing drivers
-	_ "github.com/pion/mediadevices/pkg/driver/audiotest"
-	_ "github.com/pion/mediadevices/pkg/driver/videotest"
 
 	"github.com/pion/webrtc/v3/pkg/media/h264reader"
 
@@ -41,39 +32,6 @@ const (
 	oggPageDuration      = time.Millisecond * 20
 	h264FrameDuration    = time.Millisecond * 33
 )
-
-func GetTestTracks() ([]mediadevices.Track, *webrtc.MediaEngine) {
-	x264Params, _ := x264.NewParams()
-
-	x264Params.BitRate = 500_000 // 500kbps
-
-	opusParams, _ := opus.NewParams()
-
-	codecSelector := mediadevices.NewCodecSelector(
-		mediadevices.WithVideoEncoders(&x264Params),
-		mediadevices.WithAudioEncoders(&opusParams),
-	)
-
-	mediaEngine = &webrtc.MediaEngine{}
-	if err := mediaEngine.RegisterDefaultCodecs(); err != nil {
-		panic(err)
-	}
-
-	codecSelector.Populate(mediaEngine)
-
-	s, _ := mediadevices.GetUserMedia(mediadevices.MediaStreamConstraints{
-		Video: func(c *mediadevices.MediaTrackConstraints) {
-			c.FrameFormat = prop.FrameFormat(frame.FormatI420)
-			c.Width = prop.Int(640)
-			c.Height = prop.Int(480)
-		},
-		Audio: func(c *mediadevices.MediaTrackConstraints) {
-		},
-		Codec: codecSelector,
-	})
-
-	return s.GetTracks(), mediaEngine
-}
 
 func GetStaticTracks(ctx context.Context, streamID string, loop bool) ([]*webrtc.TrackLocalStaticSample, chan bool) {
 	audioTrackID := GenerateSecureToken()
@@ -109,37 +67,6 @@ func GetStaticTracks(ctx context.Context, streamID string, loop bool) ([]*webrtc
 	}()
 
 	return staticTracks, allDone
-}
-
-func GetVideoTrack() (mediadevices.Track, *webrtc.MediaEngine) {
-	x264Params, _ := x264.NewParams()
-
-	x264Params.BitRate = 500_000 // 500kbps
-
-	opusParams, _ := opus.NewParams()
-
-	codecSelector := mediadevices.NewCodecSelector(
-		mediadevices.WithVideoEncoders(&x264Params),
-		mediadevices.WithAudioEncoders(&opusParams),
-	)
-
-	mediaEngine := webrtc.MediaEngine{}
-	if err := mediaEngine.RegisterDefaultCodecs(); err != nil {
-		panic(err)
-	}
-
-	codecSelector.Populate(&mediaEngine)
-
-	s, _ := mediadevices.GetUserMedia(mediadevices.MediaStreamConstraints{
-		Video: func(c *mediadevices.MediaTrackConstraints) {
-			c.FrameFormat = prop.FrameFormat(frame.FormatI420)
-			c.Width = prop.Int(640)
-			c.Height = prop.Int(480)
-		},
-		Codec: codecSelector,
-	})
-
-	return s.GetTracks()[0], &mediaEngine
 }
 
 func GetStaticVideoTrack(ctx context.Context, trackID, streamID string, loop bool, quality string) (*webrtc.TrackLocalStaticSample, chan bool) {
@@ -401,21 +328,10 @@ func AddSimulcastVideoTracks(ctx context.Context, pc *webrtc.PeerConnection, tra
 }
 
 func GetMediaEngine() *webrtc.MediaEngine {
-	x264Params, _ := x264.NewParams()
-
-	opusParams, _ := opus.NewParams()
-
-	codecSelector := mediadevices.NewCodecSelector(
-		mediadevices.WithVideoEncoders(&x264Params),
-		mediadevices.WithAudioEncoders(&opusParams),
-	)
-
 	mediaEngine = &webrtc.MediaEngine{}
-	// if err := mediaEngine.RegisterDefaultCodecs(); err != nil {
-	// 	panic(err)
-	// }
-
-	codecSelector.Populate(mediaEngine)
+	if err := mediaEngine.RegisterDefaultCodecs(); err != nil {
+		panic(err)
+	}
 
 	return mediaEngine
 }

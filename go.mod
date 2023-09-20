@@ -5,17 +5,15 @@ go 1.20
 require (
 	github.com/pion/ice/v2 v2.3.11
 	github.com/pion/interceptor v0.1.18
-	github.com/pion/mediadevices v0.5.0
 	github.com/pion/rtcp v1.2.10
 	github.com/pion/webrtc/v3 v3.2.19
 	github.com/speps/go-hashids v2.0.0+incompatible
 	github.com/stretchr/testify v1.8.4
 )
 
-require (
-	github.com/golang/glog v1.1.2
-	golang.org/x/text v0.12.0
-)
+require github.com/golang/glog v1.1.2
+
+require gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
@@ -34,7 +32,6 @@ require (
 	github.com/pion/turn/v2 v2.1.3
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	golang.org/x/crypto v0.12.0 // indirect
-	golang.org/x/image v0.8.0 // indirect
 	golang.org/x/net v0.14.0 // direct
 	golang.org/x/sys v0.11.0
 	gopkg.in/yaml.v3 v3.0.1 // indirect
