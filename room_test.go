@@ -247,7 +247,7 @@ Loop:
 	glog.Info("total room bytes receive: ", roomStats.BytesReceived)
 	glog.Info("total room packet lost: ", roomStats.PacketLost)
 
-	diffPercentClientIgressRoomBytesSent := (float64(totalClientIngressBytes) - float64(roomStats.ByteSent)) / float64(totalClientIngressBytes) * 100
+	diffPercentClientIgressRoomBytesSent := (float64(totalClientIngressBytes) - float64(roomStats.ByteSent-uint64(roomStats.PacketLost*1500))) / float64(totalClientIngressBytes) * 100
 	require.LessOrEqual(t, diffPercentClientIgressRoomBytesSent, 10.0, "expecting less than 10 percent difference client igress and room byte sent")
 
 	diffPercentClientEgressRoomBytesReceived := (float64(totalClientEgressBytes) - float64(roomStats.BytesReceived)) / float64(totalClientEgressBytes) * 100
