@@ -130,7 +130,7 @@ func New(ctx context.Context, iceServers []webrtc.ICEServer, mux *UDPMux) *SFU {
 		sfu.Stop()
 	}()
 
-	sfu.monitorAndAdjustBandwidth()
+	// sfu.monitorAndAdjustBandwidth()
 
 	return sfu
 }
