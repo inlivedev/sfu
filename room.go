@@ -91,7 +91,7 @@ func (r *Room) Close() error {
 		return ErrRoomIsClosed
 	}
 
-	if len(r.sfu.GetClients()) > 0 {
+	if r.sfu.clients.Length() > 0 {
 		return ErrRoomIsNotEmpty
 	}
 
@@ -121,7 +121,7 @@ func (r *Room) StopClient(id string) error {
 }
 
 func (r *Room) StopAllClients() {
-	for _, client := range r.sfu.GetClients() {
+	for _, client := range r.sfu.clients.GetClients() {
 		client.PeerConnection().Close()
 	}
 }
@@ -180,6 +180,9 @@ func (r *Room) onClientLeft(client *Client) {
 	}
 
 	// update the latest stats from client before they left
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+
 	r.stats[client.ID()] = *client.Stats()
 }
 
@@ -232,7 +235,7 @@ func (r *Room) GetStats() RoomStats {
 	}
 
 	return RoomStats{
-		ActiveSessions: calculateActiveSessions(r.GetSFU().GetClients()),
+		ActiveSessions: r.sfu.TotalActiveSessions(),
 		Clients:        len(r.stats),
 		PacketLost:     packet_lost,
 		BytesReceived:  bytesReceived,
@@ -242,7 +245,14 @@ func (r *Room) GetStats() RoomStats {
 }
 
 func (r *Room) updateStats() {
-	for _, client := range r.sfu.GetClients() {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+
+	for _, client := range r.sfu.clients.GetClients() {
 		r.stats[client.ID()] = *client.Stats()
 	}
+}
+
+func (r Room) CreateDataChannel(label string, opts DataChannelOptions) error {
+	return r.sfu.CreateDataChannel(label, opts)
 }

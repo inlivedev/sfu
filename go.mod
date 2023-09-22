@@ -1,6 +1,6 @@
 module github.com/inlivedev/sfu
 
-go 1.20
+go 1.21
 
 require (
 	github.com/pion/ice/v2 v2.3.11
@@ -11,7 +11,10 @@ require (
 	github.com/stretchr/testify v1.8.4
 )
 
-require github.com/golang/glog v1.1.2
+require (
+	github.com/golang/glog v1.1.2
+	golang.org/x/exp v0.0.0-20230905200255-921286631fa9
+)
 
 require gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 
@@ -33,6 +36,6 @@ require (
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	golang.org/x/crypto v0.12.0 // indirect
 	golang.org/x/net v0.14.0 // direct
-	golang.org/x/sys v0.11.0
+	golang.org/x/sys v0.12.0
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

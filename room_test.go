@@ -153,24 +153,24 @@ func TestRoomStats(t *testing.T) {
 	pc1, client1, statsGetter1, done1 := CreatePeerPair(ctx, testRoom, DefaultTestIceServers(), "peer1", false, false)
 	client1.SubscribeAllTracks()
 
-	client1.OnTracksAdded = func(addedTracks []ITrack) {
+	client1.OnTracksAdded(func(addedTracks []ITrack) {
 		setTracks := make(map[string]TrackType, 0)
 		for _, track := range addedTracks {
 			setTracks[track.ID()] = TrackTypeMedia
 		}
 		client1.SetTracksSourceType(setTracks)
-	}
+	})
 
 	pc2, client2, statsGetter2, done2 := CreatePeerPair(ctx, testRoom, DefaultTestIceServers(), "peer2", false, false)
 	client2.SubscribeAllTracks()
 
-	client2.OnTracksAdded = func(addedTracks []ITrack) {
+	client2.OnTracksAdded(func(addedTracks []ITrack) {
 		setTracks := make(map[string]TrackType, 0)
 		for _, track := range addedTracks {
 			setTracks[track.ID()] = TrackTypeMedia
 		}
 		client2.SetTracksSourceType(setTracks)
-	}
+	})
 
 	timeout, cancelTimeout := context.WithTimeout(ctx, 80*time.Second)
 	defer cancelTimeout()

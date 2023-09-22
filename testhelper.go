@@ -477,16 +477,28 @@ func CreatePeerPair(ctx context.Context, room *Room, iceServers []webrtc.ICEServ
 	}
 
 	client.OnRenegotiation = func(ctx context.Context, offer webrtc.SessionDescription) (answer webrtc.SessionDescription, e error) {
-		if client.State == ClientStateEnded {
+		if client.state.Load() == ClientStateEnded {
 			glog.Info("test: renegotiation canceled because client has ended")
 			return webrtc.SessionDescription{}, errors.New("client ended")
 		}
 
+		currentTranscv := len(pc.GetTransceivers())
+
 		glog.Info("test: got renegotiation ", peerName)
 		defer glog.Info("test: renegotiation done ", peerName)
-		_ = pc.SetRemoteDescription(offer)
+		if err = pc.SetRemoteDescription(offer); err != nil {
+			return webrtc.SessionDescription{}, err
+		}
+
 		answer, _ = pc.CreateAnswer(nil)
-		_ = pc.SetLocalDescription(answer)
+
+		if err = pc.SetLocalDescription(answer); err != nil {
+			return webrtc.SessionDescription{}, err
+		}
+
+		newTcv := len(pc.GetTransceivers()) - currentTranscv
+		glog.Info("test: new transceiver ", newTcv, " total tscv ", len(pc.GetTransceivers()))
+
 		return *pc.LocalDescription(), nil
 	}
 
@@ -513,4 +525,140 @@ func negotiate(pc *webrtc.PeerConnection, client *Client) {
 	_ = pc.SetLocalDescription(offer)
 	answer, _ := client.Negotiate(offer)
 	_ = pc.SetRemoteDescription(*answer)
+}
+
+func CreateDataPair(ctx context.Context, room *Room, iceServers []webrtc.ICEServer, peerName string) (*webrtc.PeerConnection, *Client, stats.Getter) {
+	var (
+		client      *Client
+		mediaEngine *webrtc.MediaEngine = GetMediaEngine()
+	)
+
+	if len(iceServers) == 0 {
+		iceServers = []webrtc.ICEServer{
+			{
+				URLs:           []string{"turn:127.0.0.1:3478", "stun:127.0.0.1:3478"},
+				Username:       "user",
+				Credential:     "pass",
+				CredentialType: webrtc.ICECredentialTypePassword,
+			},
+		}
+	}
+
+	i := &interceptor.Registry{}
+
+	statsInterceptorFactory, err := stats.NewInterceptor()
+	if err != nil {
+		panic(err)
+	}
+
+	var statsGetter stats.Getter
+
+	statsInterceptorFactory.OnNewPeerConnection(func(_ string, g stats.Getter) {
+		statsGetter = g
+	})
+
+	i.Add(statsInterceptorFactory)
+
+	// Use the default set of Interceptors
+	if err := webrtc.RegisterDefaultInterceptors(mediaEngine, i); err != nil {
+		panic(err)
+	}
+
+	webrtcAPI := webrtc.NewAPI(webrtc.WithMediaEngine(mediaEngine), webrtc.WithInterceptorRegistry(i))
+
+	pc, err := webrtcAPI.NewPeerConnection(webrtc.Configuration{
+		ICEServers: iceServers,
+	})
+
+	pc.AddTransceiverFromKind(webrtc.RTPCodecTypeVideo, webrtc.RtpTransceiverInit{Direction: webrtc.RTPTransceiverDirectionRecvonly})
+
+	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
+		if state == webrtc.PeerConnectionStateClosed || state == webrtc.PeerConnectionStateFailed {
+			glog.Info("test: peer connection closed ", peerName)
+			if client != nil {
+				_ = room.StopClient(client.ID())
+			}
+		}
+
+	})
+
+	// add a new client to room
+	// you can also get the client by using r.GetClient(clientID)
+	client, _ = room.AddClient(room.CreateClientID(room.GetSFU().Counter), DefaultClientOptions())
+
+	client.OnAllowedRemoteRenegotiation = func() {
+		glog.Info("allowed remote renegotiation")
+		go negotiate(pc, client)
+	}
+
+	client.OnIceCandidate = func(ctx context.Context, candidate *webrtc.ICECandidate) {
+		if candidate == nil {
+			return
+		}
+
+		_ = pc.AddICECandidate(candidate.ToJSON())
+	}
+
+	client.OnRenegotiation = func(ctx context.Context, offer webrtc.SessionDescription) (answer webrtc.SessionDescription, e error) {
+		if client.state.Load() == ClientStateEnded {
+			glog.Info("test: renegotiation canceled because client has ended")
+			return webrtc.SessionDescription{}, errors.New("client ended")
+		}
+
+		glog.Info("test: got renegotiation ", peerName)
+		defer glog.Info("test: renegotiation done ", peerName)
+		_ = pc.SetRemoteDescription(offer)
+		answer, _ = pc.CreateAnswer(nil)
+		_ = pc.SetLocalDescription(answer)
+		return *pc.LocalDescription(), nil
+	}
+
+	negotiate(pc, client)
+
+	pc.OnICECandidate(func(candidate *webrtc.ICECandidate) {
+		if candidate == nil {
+			return
+		}
+		err = client.PeerConnection().AddICECandidate(candidate.ToJSON())
+	})
+
+	return pc, client, statsGetter
+}
+
+func WaitConnected(ctx context.Context, peers []*webrtc.PeerConnection) chan bool {
+	connected := make(chan bool)
+	waitChan := make(chan bool)
+	connectedCount := 0
+	ctxx, cancel := context.WithCancel(ctx)
+
+	for _, pc := range peers {
+		pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
+			if state == webrtc.PeerConnectionStateConnected {
+				connected <- true
+			} else if state == webrtc.PeerConnectionStateFailed || state == webrtc.PeerConnectionStateClosed {
+				waitChan <- false
+				cancel()
+			}
+		})
+	}
+
+	go func() {
+		defer cancel()
+
+		for {
+			select {
+			case <-ctxx.Done():
+				waitChan <- false
+				return
+			case <-connected:
+				connectedCount++
+				if connectedCount == len(peers) {
+					waitChan <- true
+					return
+				}
+			}
+		}
+	}()
+
+	return waitChan
 }
