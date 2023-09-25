@@ -99,7 +99,16 @@ func (t *RemoteTrack) Track() *webrtc.TrackRemote {
 
 func (t *RemoteTrack) GetCurrentBitrate() uint32 {
 	if t.currentBytesReceived.Load() == 0 {
-		return 0
+		switch RIDToQuality(t.track.RID()) {
+		case QualityHigh:
+			return highBitrate
+		case QualityMid:
+			return midBitrate
+		case QualityLow:
+			return lowBitrate
+		default:
+			return 0
+		}
 	}
 
 	current := t.currentBytesReceived.Load()

@@ -450,10 +450,12 @@ func FlattenErrors(errs []error) error {
 func Uint32ToQualityLevel(quality uint32) QualityLevel {
 	switch quality {
 	case 0:
-		return QualityLow
+		return QualityNone
 	case 1:
-		return QualityMid
+		return QualityLow
 	case 2:
+		return QualityMid
+	case 3:
 		return QualityHigh
 	default:
 		return QualityLow

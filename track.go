@@ -36,7 +36,7 @@ type BaseTrack struct {
 	isProcessed  bool
 	kind         webrtc.RTPCodecType
 	codec        webrtc.RTPCodecParameters
-	sourceType   TrackType // source of the track, can be media or screen
+	isScreen     *atomic.Bool // source of the track, can be media or screen
 	clientTracks *clientTrackList
 }
 
@@ -47,7 +47,7 @@ type ITrack interface {
 	IsProcessed() bool
 	SetSourceType(TrackType)
 	SetAsProcessed()
-	SourceType() TrackType
+	IsScreen() bool
 	Kind() webrtc.RTPCodecType
 	TotalTracks() int
 }
@@ -70,6 +70,7 @@ func NewTrack(client *Client, track *webrtc.TrackRemote) ITrack {
 
 	baseTrack := BaseTrack{
 		id:           track.ID(),
+		isScreen:     &atomic.Bool{},
 		msid:         track.Msid(),
 		streamid:     track.StreamID(),
 		client:       client,
@@ -111,11 +112,8 @@ func (t *Track) RemoteTrack() *RemoteTrack {
 	return t.remoteTrack
 }
 
-func (t *Track) SourceType() TrackType {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	return t.base.sourceType
+func (t *Track) IsScreen() bool {
+	return t.base.isScreen.Load()
 }
 
 func (t *Track) IsSimulcast() bool {
@@ -138,14 +136,17 @@ func (t *Track) TotalTracks() int {
 }
 
 func (t *Track) Subscribe() iClientTrack {
+	isScreen := &atomic.Bool{}
+	isScreen.Store(t.IsScreen())
 	ct := &ClientTrack{
 		id:          t.base.id,
+		mu:          sync.RWMutex{},
 		client:      t.Client(),
 		kind:        t.base.kind,
 		mimeType:    t.remoteTrack.track.Codec().MimeType,
 		localTrack:  t.createLocalTrack(),
 		remoteTrack: t.remoteTrack,
-		sourceType:  t.base.sourceType,
+		isScreen:    isScreen,
 	}
 
 	t.base.clientTracks.Add(ct)
@@ -154,10 +155,7 @@ func (t *Track) Subscribe() iClientTrack {
 }
 
 func (t *Track) SetSourceType(sourceType TrackType) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	t.base.sourceType = sourceType
+	t.base.isScreen.Store(sourceType == TrackTypeScreen)
 }
 
 func (t *Track) SetAsProcessed() {
@@ -171,13 +169,6 @@ func (t *Track) SendPLI() error {
 	return t.base.client.peerConnection.WriteRTCP([]rtcp.Packet{
 		&rtcp.PictureLossIndication{MediaSSRC: uint32(t.remoteTrack.track.SSRC())},
 	})
-}
-
-func (t *Track) GetSourceType() TrackType {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	return t.base.sourceType
 }
 
 type SimulcastTrack struct {
@@ -201,6 +192,7 @@ func NewSimulcastTrack(client *Client, track *webrtc.TrackRemote) ITrack {
 		mu: sync.Mutex{},
 		base: &BaseTrack{
 			id:           track.ID(),
+			isScreen:     &atomic.Bool{},
 			msid:         track.Msid(),
 			streamid:     track.StreamID(),
 			client:       client,
@@ -313,14 +305,28 @@ func (t *SimulcastTrack) Subscribe(client *Client) iClientTrack {
 		panic(newTrackErr)
 	}
 
+	isScreen := &atomic.Bool{}
+	isScreen.Store(t.IsScreen())
+
+	lastQuality := &atomic.Uint32{}
+	lastQuality.Store(uint32(QualityLow))
+
+	sequenceNumber := &atomic.Uint32{}
+
+	lastTimestamp := &atomic.Uint32{}
+
 	ct := &SimulcastClientTrack{
-		id:          t.base.id,
-		kind:        t.base.kind,
-		mimeType:    t.base.codec.MimeType,
-		client:      client,
-		localTrack:  track,
-		remoteTrack: t,
-		sourceType:  t.base.sourceType,
+		mu:             sync.RWMutex{},
+		id:             t.base.id,
+		kind:           t.base.kind,
+		mimeType:       t.base.codec.MimeType,
+		client:         client,
+		localTrack:     track,
+		remoteTrack:    t,
+		sequenceNumber: sequenceNumber,
+		lastQuality:    lastQuality,
+		lastTimestamp:  lastTimestamp,
+		isScreen:       isScreen,
 	}
 
 	t.base.clientTracks.Add(ct)
@@ -329,10 +335,7 @@ func (t *SimulcastTrack) Subscribe(client *Client) iClientTrack {
 }
 
 func (t *SimulcastTrack) SetSourceType(sourceType TrackType) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	t.base.sourceType = sourceType
+	t.base.isScreen.Store(sourceType == TrackTypeScreen)
 }
 
 func (t *SimulcastTrack) SetAsProcessed() {
@@ -342,11 +345,8 @@ func (t *SimulcastTrack) SetAsProcessed() {
 	t.base.isProcessed = true
 }
 
-func (t *SimulcastTrack) SourceType() TrackType {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	return t.base.sourceType
+func (t *SimulcastTrack) IsScreen() bool {
+	return t.base.isScreen.Load()
 }
 
 func (t *SimulcastTrack) SendPLI(currentTrack *webrtc.TrackRemote) error {
@@ -410,7 +410,7 @@ func (t *SimulcastTrack) isTrackActive(quality QualityLevel) bool {
 
 		delta := time.Since(time.Unix(0, t.lastReadMidTimestamp.Load()))
 		if delta > threshold {
-			glog.Warningf("track: remote track %s mid is not active, last read was %d ms ago", t.Client().ID, delta.Milliseconds())
+			glog.Warningf("track: remote track %s mid is not active, last read was %d ms ago", t.Client().ID(), delta.Milliseconds())
 			return false
 		}
 

@@ -266,10 +266,18 @@ func NewClient(s *SFU, id string, peerConnectionConfig webrtc.Configuration, opt
 			if err := client.tracks.Add(track); err != nil {
 				glog.Error("client: error add track ", err)
 			}
+
+			client.onTrack(track)
+			track.SetAsProcessed()
 		} else {
 			// simulcast
+			var simulcast *SimulcastTrack
+			var ok bool
+
 			id := remoteTrack.Msid()
+
 			glog.Infof("client: simulcast track %s %s %s", id, remoteTrack.Kind(), remoteTrack.RID())
+
 			track, err = client.tracks.Get(id) // not found because the track is not added yet due to race condition
 			if err != nil {
 				glog.Infof("client: track not found %s", id)
@@ -279,23 +287,25 @@ func NewClient(s *SFU, id string, peerConnectionConfig webrtc.Configuration, opt
 					glog.Error("client: error add track ", err)
 				}
 
-				track.(*SimulcastTrack).OnTrackComplete(func() {
+				simulcast = track.(*SimulcastTrack)
+
+				simulcast.OnTrackComplete(func() {
 					glog.Info("client: track complete ", id)
 				})
-			} else if simulcast, ok := track.(*SimulcastTrack); ok {
+			} else if simulcast, ok = track.(*SimulcastTrack); ok {
 				glog.Infof("client: track found %s", id)
 				simulcast.AddRemoteTrack(remoteTrack)
 			}
 
-			// only add tracks after complete
 			glog.Infof("client: total simulcast tracks %d", track.TotalTracks())
-		}
 
-		if !track.IsProcessed() {
-			client.onTrack(track)
-			track.SetAsProcessed()
-		}
+			// only process track when the lowest quality is available
+			if simulcast.remoteTrackLow != nil {
+				client.onTrack(track)
+				track.SetAsProcessed()
+			}
 
+		}
 	})
 
 	peerConnection.OnICECandidate(func(candidate *webrtc.ICECandidate) {
@@ -953,15 +963,19 @@ func (c *Client) SetQuality(quality QualityLevel) {
 // Currently the audio max bitrate has no affect, but we might able to control it with RTCP report
 // return audio and video max bitrate allowed per track
 func (c *Client) GetMaxBitratePerTrack() (uint32, uint32) {
-	var bandwidthPerVideoTrack, bandwidthPerAudioTrack uint32
+	var bandwidthPerVideoTrack, bandwidthPerAudioTrack, bandwidthPerScreenTrack uint32
 
-	// initial track count is set 1 considering there might be a new track without a bitrate date yet
+	// initial track count is set 1 considering there might be a new track without a bitrate yet
 	audioTracks := 1
 	videoTracks := 1
+	screenTrack := 0
 	audioTotalBitrates := uint32(0)
 	videoTotalBitrates := uint32(0)
+	screenTotalBitrates := uint32(0)
+
 	maxAudioBitrates := uint32(0)
 	maxVideoBitrates := uint32(0)
+	maxScreenBitrates := uint32(0)
 
 	for _, track := range c.clientTracks.GetTracks() {
 		var currentBitrate uint32
@@ -977,12 +991,22 @@ func (c *Client) GetMaxBitratePerTrack() (uint32, uint32) {
 		}
 
 		if track.Kind() == webrtc.RTPCodecTypeVideo {
-			videoTracks++
-			currentBitrate = track.getCurrentBitrate()
-			videoTotalBitrates += currentBitrate
-			if currentBitrate > maxVideoBitrates {
-				maxVideoBitrates = currentBitrate
+			if track.IsScreen() {
+				screenTrack++
+				currentBitrate := track.getCurrentBitrate()
+				screenTotalBitrates += currentBitrate
+				if currentBitrate > maxScreenBitrates {
+					maxScreenBitrates = currentBitrate
+				}
+			} else {
+				videoTracks++
+				currentBitrate = track.getCurrentBitrate()
+				videoTotalBitrates += currentBitrate
+				if currentBitrate > maxVideoBitrates {
+					maxVideoBitrates = currentBitrate
+				}
 			}
+
 		}
 	}
 
@@ -1005,10 +1029,16 @@ func (c *Client) GetMaxBitratePerTrack() (uint32, uint32) {
 		bandwidthPerAudioTrack = bandwidth / uint32(audioTracks)
 	}
 
+	if screenTrack == 0 {
+		bandwidthPerScreenTrack = maxScreenBitrates
+	} else {
+		bandwidthPerScreenTrack = (bandwidth - totalAudioBandwidth) / uint32(screenTrack)
+	}
+
 	if videoTracks == 0 {
 		bandwidthPerVideoTrack = maxVideoBitrates
 	} else {
-		bandwidthPerVideoTrack = (bandwidth - totalAudioBandwidth) / uint32(videoTracks)
+		bandwidthPerVideoTrack = (bandwidth - totalAudioBandwidth - bandwidthPerScreenTrack) / uint32(videoTracks)
 	}
 
 	return bandwidthPerAudioTrack, bandwidthPerVideoTrack

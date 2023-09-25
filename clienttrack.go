@@ -2,6 +2,7 @@ package sfu
 
 import (
 	"sync"
+	"sync/atomic"
 
 	"github.com/golang/glog"
 	"github.com/pion/rtp"
@@ -14,16 +15,19 @@ type iClientTrack interface {
 	ID() string
 	Kind() webrtc.RTPCodecType
 	LocalTrack() *webrtc.TrackLocalStaticRTP
+	IsScreen() bool
+	SetSourceType(TrackType)
 }
 
 type ClientTrack struct {
 	id          string
+	mu          sync.RWMutex
 	client      *Client
 	kind        webrtc.RTPCodecType
 	mimeType    string
 	localTrack  *webrtc.TrackLocalStaticRTP
 	remoteTrack *RemoteTrack
-	sourceType  TrackType
+	isScreen    *atomic.Bool
 }
 
 func (t *ClientTrack) ID() string {
@@ -39,6 +43,9 @@ func (t *ClientTrack) push(rtp *rtp.Packet, quality QualityLevel) {
 		return
 	}
 
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
 	if err := t.localTrack.WriteRTP(rtp); err != nil {
 		glog.Error("clienttrack: error on write rtp", err)
 	}
@@ -52,17 +59,26 @@ func (t *ClientTrack) LocalTrack() *webrtc.TrackLocalStaticRTP {
 	return t.localTrack
 }
 
+func (t *ClientTrack) IsScreen() bool {
+	return t.isScreen.Load()
+}
+
+func (t *ClientTrack) SetSourceType(sourceType TrackType) {
+	t.isScreen.Store(sourceType == TrackTypeScreen)
+}
+
 type SimulcastClientTrack struct {
 	id             string
+	mu             sync.RWMutex
 	client         *Client
 	kind           webrtc.RTPCodecType
 	mimeType       string
 	localTrack     *webrtc.TrackLocalStaticRTP
 	remoteTrack    *SimulcastTrack
-	sequenceNumber uint16
-	lastQuality    QualityLevel
-	lastTimestamp  uint32
-	sourceType     TrackType
+	sequenceNumber *atomic.Uint32
+	lastQuality    *atomic.Uint32
+	lastTimestamp  *atomic.Uint32
+	isScreen       *atomic.Bool
 }
 
 func (t *SimulcastClientTrack) GetAllowedQuality(kind webrtc.RTPCodecType) QualityLevel {
@@ -101,15 +117,15 @@ func (t *SimulcastClientTrack) GetAllowedQuality(kind webrtc.RTPCodecType) Quali
 		estimatedQuality = QualityLow
 	} else {
 		estimatedQuality = QualityNone
+		glog.Warning("track: no quality level is fit into the current bandwidth,  max allowed bitrate: ", maxAllowedVideoBitrate)
+		glog.Warning("track: current high bitrate ", currentHighBitrate, ", current mid bitrate: ", currentMidBitrate, ", current low bitrate: ", currentLowBitrate)
+		glog.Warning("track: client ", t.client.ID(), " bandwidth ", t.client.GetEstimatedBandwidth())
 	}
 
-	clientQuality := t.client.quality.Load()
-	if clientQuality != 0 && uint32(estimatedQuality) > clientQuality {
-		return Uint32ToQualityLevel(clientQuality)
+	clientQuality := Uint32ToQualityLevel(t.client.quality.Load())
+	if clientQuality != 0 && estimatedQuality > clientQuality {
+		return clientQuality
 	}
-
-	glog.Info("track: estimated quality", estimatedQuality, "current high bitrate", currentHighBitrate, "current mid bitrate", currentMidBitrate, "current low bitrate", currentLowBitrate, "max allowed bitrate", maxAllowedVideoBitrate)
-	glog.Info("track: client bandwidth ", t.client.GetEstimatedBandwidth())
 
 	return estimatedQuality
 }
@@ -147,8 +163,7 @@ func (t *SimulcastClientTrack) push(rtp *rtp.Packet, quality QualityLevel) {
 
 	var trackQuality QualityLevel
 
-	// lastQuality := Uint32ToQualityLevel(t.lastQuality.Load())
-	lastQuality := t.lastQuality
+	lastQuality := t.LastQuality()
 
 	if t.client.peerConnection.ConnectionState() != webrtc.PeerConnectionStateConnected {
 		return
@@ -167,7 +182,7 @@ func (t *SimulcastClientTrack) push(rtp *rtp.Packet, quality QualityLevel) {
 
 	if lastQuality == 0 {
 		trackQuality = QualityLow
-	} else if isKeyframe && t.lastTimestamp != rtp.Timestamp {
+	} else if isKeyframe && t.lastTimestamp.Load() != rtp.Timestamp {
 		trackQuality = t.GetQuality()
 
 		// prevent to jump more than 1 quality level to avoid burst bitrates
@@ -180,11 +195,8 @@ func (t *SimulcastClientTrack) push(rtp *rtp.Packet, quality QualityLevel) {
 	}
 
 	if trackQuality == quality {
-		if isKeyframe && t.lastTimestamp != rtp.Timestamp {
-			glog.Info("track: quality", trackQuality, " last quality ", lastQuality)
-		}
 		// set the last processed packet timestamp to identify if is begining of the new frame
-		t.lastTimestamp = rtp.Timestamp
+		t.lastTimestamp.Store(rtp.Timestamp)
 		// make sure the timestamp and sequence number is consistent from the previous packet even it is not the same track
 
 		// credit to https://github.com/k0nserv for helping me with this on Pion Slack channel
@@ -197,17 +209,19 @@ func (t *SimulcastClientTrack) push(rtp *rtp.Packet, quality QualityLevel) {
 			rtp.Timestamp = t.remoteTrack.baseTS + ((rtp.Timestamp - t.remoteTrack.remoteTrackLowBaseTS) - t.remoteTrack.remoteTrackLowBaseTS)
 		}
 
-		t.sequenceNumber++
-		rtp.SequenceNumber = t.sequenceNumber
+		t.sequenceNumber.Add(1)
+		rtp.SequenceNumber = uint16(t.sequenceNumber.Load())
 
-		// if t.lastQuality.Load() != uint32(quality) {
-		// 	t.remoteTrack.sendPLI(quality)
-		// 	t.lastQuality.Store(uint32(quality))
+		if lastQuality != quality {
+			t.lastQuality.Store(uint32(quality))
+		}
+
+		// if t.lastQuality != quality {
+		// 	t.lastQuality = quality
 		// }
 
-		if t.lastQuality != quality {
-			t.lastQuality = quality
-		}
+		t.mu.Lock()
+		defer t.mu.Unlock()
 
 		if err := t.localTrack.WriteRTP(rtp); err != nil {
 			glog.Error("track: error on write rtp", err)
@@ -216,7 +230,9 @@ func (t *SimulcastClientTrack) push(rtp *rtp.Packet, quality QualityLevel) {
 }
 
 func (t *SimulcastClientTrack) GetRemoteTrack() *RemoteTrack {
-	switch t.lastQuality {
+	lastQuality := Uint32ToQualityLevel(t.lastQuality.Load())
+	// lastQuality := t.lastQuality
+	switch lastQuality {
 	case QualityHigh:
 		return t.remoteTrack.remoteTrackHigh
 	case QualityMid:
@@ -259,6 +275,18 @@ func (t *SimulcastClientTrack) Kind() webrtc.RTPCodecType {
 
 func (t *SimulcastClientTrack) LocalTrack() *webrtc.TrackLocalStaticRTP {
 	return t.localTrack
+}
+
+func (t *SimulcastClientTrack) IsScreen() bool {
+	return t.isScreen.Load()
+}
+
+func (t *SimulcastClientTrack) SetSourceType(sourceType TrackType) {
+	t.isScreen.Store(sourceType == TrackTypeScreen)
+}
+
+func (t *SimulcastClientTrack) LastQuality() QualityLevel {
+	return Uint32ToQualityLevel(t.lastQuality.Load())
 }
 
 type clientTrackList struct {
@@ -309,8 +337,8 @@ func (l *clientTrackList) Length() int {
 }
 
 func (l *clientTrackList) GetTracks() []iClientTrack {
-	// l.mu.Lock()
-	// defer l.mu.Unlock()
+	l.mu.Lock()
+	defer l.mu.Unlock()
 
 	tracks := make([]iClientTrack, 0)
 	tracks = append(tracks, l.tracks...)
