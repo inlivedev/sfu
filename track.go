@@ -42,6 +42,7 @@ type BaseTrack struct {
 
 type ITrack interface {
 	ID() string
+	StreamID() string
 	Client() *Client
 	IsSimulcast() bool
 	IsProcessed() bool
@@ -99,6 +100,10 @@ func (t *Track) createLocalTrack() *webrtc.TrackLocalStaticRTP {
 
 func (t *Track) ID() string {
 	return t.base.msid
+}
+
+func (t *Track) StreamID() string {
+	return t.base.streamid
 }
 
 func (t *Track) Client() *Client {
@@ -217,6 +222,10 @@ func (t *SimulcastTrack) OnTrackComplete(f func()) {
 // TODO: this is contain multiple tracks, there is a possibility remote track high is not available yet
 func (t *SimulcastTrack) ID() string {
 	return t.base.msid
+}
+
+func (t *SimulcastTrack) StreamID() string {
+	return t.base.streamid
 }
 
 func (t *SimulcastTrack) Client() *Client {

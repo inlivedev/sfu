@@ -259,7 +259,6 @@ func NewClient(s *SFU, id string, peerConnectionConfig webrtc.Configuration, opt
 	peerConnection.OnTrack(func(remoteTrack *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
 		var track ITrack
 
-		glog.Infof("client: ontrack %s %s %s", remoteTrack.Msid(), remoteTrack.Kind(), remoteTrack.RID())
 		if remoteTrack.RID() == "" {
 			// not simulcast
 			track = NewTrack(client, remoteTrack)
@@ -276,11 +275,8 @@ func NewClient(s *SFU, id string, peerConnectionConfig webrtc.Configuration, opt
 
 			id := remoteTrack.Msid()
 
-			glog.Infof("client: simulcast track %s %s %s", id, remoteTrack.Kind(), remoteTrack.RID())
-
 			track, err = client.tracks.Get(id) // not found because the track is not added yet due to race condition
 			if err != nil {
-				glog.Infof("client: track not found %s", id)
 				// if track not found, add it
 				track = NewSimulcastTrack(client, remoteTrack)
 				if err := client.tracks.Add(track); err != nil {
@@ -289,15 +285,9 @@ func NewClient(s *SFU, id string, peerConnectionConfig webrtc.Configuration, opt
 
 				simulcast = track.(*SimulcastTrack)
 
-				simulcast.OnTrackComplete(func() {
-					glog.Info("client: track complete ", id)
-				})
 			} else if simulcast, ok = track.(*SimulcastTrack); ok {
-				glog.Infof("client: track found %s", id)
 				simulcast.AddRemoteTrack(remoteTrack)
 			}
-
-			glog.Infof("client: total simulcast tracks %d", track.TotalTracks())
 
 			// only process track when the lowest quality is available
 			if simulcast.remoteTrackLow != nil {
@@ -326,6 +316,8 @@ func NewClient(s *SFU, id string, peerConnectionConfig webrtc.Configuration, opt
 
 	if opts.EnableCongestionController {
 		go func() {
+			client.mu.Lock()
+			defer client.mu.Unlock()
 			client.estimator = <-client.estimatorChan
 		}()
 	}

@@ -403,9 +403,11 @@ func (s *SFU) removeClient(client *Client) error {
 
 func (s *SFU) SetClientsMinMaxBitrate(minBitrate, maxBitrate uint32) {
 	for _, client := range s.clients.GetClients() {
+		client.mu.Lock()
 		if client.OnMinMaxBitrateAdjusted != nil {
 			client.OnMinMaxBitrateAdjusted(s.context, minBitrate, maxBitrate)
 		}
+		client.mu.Unlock()
 	}
 }
 
