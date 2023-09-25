@@ -130,7 +130,7 @@ func New(ctx context.Context, iceServers []webrtc.ICEServer, mux *UDPMux) *SFU {
 		sfu.Stop()
 	}()
 
-	// sfu.monitorAndAdjustBandwidth()
+	sfu.monitorAndAdjustBandwidth()
 
 	return sfu
 }
@@ -157,10 +157,6 @@ func (s *SFU) createClient(id string, peerConnectionConfig webrtc.Configuration,
 
 func (s *SFU) NewClient(id string, opts ClientOptions) *Client {
 	s.Counter++
-
-	// iceServers := []webrtc.ICEServer{{URLs: []string{
-	// 	"stun:stun.l.google.com:19302",
-	// }}}
 
 	peerConnectionConfig := webrtc.Configuration{
 		ICEServers: s.iceServers,
@@ -337,7 +333,9 @@ func (s *SFU) OnClientRemoved(callback func(*Client)) {
 }
 
 func (s *SFU) onAfterClientStopped(client *Client) {
-	s.removeClient(client)
+	if err := s.removeClient(client); err != nil {
+		glog.Error("sfu: failed to remove client ", err)
+	}
 }
 
 func (s *SFU) onClientAdded(client *Client) {
