@@ -3,7 +3,10 @@ package sfu
 import (
 	"context"
 	"io"
+	"sync"
 	"time"
+
+	"sync/atomic"
 
 	"github.com/golang/glog"
 	"github.com/pion/interceptor/pkg/stats"
@@ -12,20 +15,21 @@ import (
 )
 
 type RemoteTrack struct {
-	context               context.Context
+	client                *Client
+	mu                    sync.Mutex
 	track                 *webrtc.TrackRemote
 	onRead                func(*rtp.Packet)
-	onEnded               func()
-	previousBytesReceived uint64
-	currentBytesReceived  uint64
-	currentBitrate        uint32
-	latestUpdatedTS       time.Time
+	previousBytesReceived atomic.Uint64
+	currentBytesReceived  atomic.Uint64
+	latestUpdatedTS       atomic.Uint64
 }
 
-func NewRemoteTrack(ctx context.Context, track *webrtc.TrackRemote) *RemoteTrack {
+func NewRemoteTrack(client *Client, track *webrtc.TrackRemote, onRead func(*rtp.Packet)) *RemoteTrack {
 	rt := &RemoteTrack{
-		context: ctx,
-		track:   track,
+		client: client,
+		mu:     sync.Mutex{},
+		track:  track,
+		onRead: onRead,
 	}
 
 	rt.readRTP()
@@ -33,9 +37,17 @@ func NewRemoteTrack(ctx context.Context, track *webrtc.TrackRemote) *RemoteTrack
 	return rt
 }
 
+func (t *RemoteTrack) onEnded() {
+	t.client.tracks.Remove([]string{t.track.ID()})
+	trackIDs := make([]string, 0)
+	trackIDs = append(trackIDs, t.track.ID())
+
+	t.client.sfu.removeTracks(trackIDs)
+}
+
 func (t *RemoteTrack) readRTP() {
 	go func() {
-		ctxx, cancel := context.WithCancel(t.context)
+		ctxx, cancel := context.WithCancel(t.client.context)
 
 		defer cancel()
 
@@ -47,9 +59,7 @@ func (t *RemoteTrack) readRTP() {
 			default:
 				rtp, _, readErr := t.track.ReadRTP()
 				if readErr == io.EOF {
-					if t.onEnded != nil {
-						t.onEnded()
-					}
+					t.onEnded()
 
 					return
 				} else if readErr != nil {
@@ -57,32 +67,30 @@ func (t *RemoteTrack) readRTP() {
 					return
 				}
 
-				if t.onRead != nil {
-					t.onRead(rtp)
-				}
+				t.onRead(rtp)
+
+				go t.client.updateReceiverStats(t)
+
 			}
 		}
 	}()
 }
 
 func (t *RemoteTrack) updateStats(s stats.Stats) {
-	if t.latestUpdatedTS.IsZero() {
-		t.latestUpdatedTS = s.LastPacketReceivedTimestamp
+	if t.latestUpdatedTS.Load() == 0 {
+		t.latestUpdatedTS.Store(uint64(s.LastPacketReceivedTimestamp.UnixNano()))
 		return
 	}
 
 	// update the bitrate if the last update equal or more than 1 second
-	if s.LastPacketReceivedTimestamp.Sub(t.latestUpdatedTS) >= time.Second {
-		t.latestUpdatedTS = s.LastPacketReceivedTimestamp
-		t.previousBytesReceived = t.currentBytesReceived
-		t.currentBytesReceived = s.BytesReceived
-		t.currentBitrate = t.GetCurrentBitrate()
+	lastTS := time.Unix(0, int64(t.latestUpdatedTS.Load()))
+	if time.Since(lastTS) >= time.Second {
+		t.latestUpdatedTS.Store(uint64(s.LastPacketReceivedTimestamp.UnixNano()))
+		current := t.currentBytesReceived.Load()
+		t.previousBytesReceived.Store(current)
+		t.currentBytesReceived.Store(s.BytesReceived)
 	}
 
-}
-
-func (t *RemoteTrack) Context() context.Context {
-	return t.context
 }
 
 func (t *RemoteTrack) Track() *webrtc.TrackRemote {
@@ -90,9 +98,21 @@ func (t *RemoteTrack) Track() *webrtc.TrackRemote {
 }
 
 func (t *RemoteTrack) GetCurrentBitrate() uint32 {
-	if t.currentBytesReceived == 0 {
-		return 0
+	if t.currentBytesReceived.Load() == 0 {
+		switch RIDToQuality(t.track.RID()) {
+		case QualityHigh:
+			return highBitrate
+		case QualityMid:
+			return midBitrate
+		case QualityLow:
+			return lowBitrate
+		default:
+			return 0
+		}
 	}
 
-	return uint32((t.currentBytesReceived - t.previousBytesReceived) * 8)
+	current := t.currentBytesReceived.Load()
+	previous := t.previousBytesReceived.Load()
+
+	return uint32((current - previous) * 8)
 }

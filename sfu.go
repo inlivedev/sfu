@@ -7,6 +7,7 @@ import (
 
 	"github.com/golang/glog"
 	"github.com/pion/webrtc/v3"
+	"golang.org/x/exp/slices"
 )
 
 const (
@@ -24,7 +25,12 @@ func (s *SFUClients) GetClients() map[string]*Client {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	return s.clients
+	clients := make(map[string]*Client)
+	for k, v := range s.clients {
+		clients[k] = v
+	}
+
+	return clients
 }
 
 func (s *SFUClients) GetClient(id string) (*Client, error) {
@@ -78,8 +84,7 @@ type SFU struct {
 	callbacksOnClientRemoved []func(*Client)
 	callbacksOnClientAdded   []func(*Client)
 	Counter                  int
-	publicDataChannels       map[string]map[string]*webrtc.DataChannel
-	privateDataChannels      map[string]map[string]*webrtc.DataChannel
+	dataChannels             *SFUDataChannelList
 	idleChan                 chan bool
 	iceServers               []webrtc.ICEServer
 	mutex                    sync.Mutex
@@ -98,15 +103,14 @@ func New(ctx context.Context, iceServers []webrtc.ICEServer, mux *UDPMux) *SFU {
 	localCtx, cancel := context.WithCancel(ctx)
 
 	sfu := &SFU{
-		clients:             &SFUClients{clients: make(map[string]*Client), mutex: sync.Mutex{}},
-		Counter:             0,
-		context:             localCtx,
-		cancel:              cancel,
-		publicDataChannels:  make(map[string]map[string]*webrtc.DataChannel),
-		privateDataChannels: make(map[string]map[string]*webrtc.DataChannel),
-		mutex:               sync.Mutex{},
-		iceServers:          iceServers,
-		mux:                 mux,
+		clients:      &SFUClients{clients: make(map[string]*Client), mutex: sync.Mutex{}},
+		Counter:      0,
+		context:      localCtx,
+		cancel:       cancel,
+		dataChannels: NewSFUDataChannelList(),
+		mutex:        sync.Mutex{},
+		iceServers:   iceServers,
+		mux:          mux,
 	}
 
 	go func() {
@@ -154,10 +158,6 @@ func (s *SFU) createClient(id string, peerConnectionConfig webrtc.Configuration,
 func (s *SFU) NewClient(id string, opts ClientOptions) *Client {
 	s.Counter++
 
-	// iceServers := []webrtc.ICEServer{{URLs: []string{
-	// 	"stun:stun.l.google.com:19302",
-	// }}}
-
 	peerConnectionConfig := webrtc.Configuration{
 		ICEServers: s.iceServers,
 	}
@@ -168,8 +168,10 @@ func (s *SFU) NewClient(id string, opts ClientOptions) *Client {
 		glog.Info("client: connection state changed ", client.ID(), connectionState)
 		switch connectionState {
 		case webrtc.PeerConnectionStateConnected:
-			if client.State == ClientStateNew {
-				client.State = ClientStateActive
+			if client.state.Load() == ClientStateNew {
+				client.mu.Lock()
+				defer client.mu.Unlock()
+				client.state.Store(ClientStateActive)
 				client.onJoined()
 
 				// trigger available tracks from other clients
@@ -183,6 +185,7 @@ func (s *SFU) NewClient(id string, opts ClientOptions) *Client {
 							}
 						}
 					}
+
 					if len(availableTracks) > 0 {
 						client.OnTracksAvailable(availableTracks)
 					}
@@ -204,7 +207,7 @@ func (s *SFU) NewClient(id string, opts ClientOptions) *Client {
 			}
 
 		case webrtc.PeerConnectionStateClosed:
-			if client.State != ClientStateEnded {
+			if client.state.Load() != ClientStateEnded {
 				client.afterClosed()
 			}
 		case webrtc.PeerConnectionStateFailed:
@@ -215,6 +218,9 @@ func (s *SFU) NewClient(id string, opts ClientOptions) *Client {
 	})
 
 	client.onTrack = func(track ITrack) {
+		client.mu.Lock()
+		defer client.mu.Unlock()
+
 		if err := client.pendingPublishedTracks.Add(track); err == ErrTrackExists {
 			// not an error could be because a simulcast track already added
 			return
@@ -223,20 +229,16 @@ func (s *SFU) NewClient(id string, opts ClientOptions) *Client {
 		// don't publish track when not all the tracks are received
 		// TODO:
 		// 1. need to handle simulcast track because  it will be counted as single track
-		if client.Type() == ClientTypePeer && client.initialTracksCount > client.pendingPublishedTracks.Length() {
-			glog.Infof("client: not all tracks are received, skip publish track %d %d", client.initialTracksCount, client.pendingPublishedTracks.Length())
+		if client.Type() == ClientTypePeer && int(client.initialTracksCount.Load()) > client.pendingPublishedTracks.Length() {
 			return
 		}
 
 		glog.Info("publish tracks")
 
-		availableTracks := make([]ITrack, 0)
-		for _, track := range client.pendingPublishedTracks.GetTracks() {
-			availableTracks = append(availableTracks, track)
-		}
+		availableTracks := client.pendingPublishedTracks.GetTracks()
 
-		if client.OnTracksAdded != nil {
-			client.OnTracksAdded(availableTracks)
+		if client.onTracksAdded != nil {
+			client.onTracksAdded(availableTracks)
 		}
 
 		// broadcast to client with auto subscribe tracks
@@ -247,8 +249,8 @@ func (s *SFU) NewClient(id string, opts ClientOptions) *Client {
 	client.requestKeyFrame()
 
 	client.peerConnection.OnSignalingStateChange(func(state webrtc.SignalingState) {
-		if state == webrtc.SignalingStateStable && client.pendingRemoteRenegotiation {
-			client.pendingRemoteRenegotiation = false
+		if state == webrtc.SignalingStateStable && client.pendingRemoteRenegotiation.Load() {
+			client.pendingRemoteRenegotiation.Store(false)
 			client.allowRemoteRenegotiation()
 		}
 	})
@@ -270,14 +272,17 @@ func (s *SFU) removeTracks(trackIDs []string) {
 // Syncs track from connected client to other clients
 // returns true if need renegotiation
 func (s *SFU) SyncTrack(client *Client) bool {
-	currentTracks := client.GetCurrentTracks()
+	publishedTrackIDs := make([]string, 0)
+	for _, track := range client.publishedTracks.GetTracks() {
+		publishedTrackIDs = append(publishedTrackIDs, track.ID())
+	}
 
 	needRenegotiation := false
 
 	for _, clientPeer := range s.clients.GetClients() {
 		for _, track := range clientPeer.tracks.GetTracks() {
 			if client.ID() != clientPeer.ID() {
-				if _, ok := currentTracks[track.ID()]; !ok {
+				if !slices.Contains(publishedTrackIDs, track.ID()) {
 					isNeedRenegotiation := client.addTrack(track)
 
 					// request the keyframe from track publisher after added
@@ -293,18 +298,10 @@ func (s *SFU) SyncTrack(client *Client) bool {
 	return needRenegotiation
 }
 
-func (s *SFU) GetTracks() []ITrack {
-	tracks := make([]ITrack, 0)
-	for _, client := range s.clients.GetClients() {
-		for _, track := range client.tracks.GetTracks() {
-			tracks = append(tracks, track)
-		}
-	}
-
-	return tracks
-}
-
 func (s *SFU) Stop() {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
 	for _, client := range s.clients.GetClients() {
 		client.PeerConnection().Close()
 	}
@@ -336,7 +333,9 @@ func (s *SFU) OnClientRemoved(callback func(*Client)) {
 }
 
 func (s *SFU) onAfterClientStopped(client *Client) {
-	s.removeClient(client)
+	if err := s.removeClient(client); err != nil {
+		glog.Error("sfu: failed to remove client ", err)
+	}
 }
 
 func (s *SFU) onClientAdded(client *Client) {
@@ -353,7 +352,7 @@ func (s *SFU) onClientRemoved(client *Client) {
 
 func (s *SFU) onTracksAvailable(tracks []ITrack) {
 	for _, client := range s.clients.GetClients() {
-		if !client.IsSubscribeAllTracks && client.OnTracksAvailable != nil {
+		if !client.IsSubscribeAllTracks.Load() && client.OnTracksAvailable != nil {
 			// filter out tracks from the same client
 			filteredTracks := make([]ITrack, 0)
 			for _, track := range tracks {
@@ -379,16 +378,12 @@ func (s *SFU) broadcastTracksToAutoSubscribeClients(tracks []ITrack) {
 	}
 
 	for _, client := range s.clients.GetClients() {
-		if client.IsSubscribeAllTracks {
+		if client.IsSubscribeAllTracks.Load() {
 			if err := client.SubscribeTracks(trackReq); err != nil {
 				glog.Error("client: failed to subscribe tracks ", err)
 			}
 		}
 	}
-}
-
-func (s *SFU) GetClients() map[string]*Client {
-	return s.clients.GetClients()
 }
 
 func (s *SFU) GetClient(id string) (*Client, error) {
@@ -451,4 +446,89 @@ func (s *SFU) monitorAndAdjustBandwidth() {
 			}
 		}
 	}()
+}
+
+func (s *SFU) CreateDataChannel(label string, opts DataChannelOptions) error {
+	dc := s.dataChannels.Get(label)
+	if dc != nil {
+		return ErrDataChannelExists
+	}
+
+	s.dataChannels.Add(label, opts)
+
+	errors := []error{}
+	initOpts := &webrtc.DataChannelInit{
+		Ordered: &opts.Ordered,
+	}
+
+	for _, client := range s.clients.GetClients() {
+		if len(opts.ClientIDs) > 0 {
+			if !slices.Contains(opts.ClientIDs, client.ID()) {
+				continue
+			}
+		}
+
+		err := client.createDataChannel(label, initOpts)
+		if err != nil {
+			errors = append(errors, err)
+		}
+	}
+
+	return FlattenErrors(errors)
+}
+
+func (s *SFU) setupMessageForwarder(clientID string, d *webrtc.DataChannel) {
+	d.OnMessage(func(msg webrtc.DataChannelMessage) {
+		// broadcast to all clients
+		s.mutex.Lock()
+		defer s.mutex.Unlock()
+
+		for _, client := range s.clients.GetClients() {
+			// skip the sender
+			if client.id == clientID {
+				continue
+			}
+
+			dc := client.dataChannels.Get(d.Label())
+			if dc == nil {
+				continue
+			}
+
+			if dc.ReadyState() != webrtc.DataChannelStateOpen {
+				dc.OnOpen(func() {
+					dc.Send(msg.Data)
+				})
+			} else {
+				dc.Send(msg.Data)
+			}
+		}
+	})
+}
+
+func (s *SFU) createExistingDataChannels(c *Client) {
+	for _, dc := range s.dataChannels.dataChannels {
+		initOpts := &webrtc.DataChannelInit{
+			Ordered: &dc.isOrdered,
+		}
+		if len(dc.clientIDs) > 0 {
+			if !slices.Contains(dc.clientIDs, c.id) {
+				continue
+			}
+		}
+
+		if err := c.createDataChannel(dc.label, initOpts); err != nil {
+			glog.Error("datachanel: error on create existing data channels, ", err)
+		}
+	}
+}
+
+func (s *SFU) TotalActiveSessions() int {
+	count := 0
+	for _, c := range s.clients.GetClients() {
+		if c.PeerConnection().ConnectionState() == webrtc.PeerConnectionStateConnected {
+			count++
+		}
+	}
+
+	return count
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/golang/glog"
@@ -41,7 +42,7 @@ const (
 	initialSendBandwidth = 1_000_000
 )
 
-type QualityLevel int
+type QualityLevel uint32
 
 var (
 	ErrNegotiationIsNotRequested = errors.New("client: error negotiation is called before requested")
@@ -56,7 +57,7 @@ type ClientOptions struct {
 }
 
 type ClientStats struct {
-	mutex    sync.Mutex
+	mu       sync.RWMutex
 	Sender   map[webrtc.SSRC]stats.Stats
 	Receiver map[webrtc.SSRC]stats.Stats
 }
@@ -65,24 +66,26 @@ type Client struct {
 	id                                string
 	context                           context.Context
 	cancel                            context.CancelFunc
-	canAddCandidate                   bool
+	canAddCandidate                   *atomic.Bool
 	clientStats                       *ClientStats
+	dataChannels                      *DataChannelList
 	estimatorChan                     chan cc.BandwidthEstimator
 	estimator                         cc.BandwidthEstimator
-	initialTracksCount                int
-	isInRenegotiation                 bool
-	isInRemoteNegotiation             bool
-	IsSubscribeAllTracks              bool
+	initialTracksCount                atomic.Uint32
+	isInRenegotiation                 *atomic.Bool
+	isInRemoteNegotiation             *atomic.Bool
+	IsSubscribeAllTracks              *atomic.Bool
 	idleTimeoutContext                context.Context
 	idleTimeoutCancel                 context.CancelFunc
-	mutex                             sync.Mutex
+	mu                                sync.Mutex
 	peerConnection                    *webrtc.PeerConnection
 	pendingReceivedTracks             *TrackList
 	pendingPublishedTracks            *TrackList
-	pendingRemoteRenegotiation        bool
+	pendingRemoteRenegotiation        *atomic.Bool
 	publishedTracks                   *TrackList
+	clientTracks                      *clientTrackList
 	queue                             *queue
-	State                             ClientState
+	state                             *atomic.Value
 	sfu                               *SFU
 	onConnectionStateChangedCallbacks []func(webrtc.PeerConnectionState)
 	onJoinedCallbacks                 []func()
@@ -96,16 +99,16 @@ type Client struct {
 	OnTracksAvailable                 func([]ITrack)
 	// onTrack is used by SFU to take action when a new track is added to the client
 	onTrack                 func(ITrack)
-	OnTracksAdded           func([]ITrack)
+	onTracksAdded           func([]ITrack)
 	options                 ClientOptions
 	statsGetter             stats.Getter
 	tracks                  *TrackList
-	NegotiationNeeded       bool
+	negotiationNeeded       *atomic.Bool
 	pendingRemoteCandidates []webrtc.ICECandidateInit
 	pendingLocalCandidates  []*webrtc.ICECandidate
-	quality                 QualityLevel
-	egressBandwidth         uint32
-	ingressBandwidth        uint32
+	quality                 *atomic.Uint32
+	egressBandwidth         *atomic.Uint32
+	ingressBandwidth        *atomic.Uint32
 }
 
 func DefaultClientOptions() ClientOptions {
@@ -197,35 +200,50 @@ func NewClient(s *SFU, id string, peerConnectionConfig webrtc.Configuration, opt
 		panic(err)
 	}
 
-	s.setupDataChannelBroadcaster(peerConnection, id)
-
 	// add other clients tracks before generate the answer
 	// s.addOtherClientTracksBeforeSendAnswer(peerConnection)
 	localCtx, cancel := context.WithCancel(s.context)
+	var stateNew atomic.Value
+	stateNew.Store(ClientStateNew)
 
+	var quality atomic.Uint32
+	quality.Store(QualityHigh)
 	client := &Client{
 		id:            id,
 		estimatorChan: estimatorChan,
 		context:       localCtx,
 		cancel:        cancel,
+		clientTracks:  newClientTrackList(),
 		clientStats: &ClientStats{
-			mutex:    sync.Mutex{},
+			mu:       sync.RWMutex{},
 			Sender:   make(map[webrtc.SSRC]stats.Stats),
 			Receiver: make(map[webrtc.SSRC]stats.Stats),
 		},
-		mutex:                  sync.Mutex{},
-		egressBandwidth:        uint32(initialSendBandwidth),
-		peerConnection:         peerConnection,
-		State:                  ClientStateNew,
-		tracks:                 newTrackList(),
-		options:                opts,
-		pendingReceivedTracks:  newTrackList(),
-		pendingPublishedTracks: newTrackList(),
-		publishedTracks:        newTrackList(),
-		queue:                  NewQueue(localCtx),
-		sfu:                    s,
-		statsGetter:            statsGetter,
+		canAddCandidate:            &atomic.Bool{},
+		isInRenegotiation:          &atomic.Bool{},
+		isInRemoteNegotiation:      &atomic.Bool{},
+		IsSubscribeAllTracks:       &atomic.Bool{},
+		dataChannels:               NewDataChannelList(),
+		mu:                         sync.Mutex{},
+		negotiationNeeded:          &atomic.Bool{},
+		peerConnection:             peerConnection,
+		state:                      &stateNew,
+		tracks:                     newTrackList(),
+		options:                    opts,
+		pendingReceivedTracks:      newTrackList(),
+		pendingPublishedTracks:     newTrackList(),
+		pendingRemoteRenegotiation: &atomic.Bool{},
+		publishedTracks:            newTrackList(),
+		queue:                      NewQueue(localCtx),
+		sfu:                        s,
+		statsGetter:                statsGetter,
+		quality:                    &quality,
+		egressBandwidth:            &atomic.Uint32{},
+		ingressBandwidth:           &atomic.Uint32{},
 	}
+
+	// make sure the exisiting data channels is created on new clients
+	s.createExistingDataChannels(client)
 
 	peerConnection.OnICEConnectionStateChange(func(connectionState webrtc.ICEConnectionState) {
 		glog.Info("client: ice connection state changed ", connectionState)
@@ -248,10 +266,18 @@ func NewClient(s *SFU, id string, peerConnectionConfig webrtc.Configuration, opt
 			if err := client.tracks.Add(track); err != nil {
 				glog.Error("client: error add track ", err)
 			}
+
+			client.onTrack(track)
+			track.SetAsProcessed()
 		} else {
 			// simulcast
+			var simulcast *SimulcastTrack
+			var ok bool
+
 			id := remoteTrack.Msid()
+
 			glog.Infof("client: simulcast track %s %s %s", id, remoteTrack.Kind(), remoteTrack.RID())
+
 			track, err = client.tracks.Get(id) // not found because the track is not added yet due to race condition
 			if err != nil {
 				glog.Infof("client: track not found %s", id)
@@ -261,29 +287,34 @@ func NewClient(s *SFU, id string, peerConnectionConfig webrtc.Configuration, opt
 					glog.Error("client: error add track ", err)
 				}
 
-				track.(*SimulcastTrack).OnTrackComplete(func() {
+				simulcast = track.(*SimulcastTrack)
+
+				simulcast.OnTrackComplete(func() {
 					glog.Info("client: track complete ", id)
 				})
-			} else if simulcast, ok := track.(*SimulcastTrack); ok {
+			} else if simulcast, ok = track.(*SimulcastTrack); ok {
 				glog.Infof("client: track found %s", id)
 				simulcast.AddRemoteTrack(remoteTrack)
 			}
 
-			// only add tracks after complete
 			glog.Infof("client: total simulcast tracks %d", track.TotalTracks())
-		}
 
-		if !track.IsProcessed() {
-			client.onTrack(track)
-			track.SetAsProcessed()
-		}
+			// only process track when the lowest quality is available
+			if simulcast.remoteTrackLow != nil {
+				client.onTrack(track)
+				track.SetAsProcessed()
+			}
 
+		}
 	})
 
 	peerConnection.OnICECandidate(func(candidate *webrtc.ICECandidate) {
+		client.mu.Lock()
+		defer client.mu.Unlock()
+
 		// only sending candidate when the local description is set, means expecting the remote peer already has the remote description
 		if candidate != nil {
-			if client.canAddCandidate {
+			if client.canAddCandidate.Load() {
 				go client.onIceCandidateCallback(candidate)
 
 				return
@@ -310,6 +341,13 @@ func (c *Client) Context() context.Context {
 	return c.context
 }
 
+func (c *Client) OnTracksAdded(f func(addedTracks []ITrack)) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.onTracksAdded = f
+}
+
 // Init and Complete negotiation is used for bridging the room between servers
 func (c *Client) InitNegotiation() *webrtc.SessionDescription {
 	offer, err := c.peerConnection.CreateOffer(nil)
@@ -323,7 +361,7 @@ func (c *Client) InitNegotiation() *webrtc.SessionDescription {
 	}
 
 	// allow add candidates once the local description is set
-	c.canAddCandidate = true
+	c.canAddCandidate.Store(true)
 
 	return c.peerConnection.LocalDescription()
 }
@@ -339,12 +377,12 @@ func (c *Client) CompleteNegotiation(answer webrtc.SessionDescription) {
 // return false means the negotiation is in process, the requester must have a mechanism to repeat the request once it's done.
 // requesting this must be followed by calling Negotate() to make sure the state is completed. Failed on called Negotiate() will cause the client to be in inconsistent state.
 func (c *Client) IsAllowNegotiation() bool {
-	if c.isInRenegotiation {
-		c.pendingRemoteRenegotiation = true
+	if c.isInRenegotiation.Load() {
+		c.pendingRemoteRenegotiation.Store(true)
 		return false
 	}
 
-	c.isInRemoteNegotiation = true
+	c.isInRemoteNegotiation.Store(true)
 
 	return true
 }
@@ -372,7 +410,7 @@ func (c *Client) Negotiate(offer webrtc.SessionDescription) (*webrtc.SessionDesc
 }
 
 func (c *Client) negotiateQueuOp(offer webrtc.SessionDescription) (*webrtc.SessionDescription, error) {
-	c.isInRemoteNegotiation = true
+	c.isInRemoteNegotiation.Store(true)
 
 	currentTransceiverCount := len(c.peerConnection.GetTransceivers())
 
@@ -395,7 +433,7 @@ func (c *Client) negotiateQueuOp(offer webrtc.SessionDescription) (*webrtc.Sessi
 	}
 
 	// allow add candidates once the local description is set
-	c.canAddCandidate = true
+	c.canAddCandidate.Store(true)
 
 	// process pending ice
 	for _, iceCandidate := range c.pendingRemoteCandidates {
@@ -405,14 +443,15 @@ func (c *Client) negotiateQueuOp(offer webrtc.SessionDescription) (*webrtc.Sessi
 		}
 	}
 
-	c.initialTracksCount = len(c.peerConnection.GetTransceivers()) - currentTransceiverCount
+	initialTrackCount := len(c.peerConnection.GetTransceivers()) - currentTransceiverCount
+	c.initialTracksCount.Store(uint32(initialTrackCount))
 
 	// send pending local candidates if any
 	c.sendPendingLocalCandidates()
 
 	c.pendingRemoteCandidates = nil
 
-	c.isInRemoteNegotiation = false
+	c.isInRemoteNegotiation.Store(false)
 
 	// call renegotiation that might delay because the remote client is doing renegotiation
 
@@ -434,29 +473,29 @@ func (c *Client) renegotiateQueuOp() {
 		return
 	}
 
-	c.NegotiationNeeded = true
+	c.negotiationNeeded.Store(true)
 
-	if c.isInRemoteNegotiation {
+	if c.isInRemoteNegotiation.Load() {
 		glog.Info("sfu: renegotiation is delayed because the remote client is doing negotiation ", c.ID)
 
 		return
 	}
 
 	// no need to run another negotiation if it's already in progress, it will rerun because we mark the negotiationneeded to true
-	if c.isInRenegotiation {
+	if c.isInRenegotiation.Load() {
 		glog.Info("sfu: renegotiation can't run, renegotiation still in progress ", c.ID)
 		return
 	}
 
 	// mark negotiation is in progress to make sure no concurrent negotiation
-	c.isInRenegotiation = true
+	c.isInRenegotiation.Store(true)
 
-	for c.NegotiationNeeded {
+	for c.negotiationNeeded.Load() {
 		// mark negotiation is not needed after this done, so it will out of the loop
-		c.NegotiationNeeded = false
+		c.negotiationNeeded.Store(false)
 
 		// only renegotiate when client is connected
-		if c.State != ClientStateEnded &&
+		if c.state.Load() != ClientStateEnded &&
 			c.peerConnection.SignalingState() == webrtc.SignalingStateStable &&
 			c.peerConnection.ConnectionState() == webrtc.PeerConnectionStateConnected {
 
@@ -493,7 +532,7 @@ func (c *Client) renegotiateQueuOp() {
 		}
 	}
 
-	c.isInRenegotiation = false
+	c.isInRenegotiation.Store(false)
 }
 
 func (c *Client) allowRemoteRenegotiation() {
@@ -505,7 +544,7 @@ func (c *Client) allowRemoteRenegotiation() {
 // inform to remote client that it's allowed to do renegotiation through event
 func (c *Client) allowRemoteRenegotiationQueuOp() {
 	if c.OnAllowedRemoteRenegotiation != nil {
-		c.isInRemoteNegotiation = true
+		c.isInRemoteNegotiation.Store(true)
 		go c.OnAllowedRemoteRenegotiation()
 	}
 }
@@ -525,7 +564,7 @@ func (c *Client) addTrack(track ITrack) bool {
 }
 
 func (c *Client) setClientTrack(track ITrack) bool {
-	var outputTrack webrtc.TrackLocal
+	var outputTrack iClientTrack
 
 	err := c.publishedTracks.Add(track)
 	if err != nil {
@@ -541,7 +580,10 @@ func (c *Client) setClientTrack(track ITrack) bool {
 		outputTrack = singleTrack.Subscribe()
 	}
 
-	transc, err := c.peerConnection.AddTransceiverFromTrack(outputTrack, webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionSendonly})
+	c.clientTracks.Add(outputTrack)
+	localTrack := outputTrack.LocalTrack()
+
+	transc, err := c.peerConnection.AddTransceiverFromTrack(localTrack, webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionSendonly})
 	if err != nil {
 		glog.Error("client: error on adding track ", err)
 		return false
@@ -569,7 +611,7 @@ func (c *Client) removePublishedTrack(trackIDs []string) {
 				}
 				removed = true
 
-				c.publishedTracks.Remove(id)
+				c.publishedTracks.Remove([]string{id})
 			}
 		}
 	}
@@ -632,24 +674,16 @@ func (c *Client) processPendingTracks() bool {
 	return trackAdded
 }
 
-func (c *Client) GetCurrentTracks() map[string]ITrack {
-	return c.publishedTracks.GetTracks()
-}
-
 func (c *Client) afterClosed() {
-	if c.State != ClientStateEnded {
-		c.State = ClientStateEnded
+	state := c.state.Load()
+	if state != ClientStateEnded {
+		c.state.Store(ClientStateEnded)
 	}
 
 	removeTrackIDs := make([]string, 0)
 
 	for _, track := range c.tracks.GetTracks() {
-		if track.IsSimulcast() {
-			track = track.(*SimulcastTrack)
-			removeTrackIDs = append(removeTrackIDs, track.RemoteTrack().track.ID())
-		} else {
-			removeTrackIDs = append(removeTrackIDs, track.(*Track).remoteTrack.track.ID())
-		}
+		removeTrackIDs = append(removeTrackIDs, track.ID())
 	}
 
 	c.sfu.removeTracks(removeTrackIDs)
@@ -660,11 +694,14 @@ func (c *Client) afterClosed() {
 }
 
 func (c *Client) Stop() error {
-	if c.State == ClientStateEnded {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.state.Load() == ClientStateEnded {
 		return ErrClientStoped
 	}
 
-	c.State = ClientStateEnded
+	c.state.Store(ClientStateEnded)
 
 	err := c.peerConnection.Close()
 	if err != nil {
@@ -678,9 +715,9 @@ func (c *Client) Stop() error {
 
 func (c *Client) AddICECandidate(candidate webrtc.ICECandidateInit) error {
 	if c.peerConnection.RemoteDescription() == nil {
-		// c.mutex.Lock()
+		// c.mu.Lock()
 		c.pendingRemoteCandidates = append(c.pendingRemoteCandidates, candidate)
-		// c.mutex.Unlock()
+		// c.mu.Unlock()
 	} else {
 		if err := c.peerConnection.AddICECandidate(candidate); err != nil {
 			glog.Error("client: error add ice candidate ", err)
@@ -701,6 +738,9 @@ func (c *Client) onIceCandidateCallback(candidate *webrtc.ICECandidate) {
 }
 
 func (c *Client) sendPendingLocalCandidates() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	for _, candidate := range c.pendingLocalCandidates {
 		c.onIceCandidateCallback(candidate)
 	}
@@ -776,10 +816,6 @@ func (c *Client) Type() string {
 	return c.options.Type
 }
 
-func (c *Client) Tracks() map[string]ITrack {
-	return c.tracks.GetTracks()
-}
-
 func (c *Client) PeerConnection() *webrtc.PeerConnection {
 	return c.peerConnection
 }
@@ -788,25 +824,27 @@ func (c *Client) Stats() *ClientStats {
 	return c.clientStats
 }
 
-func (c *Client) updateReceiverStats(track ITrack, remoteTrack *webrtc.TrackRemote) {
+func (c *Client) updateReceiverStats(remoteTrack *RemoteTrack) {
 	if c.statsGetter == nil {
 		return
 	}
 
-	if remoteTrack == nil {
+	if remoteTrack.track == nil {
 		return
 	}
 
-	if remoteTrack.SSRC() == 0 {
+	track := remoteTrack.track
+
+	if track.SSRC() == 0 {
 		return
 	}
 
-	c.clientStats.mutex.Lock()
-	defer c.clientStats.mutex.Unlock()
+	c.clientStats.mu.Lock()
+	defer c.clientStats.mu.Unlock()
 
-	c.clientStats.Receiver[remoteTrack.SSRC()] = *c.statsGetter.Get(uint32(remoteTrack.SSRC()))
+	c.clientStats.Receiver[track.SSRC()] = *c.statsGetter.Get(uint32(track.SSRC()))
 
-	track.UpdateStats(remoteTrack, c.clientStats.Receiver[remoteTrack.SSRC()])
+	remoteTrack.updateStats(c.clientStats.Receiver[track.SSRC()])
 }
 
 func (c *Client) updateSenderStats(sender *webrtc.RTPSender) {
@@ -822,26 +860,33 @@ func (c *Client) updateSenderStats(sender *webrtc.RTPSender) {
 		return
 	}
 
-	c.clientStats.mutex.Lock()
-	defer c.clientStats.mutex.Unlock()
+	c.clientStats.mu.RLock()
+	defer c.clientStats.mu.RUnlock()
 
 	ssrc := sender.GetParameters().Encodings[0].SSRC
+
+	_, ok := c.clientStats.Sender[ssrc]
+	if !ok {
+		return
+	}
 
 	c.clientStats.Sender[ssrc] = *c.statsGetter.Get(uint32(ssrc))
 }
 
 func (c *Client) SetTracksSourceType(trackTypes map[string]TrackType) {
 	availableTracks := make([]ITrack, 0)
-	tracks := c.pendingPublishedTracks.GetTracks()
-	for id, trackType := range trackTypes {
-		if track, ok := tracks[id]; ok {
+	removeTrackIDs := make([]string, 0)
+	for _, track := range c.pendingPublishedTracks.GetTracks() {
+		if trackType, ok := trackTypes[track.ID()]; ok {
 			track.SetSourceType(trackType)
 			availableTracks = append(availableTracks, track)
 
 			// remove it from pending published once it published available to other clients
-			c.pendingPublishedTracks.Remove(track.ID())
+			removeTrackIDs = append(removeTrackIDs, track.ID())
 		}
 	}
+
+	c.pendingPublishedTracks.Remove(removeTrackIDs)
 
 	if len(availableTracks) > 0 {
 		c.sfu.onTracksAvailable(availableTracks)
@@ -860,7 +905,7 @@ func (c *Client) SubscribeTracks(req []SubscribeTrackRequest) error {
 		}
 
 		if client, err := c.sfu.clients.GetClient(r.ClientID); err == nil {
-			for _, track := range client.Tracks() {
+			for _, track := range client.tracks.GetTracks() {
 				if track.ID() == r.TrackID {
 					if c.addTrack(track) {
 						negotiationNeeded = true
@@ -886,7 +931,7 @@ func (c *Client) SubscribeTracks(req []SubscribeTrackRequest) error {
 }
 
 func (c *Client) SubscribeAllTracks() {
-	c.IsSubscribeAllTracks = true
+	c.IsSubscribeAllTracks.Store(true)
 
 	negotiateNeeded := c.sfu.SyncTrack(c)
 
@@ -896,42 +941,48 @@ func (c *Client) SubscribeAllTracks() {
 }
 
 func (c *Client) SetQuality(quality QualityLevel) {
-	if c.quality == quality {
+	if c.quality.Load() == uint32(quality) {
 		return
 	}
 
 	glog.Infof("client: %s switch quality to %s", c.ID, quality)
-	c.quality = quality
+	c.quality.Store(uint32(quality))
 }
 
 // This function is to calculate maximum bitrate allowed per audio or video track.
 // The bitrate is calculated based on the estimated bandwidth and the number of tracks.
 // Because we prioritize audio tracks, then the audio tracks will get the maximum bitrate allowed per track. TODO: this should be configurable
 // The video tracks will get the rest of the bandwidth.
+//
 // TODO:
 // - This should pass the track as parameter to it's maximum allowed bitrate, so we can check the priority of the track compare with the others.
 // - For example if the track is speaking, then it should get the maximum bitrate allowed together with the other tracks in the same stream_id.
 // - Check if the client has a manual overide quality, then use it instead of the estimated quality
-
+// - Current check the bitrate from remote track, but it should be from the local track because there is a possibility that some tracks are not forwarded to the client
+//
 // Currently the audio max bitrate has no affect, but we might able to control it with RTCP report
 // return audio and video max bitrate allowed per track
 func (c *Client) GetMaxBitratePerTrack() (uint32, uint32) {
-	var bandwidthPerVideoTrack, bandwidthPerAudioTrack uint32
+	var bandwidthPerVideoTrack, bandwidthPerAudioTrack, bandwidthPerScreenTrack uint32
 
-	// initial track count is set 1 considering there might be a new track without a bitrate date yet
+	// initial track count is set 1 considering there might be a new track without a bitrate yet
 	audioTracks := 1
 	videoTracks := 1
+	screenTrack := 0
 	audioTotalBitrates := uint32(0)
 	videoTotalBitrates := uint32(0)
+	screenTotalBitrates := uint32(0)
+
 	maxAudioBitrates := uint32(0)
 	maxVideoBitrates := uint32(0)
+	maxScreenBitrates := uint32(0)
 
-	for _, track := range c.publishedTracks.GetTracks() {
+	for _, track := range c.clientTracks.GetTracks() {
 		var currentBitrate uint32
 
 		if track.Kind() == webrtc.RTPCodecTypeAudio {
 			audioTracks++
-			currentBitrate = track.RemoteTrack().GetCurrentBitrate()
+			currentBitrate = track.getCurrentBitrate()
 			audioTotalBitrates += currentBitrate
 			if currentBitrate > maxAudioBitrates {
 				maxAudioBitrates = currentBitrate
@@ -940,57 +991,23 @@ func (c *Client) GetMaxBitratePerTrack() (uint32, uint32) {
 		}
 
 		if track.Kind() == webrtc.RTPCodecTypeVideo {
-			videoTracks++
-			if track.IsSimulcast() {
-				simulcastTracks := track.(*SimulcastTrack)
-
-				for _, localTrack := range simulcastTracks.localTracks {
-					switch localTrack.lastQuality {
-					case QualityHigh:
-						if simulcastTracks.remoteTrackHigh == nil {
-							currentBitrate = localTrack.remoteTrack.remoteTrackHigh.GetCurrentBitrate()
-						}
-					case QualityMid:
-						if simulcastTracks.remoteTrackMid != nil {
-							currentBitrate = localTrack.remoteTrack.remoteTrackMid.GetCurrentBitrate()
-						}
-					case QualityLow:
-						if simulcastTracks.remoteTrackLow != nil {
-							currentBitrate = localTrack.remoteTrack.remoteTrackLow.GetCurrentBitrate()
-						}
-					case QualityNone:
-						if simulcastTracks.remoteTrackLow != nil {
-							currentBitrate = localTrack.remoteTrack.remoteTrackLow.GetCurrentBitrate()
-							if currentBitrate == 0 {
-								currentBitrate = MinBitrateUpperCap
-							}
-						}
-					}
-
-					videoTotalBitrates += currentBitrate
-					if currentBitrate > maxVideoBitrates {
-						maxVideoBitrates = currentBitrate
-					}
+			if track.IsScreen() {
+				screenTrack++
+				currentBitrate := track.getCurrentBitrate()
+				screenTotalBitrates += currentBitrate
+				if currentBitrate > maxScreenBitrates {
+					maxScreenBitrates = currentBitrate
 				}
-
 			} else {
-				simpleTracks := track.(*Track)
-
-				for _, localTrack := range simpleTracks.localTracks {
-					currentBitrate = localTrack.remoteTrack.GetCurrentBitrate()
-					if currentBitrate == 0 {
-						currentBitrate = MinBitrateUpperCap
-					}
-
-					videoTotalBitrates += currentBitrate
-
-					if currentBitrate > maxVideoBitrates {
-						maxVideoBitrates = currentBitrate
-					}
+				videoTracks++
+				currentBitrate = track.getCurrentBitrate()
+				videoTotalBitrates += currentBitrate
+				if currentBitrate > maxVideoBitrates {
+					maxVideoBitrates = currentBitrate
 				}
 			}
-		}
 
+		}
 	}
 
 	if maxAudioBitrates < 24_000 {
@@ -1012,23 +1029,33 @@ func (c *Client) GetMaxBitratePerTrack() (uint32, uint32) {
 		bandwidthPerAudioTrack = bandwidth / uint32(audioTracks)
 	}
 
+	if screenTrack == 0 {
+		bandwidthPerScreenTrack = maxScreenBitrates
+	} else {
+		bandwidthPerScreenTrack = (bandwidth - totalAudioBandwidth) / uint32(screenTrack)
+	}
+
 	if videoTracks == 0 {
 		bandwidthPerVideoTrack = maxVideoBitrates
 	} else {
-		bandwidthPerVideoTrack = (bandwidth - totalAudioBandwidth) / uint32(videoTracks)
+		bandwidthPerVideoTrack = (bandwidth - totalAudioBandwidth - bandwidthPerScreenTrack) / uint32(videoTracks)
 	}
 
 	return bandwidthPerAudioTrack, bandwidthPerVideoTrack
 }
 
 func (c *Client) GetEstimatedBandwidth() uint32 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	if c.estimator == nil {
 		return uint32(initialSendBandwidth)
 	}
 
-	c.egressBandwidth = uint32(c.estimator.GetTargetBitrate())
+	bw := uint32(c.estimator.GetTargetBitrate())
+	c.egressBandwidth.Store(bw)
 
-	return c.egressBandwidth
+	return bw
 }
 
 func (c *Client) UpdatePublisherBandwidth(bitrate uint32) {
@@ -1036,5 +1063,24 @@ func (c *Client) UpdatePublisherBandwidth(bitrate uint32) {
 		return
 	}
 
-	c.ingressBandwidth = bitrate
+	c.ingressBandwidth.Store(bitrate)
+}
+
+func (c *Client) createDataChannel(label string, initOpts *webrtc.DataChannelInit) error {
+	if dc := c.dataChannels.Get(label); dc != nil {
+		return ErrDataChannelExists
+	}
+
+	newDc, err := c.peerConnection.CreateDataChannel(label, initOpts)
+	if err != nil {
+		return err
+	}
+
+	glog.Info("client: data channel created ", label, " ", c.ID())
+	c.sfu.setupMessageForwarder(c.ID(), newDc)
+	c.dataChannels.Add(newDc)
+
+	c.renegotiate()
+
+	return nil
 }

@@ -18,8 +18,8 @@ go get github.com/inlivedev/sfu
 - [x] Group call
 - [x] Screen sharing
 - [x] Perfect negotiation
-- [ ] Data channel (WIP)
-- [ ] Simulcast
+- [x] Data channel - note: only room channel currenty available
+- [x] Simulcast - note: still need some tuning on bitrate management
 - [ ] Events
 - [ ] Room statistic
 

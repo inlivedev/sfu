@@ -45,13 +45,13 @@ func TestLeaveRoom(t *testing.T) {
 
 			client.SubscribeAllTracks()
 
-			client.OnTracksAdded = func(addedTracks []ITrack) {
+			client.OnTracksAdded(func(addedTracks []ITrack) {
 				setTracks := make(map[string]TrackType, 0)
 				for _, track := range addedTracks {
 					setTracks[track.ID()] = TrackTypeMedia
 				}
 				client.SetTracksSourceType(setTracks)
-			}
+			})
 
 			pc.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
 				trackChan <- true
@@ -156,13 +156,13 @@ func TestRenegotiation(t *testing.T) {
 		client.SubscribeAllTracks()
 		pairs = append(pairs, Pair{pc, client})
 
-		client.OnTracksAdded = func(addedTracks []ITrack) {
+		client.OnTracksAdded(func(addedTracks []ITrack) {
 			setTracks := make(map[string]TrackType, 0)
 			for _, track := range addedTracks {
 				setTracks[track.ID()] = TrackTypeMedia
 			}
 			client.SetTracksSourceType(setTracks)
-		}
+		})
 
 		pc.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
 			trackChan <- true

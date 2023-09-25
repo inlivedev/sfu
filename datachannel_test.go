@@ -1,78 +1,206 @@
 package sfu
 
 import (
+	"context"
 	"testing"
+	"time"
+
+	"github.com/golang/glog"
+	"github.com/pion/webrtc/v3"
+	"github.com/stretchr/testify/require"
 )
 
-func TestBroadcastDataChannel(t *testing.T) {
-	// ctx, cancel := context.WithCancel(context.Background())
-	// defer cancel()
-	// udpMux := NewUDPMux(ctx, 40008)
+func TestRoomDataChannel(t *testing.T) {
+	t.Parallel()
 
-	// connectedChan := make(chan bool)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-	// turn := TurnServer{
-	// 	Port:     3478,
-	// 	Host:     "turn.inlive.app",
-	// 	Username: "inlive",
-	// 	Password: "inlivesdkturn",
-	// }
+	// create room manager first before create new room
+	roomManager := NewManager(ctx, "test-room-datachannel", Options{
+		WebRTCPort:               40010,
+		ConnectRemoteRoomTimeout: 30 * time.Second,
+		IceServers:               DefaultTestIceServers(),
+	})
 
-	// sfu := New(ctx, turn, udpMux)
+	roomID := roomManager.CreateRoomID()
+	roomName := "test-room"
 
-	// tracks, mediaEngine := testhelper.GetTestTracks()
-	// defer sfu.Stop()
+	// create new room
+	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal)
+	require.NoError(t, err, "error creating room: %v", err)
+	pc1, client1, _ := CreateDataPair(ctx, testRoom, roomManager.Options.IceServers, "peer1")
+	pc2, client2, _ := CreateDataPair(ctx, testRoom, roomManager.Options.IceServers, "peer2")
 
-	// peer1, _ := createPeer(ctx, t, sfu, tracks, mediaEngine, connectedChan)
-	// chatChannel := "chat"
-	// dataChannel, _ := peer1.CreateDataChannel(chatChannel, nil)
-	// chatChan := make(chan Data)
+	defer func() {
+		_ = client1.Stop()
+		_ = client2.Stop()
+	}()
 
-	// dataChannel.OnMessage(func(msg webrtc.DataChannelMessage) {
-	// 	glog.Info("data channel message: ", string(msg.Data))
-	// 	chat := Data{}
-	// 	json.Unmarshal(msg.Data, &chat)
-	// 	chatChan <- chat
-	// })
+	chatChan := make(chan string)
 
-	// dataChannel.OnOpen(func() {
-	// 	dataChannel.Send([]byte("hello"))
-	// })
+	var onDataChannel = func(d *webrtc.DataChannel) {
+		t.Log("data channel opened ", d.Label())
 
+		d.OnMessage(func(msg webrtc.DataChannelMessage) {
+			chatChan <- string(msg.Data)
+			if string(msg.Data) == "hello" {
+				d.Send([]byte("world"))
+			}
+		})
+
+		if d.ReadyState() == webrtc.DataChannelStateOpen {
+			d.Send([]byte("hello"))
+		} else {
+			d.OnOpen(func() {
+				d.Send([]byte("hello"))
+			})
+		}
+	}
+
+	pc1.OnDataChannel(onDataChannel)
+
+	pc2.OnDataChannel(onDataChannel)
+
+	connected := WaitConnected(ctx, []*webrtc.PeerConnection{pc1, pc2})
+
+	isConnected := <-connected
+	require.True(t, isConnected)
+
+	err = testRoom.CreateDataChannel("chat", DefaultDataChannelOptions())
+	require.NoError(t, err)
+
+	// make sure to return error on creating data channel with same label
+	err = testRoom.CreateDataChannel("chat", DefaultDataChannelOptions())
+	require.Error(t, err)
+
+	timeout, cancelTimeout := context.WithTimeout(ctx, 30*time.Second)
+	defer cancelTimeout()
+
+	messages := ""
+
+Loop:
+	for {
+		select {
+		case <-timeout.Done():
+			break Loop
+		case chat := <-chatChan:
+			messages += chat
+			glog.Info("chat: ", messages)
+			if messages == "hellohelloworldworld" {
+				break Loop
+			}
+		}
+	}
+
+	require.Equal(t, "hellohelloworldworld", messages)
 }
 
-// func TestPrivateDataChannel(t *testing.T) {
-// 	receiver.PeerConnection.OnDataChannel(func(d *webrtc.DataChannel) {
-// 		require.Equal(t, "pm-"+peers[0].ID, d.Label())
+func TestRoomDataChannelWithClientID(t *testing.T) {
+	t.Parallel()
 
-// 		d.OnMessage(func(msg webrtc.DataChannelMessage) {
-// 			require.Equal(t, "hello", string(msg.Data))
-// 			msgReceived <- true
-// 		})
-// 	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-// 	dcPM2, err := sender.PeerConnection.CreateDataChannel("pm-"+peers[2].ID, nil)
+	// create room manager first before create new room
+	roomManager := NewManager(ctx, "test-room-datachannel", Options{
+		WebRTCPort:               40011,
+		ConnectRemoteRoomTimeout: 30 * time.Second,
+		IceServers:               DefaultTestIceServers(),
+	})
 
-// 	require.NoError(t, err)
+	roomID := roomManager.CreateRoomID()
+	roomName := "test-room"
 
-// 	relay := sfu.Clients[sender.ID]
-// 	if relay.IsAllowNegotiation() {
-// 		offer, _ := sender.PeerConnection.CreateOffer(nil)
-// 		_ = sender.PeerConnection.SetLocalDescription(offer)
-// 		answer, _ := relay.Negotiate(*sender.PeerConnection.LocalDescription())
-// 		_ = sender.PeerConnection.SetRemoteDescription(*answer)
-// 	}
+	// create new room
+	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal)
+	require.NoError(t, err, "error creating room: %v", err)
+	pc1, client1, _ := CreateDataPair(ctx, testRoom, roomManager.Options.IceServers, "peer1")
+	pc2, client2, _ := CreateDataPair(ctx, testRoom, roomManager.Options.IceServers, "peer2")
+	pc3, client3, _ := CreateDataPair(ctx, testRoom, roomManager.Options.IceServers, "peer2")
 
-// 	dcPM2.OnOpen(func() {
-// 		dcPM2.Send([]byte("hello"))
-// 	})
+	defer func() {
+		_ = client1.Stop()
+		_ = client2.Stop()
+	}()
 
-// 	ctxTimeoutMsg, cancelMsg := context.WithTimeout(ctx, 30*time.Second)
-// 	defer cancelMsg()
+	chatChan := make(chan string)
 
-// 	select {
-// 	case <-ctxTimeoutMsg.Done():
-// 		require.Fail(t, "timeout waiting the message")
-// 	case <-msgReceived:
-// 	}
-// }
+	var onDataChannel = func(d *webrtc.DataChannel) {
+		t.Log("data channel opened ", d.Label())
+
+		d.OnMessage(func(msg webrtc.DataChannelMessage) {
+			chatChan <- string(msg.Data)
+			if string(msg.Data) == "hello" {
+				d.Send([]byte("world"))
+			}
+		})
+
+		if d.ReadyState() == webrtc.DataChannelStateOpen {
+			d.Send([]byte("hello"))
+		} else {
+			d.OnOpen(func() {
+				d.Send([]byte("hello"))
+			})
+		}
+	}
+
+	pc1.OnDataChannel(onDataChannel)
+
+	pc2.OnDataChannel(func(d *webrtc.DataChannel) {
+		t.Log("data channel opened ", d.Label())
+
+		d.OnMessage(func(msg webrtc.DataChannelMessage) {
+			chatChan <- string(msg.Data)
+			if string(msg.Data) == "hello" {
+				d.Send([]byte("noworld"))
+			}
+		})
+
+		if d.ReadyState() == webrtc.DataChannelStateOpen {
+			d.Send([]byte("hello"))
+		} else {
+			d.OnOpen(func() {
+				d.Send([]byte("noworld"))
+			})
+		}
+	})
+
+	pc3.OnDataChannel(onDataChannel)
+
+	connected := WaitConnected(ctx, []*webrtc.PeerConnection{pc1, pc2, pc3})
+
+	isConnected := <-connected
+	require.True(t, isConnected)
+
+	err = testRoom.CreateDataChannel("chat", DataChannelOptions{
+		Ordered:   true,
+		ClientIDs: []string{client1.ID(), client3.ID()},
+	})
+	require.NoError(t, err)
+
+	// make sure to return error on creating data channel with same label
+	err = testRoom.CreateDataChannel("chat", DefaultDataChannelOptions())
+	require.Error(t, err)
+
+	timeout, cancelTimeout := context.WithTimeout(ctx, 30*time.Second)
+	defer cancelTimeout()
+
+	messages := ""
+
+Loop:
+	for {
+		select {
+		case <-timeout.Done():
+			break Loop
+		case chat := <-chatChan:
+			messages += chat
+			glog.Info("chat: ", messages)
+			if messages == "hellohelloworldworld" {
+				break Loop
+			}
+		}
+	}
+
+	require.Equal(t, "hellohelloworldworld", messages)
+}

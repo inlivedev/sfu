@@ -52,14 +52,16 @@ func TestTracksManualSubscribe(t *testing.T) {
 			require.NoError(t, err)
 		}
 
-		client.OnTracksAdded = func(addedTracks []ITrack) {
+		client.OnTracksAdded(func(addedTracks []ITrack) {
 			tracksAddedChan <- len(addedTracks)
-			setTracks := make(map[string]TrackType, 0)
+
+			setTracks := make(map[string]TrackType)
+
 			for _, track := range addedTracks {
 				setTracks[track.ID()] = TrackTypeMedia
 			}
 			client.SetTracksSourceType(setTracks)
-		}
+		})
 
 		pc.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
 			trackChan <- true
@@ -124,13 +126,13 @@ func TestAutoSubscribeTracks(t *testing.T) {
 		pc, client, _, _ := CreatePeerPair(ctx, testRoom, DefaultTestIceServers(), fmt.Sprintf("peer-%d", i), true, false)
 		client.SubscribeAllTracks()
 
-		client.OnTracksAdded = func(addedTracks []ITrack) {
+		client.OnTracksAdded(func(addedTracks []ITrack) {
 			setTracks := make(map[string]TrackType, 0)
 			for _, track := range addedTracks {
 				setTracks[track.ID()] = TrackTypeMedia
 			}
 			client.SetTracksSourceType(setTracks)
-		}
+		})
 
 		pc.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
 			trackChan <- true
@@ -235,13 +237,13 @@ func addSimulcastPair(t *testing.T, ctx context.Context, room *Room, peerName st
 		require.NoError(t, err)
 	}
 
-	client.OnTracksAdded = func(addedTracks []ITrack) {
+	client.OnTracksAdded(func(addedTracks []ITrack) {
 		setTracks := make(map[string]TrackType, 0)
 		for _, track := range addedTracks {
 			setTracks[track.ID()] = TrackTypeMedia
 		}
 		client.SetTracksSourceType(setTracks)
-	}
+	})
 
 	pc.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
 		glog.Info("test: on track", track.Msid())

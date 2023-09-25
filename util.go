@@ -3,6 +3,7 @@ package sfu
 import (
 	"bufio"
 	"context"
+	"errors"
 	"flag"
 	"log"
 	"math/rand"
@@ -431,4 +432,32 @@ func GetLocalIp() (net.IP, error) {
 		}
 	}
 	return ip, nil
+}
+
+func FlattenErrors(errs []error) error {
+	if len(errs) == 0 {
+		return nil
+	}
+
+	errString := ""
+	for _, err := range errs {
+		errString += err.Error() + "\n"
+	}
+
+	return errors.New(errString)
+}
+
+func Uint32ToQualityLevel(quality uint32) QualityLevel {
+	switch quality {
+	case 0:
+		return QualityNone
+	case 1:
+		return QualityLow
+	case 2:
+		return QualityMid
+	case 3:
+		return QualityHigh
+	default:
+		return QualityLow
+	}
 }

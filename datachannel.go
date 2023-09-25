@@ -1,12 +1,32 @@
 package sfu
 
 import (
-	"strings"
+	"errors"
+	"sync"
 	"time"
 
-	"github.com/golang/glog"
 	"github.com/pion/webrtc/v3"
 )
+
+var (
+	ErrDataChannelExists = errors.New("error: data channel already exists")
+)
+
+type SFUDataChannel struct {
+	label     string
+	clientIDs []string
+	isOrdered bool
+}
+
+type SFUDataChannelList struct {
+	dataChannels map[string]*SFUDataChannel
+	mu           sync.Mutex
+}
+
+type DataChannelOptions struct {
+	Ordered   bool
+	ClientIDs []string // empty means all clients
+}
 
 type Data struct {
 	FromID string      `json:"from_id"`
@@ -15,68 +35,98 @@ type Data struct {
 	Data   interface{} `json:"data"`
 }
 
-func (s *SFU) setupDataChannelBroadcaster(peerConnection *webrtc.PeerConnection, id string) {
-	// wait data channel
-	peerConnection.OnDataChannel(func(d *webrtc.DataChannel) {
-		glog.Info("sfu:received data channel", id, d.Label())
-		if strings.HasPrefix(d.Label(), "pm-") {
-			// private channel
-			if _, ok := s.privateDataChannels[id]; !ok {
-				s.privateDataChannels[id] = make(map[string]*webrtc.DataChannel)
-			}
+type DataChannelList struct {
+	dataChannels map[string]*webrtc.DataChannel
+	mu           sync.Mutex
+}
 
-			IDSs := strings.Split(d.Label(), "-")
-			if len(IDSs) != 2 {
-				//invalid data channel label, must be in format of "fromid-toid"
-				return
-			}
+func NewSFUDataChannel(label string, opts DataChannelOptions) *SFUDataChannel {
+	return &SFUDataChannel{
+		label:     label,
+		clientIDs: opts.ClientIDs,
+		isOrdered: opts.Ordered,
+	}
+}
 
-			toID := IDSs[1]
-			if _, ok := s.privateDataChannels[id][toID]; !ok {
-				if client, err := s.GetClient(toID); err == nil {
-					dc, err := client.PeerConnection().CreateDataChannel("pm-"+id, nil)
-					if err != nil {
-						glog.Error("sfu:error creating data channel", err)
-						return
-					}
+func (s *SFUDataChannel) ClientIDs() []string {
+	return s.clientIDs
+}
 
-					s.privateDataChannels[id][toID] = dc
-				}
-			}
+func (s *SFUDataChannel) IsOrdered() bool {
+	return s.isOrdered
+}
 
-			d.OnMessage(func(msg webrtc.DataChannelMessage) {
-				// private message
-				if dataChannel, ok := s.privateDataChannels[id][toID]; ok {
-					if dataChannel.ReadyState() != webrtc.DataChannelStateOpen {
-						dataChannel.OnOpen(func() {
-							dataChannel.Send(msg.Data)
-						})
-					} else {
-						dataChannel.Send(msg.Data)
-					}
-				}
-			})
-		} else {
-			// public channel
-			if _, ok := s.publicDataChannels[id]; !ok {
-				s.publicDataChannels[id] = make(map[string]*webrtc.DataChannel)
-			}
+func NewSFUDataChannelList() *SFUDataChannelList {
+	return &SFUDataChannelList{
+		dataChannels: make(map[string]*SFUDataChannel),
+		mu:           sync.Mutex{},
+	}
+}
 
-			if _, ok := s.publicDataChannels[id][d.Label()]; !ok {
-				s.publicDataChannels[id][d.Label()] = d
-			}
+func (s *SFUDataChannelList) Add(label string, opts DataChannelOptions) *SFUDataChannel {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	sfuDC := NewSFUDataChannel(label, opts)
+	s.dataChannels[label] = sfuDC
 
-			d.OnMessage(func(msg webrtc.DataChannelMessage) {
-				// broadcast to all clients
-				for clientid, clients := range s.publicDataChannels {
-					if clientid != id {
-						for _, dataChannel := range clients {
-							dataChannel.Send(msg.Data)
-						}
-					}
-				}
-			})
-		}
+	return sfuDC
+}
 
-	})
+func (s *SFUDataChannelList) Remove(dc *SFUDataChannel) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	delete(s.dataChannels, dc.label)
+}
+
+func (s *SFUDataChannelList) Get(label string) *SFUDataChannel {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	dc, ok := s.dataChannels[label]
+	if !ok {
+		return nil
+	}
+
+	return dc
+}
+
+func DefaultDataChannelOptions() DataChannelOptions {
+	return DataChannelOptions{
+		Ordered:   true,
+		ClientIDs: []string{},
+	}
+}
+
+func NewDataChannelList() *DataChannelList {
+	return &DataChannelList{
+		dataChannels: make(map[string]*webrtc.DataChannel),
+		mu:           sync.Mutex{},
+	}
+}
+
+func (d *DataChannelList) Add(dc *webrtc.DataChannel) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	d.dataChannels[dc.Label()] = dc
+}
+
+func (d *DataChannelList) Remove(dc *webrtc.DataChannel) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	delete(d.dataChannels, dc.Label())
+}
+
+func (d *DataChannelList) Get(label string) *webrtc.DataChannel {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	dc, ok := d.dataChannels[label]
+	if !ok {
+		return nil
+	}
+
+	return dc
 }

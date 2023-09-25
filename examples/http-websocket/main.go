@@ -80,13 +80,13 @@ func main() {
 		fc := fakeclient.Create(ctx, defaultRoom, iceServers, fmt.Sprintf("fake-client-%d", i), true)
 		fc.Client.SubscribeAllTracks()
 
-		fc.Client.OnTracksAdded = func(addedTracks []sfu.ITrack) {
+		fc.Client.OnTracksAdded(func(addedTracks []sfu.ITrack) {
 			setTracks := make(map[string]sfu.TrackType, 0)
 			for _, track := range addedTracks {
 				setTracks[track.ID()] = sfu.TrackTypeMedia
 			}
 			fc.Client.SetTracksSourceType(setTracks)
-		}
+		})
 	}
 
 	fs := http.FileServer(http.Dir("./"))
@@ -159,7 +159,7 @@ func clientHandler(conn *websocket.Conn, messageChan chan Request, r *sfu.Room) 
 
 	client.SubscribeAllTracks()
 
-	client.OnTracksAdded = func(tracks []sfu.ITrack) {
+	client.OnTracksAdded(func(tracks []sfu.ITrack) {
 		tracksAdded := map[string]map[string]string{}
 		for _, track := range tracks {
 			tracksAdded[track.ID()] = map[string]string{"id": track.ID()}
@@ -173,7 +173,7 @@ func clientHandler(conn *websocket.Conn, messageChan chan Request, r *sfu.Room) 
 		trackAddedResp, _ := json.Marshal(resp)
 
 		_, _ = conn.Write(trackAddedResp)
-	}
+	})
 
 	// client.OnTracksAvailable = func(tracks []sfu.ITrack) {
 	// 	tracksAvailable := map[string]map[string]interface{}{}

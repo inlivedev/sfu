@@ -15,6 +15,7 @@
                 // "PIONS_LOG_TRACE":"all",
                 // "PIONS_LOG_INFO":"all",
             },
+            "buildFlags": "-race"
 
         }
     ]
