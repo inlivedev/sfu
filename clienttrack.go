@@ -83,13 +83,19 @@ type SimulcastClientTrack struct {
 
 func (t *SimulcastClientTrack) GetAllowedQuality(kind webrtc.RTPCodecType) QualityLevel {
 	var estimatedQuality QualityLevel
-	var currentHighBitrate, currentMidBitrate, currentLowBitrate uint32
+	var currentHighBitrate, currentMidBitrate, currentLowBitrate, maxAllowedBitrate uint32
 
 	if kind == webrtc.RTPCodecTypeAudio {
 		return QualityHigh
 	}
 
-	_, maxAllowedVideoBitrate := t.client.GetMaxBitratePerTrack()
+	_, maxAllowedScreenBitrate, maxAllowedVideoBitrate := t.client.GetMaxBitratePerTrack()
+
+	if t.isScreen.Load() {
+		maxAllowedBitrate = maxAllowedScreenBitrate
+	} else {
+		maxAllowedBitrate = maxAllowedVideoBitrate
+	}
 
 	if t.remoteTrack.isTrackActive(QualityHigh) {
 		currentHighBitrate = t.remoteTrack.remoteTrackHigh.GetCurrentBitrate()
@@ -109,15 +115,15 @@ func (t *SimulcastClientTrack) GetAllowedQuality(kind webrtc.RTPCodecType) Quali
 		currentLowBitrate = lowBitrate
 	}
 
-	if currentHighBitrate != 0 && maxAllowedVideoBitrate > currentHighBitrate {
+	if currentHighBitrate != 0 && maxAllowedBitrate > currentHighBitrate {
 		estimatedQuality = QualityHigh
-	} else if currentMidBitrate != 0 && maxAllowedVideoBitrate < currentHighBitrate && maxAllowedVideoBitrate > currentMidBitrate {
+	} else if currentMidBitrate != 0 && maxAllowedBitrate < currentHighBitrate && maxAllowedBitrate > currentMidBitrate {
 		estimatedQuality = QualityMid
-	} else if currentLowBitrate != 0 && maxAllowedVideoBitrate < currentMidBitrate && maxAllowedVideoBitrate > currentLowBitrate {
+	} else if currentLowBitrate != 0 && maxAllowedBitrate < currentMidBitrate && maxAllowedBitrate > currentLowBitrate {
 		estimatedQuality = QualityLow
 	} else {
 		estimatedQuality = QualityNone
-		glog.Warning("track: no quality level is fit into the current bandwidth,  max allowed bitrate: ", maxAllowedVideoBitrate)
+		glog.Warning("track: no quality level is fit into the current bandwidth,  max allowed bitrate: ", maxAllowedBitrate)
 		glog.Warning("track: current high bitrate ", currentHighBitrate, ", current mid bitrate: ", currentMidBitrate, ", current low bitrate: ", currentLowBitrate)
 		glog.Warning("track: client ", t.client.ID(), " bandwidth ", t.client.GetEstimatedBandwidth())
 	}

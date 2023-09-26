@@ -36,6 +36,7 @@ const (
 	QualityLow  = 1
 	QualityNone = 0
 
+	// TODO: make this configurable
 	lowBitrate           = 150_000
 	midBitrate           = 500_000
 	highBitrate          = 2_500_000
@@ -958,8 +959,8 @@ func (c *Client) SetQuality(quality QualityLevel) {
 // - Current check the bitrate from remote track, but it should be from the local track because there is a possibility that some tracks are not forwarded to the client
 //
 // Currently the audio max bitrate has no affect, but we might able to control it with RTCP report
-// return audio and video max bitrate allowed per track
-func (c *Client) GetMaxBitratePerTrack() (uint32, uint32) {
+// return audio, screen and video max bitrate allowed per track
+func (c *Client) GetMaxBitratePerTrack() (uint32, uint32, uint32) {
 	var bandwidthPerVideoTrack, bandwidthPerAudioTrack, bandwidthPerScreenTrack uint32
 
 	// initial track count is set 1 considering there might be a new track without a bitrate yet
@@ -973,6 +974,8 @@ func (c *Client) GetMaxBitratePerTrack() (uint32, uint32) {
 	maxAudioBitrates := uint32(0)
 	maxVideoBitrates := uint32(0)
 	maxScreenBitrates := uint32(0)
+
+	bandwidthLeft := c.GetEstimatedBandwidth()
 
 	for _, track := range c.clientTracks.GetTracks() {
 		var currentBitrate uint32
@@ -1011,34 +1014,69 @@ func (c *Client) GetMaxBitratePerTrack() (uint32, uint32) {
 		maxAudioBitrates = 48_000
 	}
 
-	bandwidth := c.GetEstimatedBandwidth()
-
-	// make sure the max audio bitrate is not more than the estimated bandwidth
-	if maxAudioBitrates*uint32(audioTracks) > bandwidth {
-		maxAudioBitrates = bandwidth / uint32(audioTracks)
+	if maxAudioBitrates*uint32(audioTracks) > bandwidthLeft {
+		// not enough bandwidth for audio tracks
+		// no need to calculate the screen and video bitrate because it doesn't have enough bandwidth
+		bandwidthPerAudioTrack = bandwidthLeft / uint32(audioTracks)
+		return bandwidthPerAudioTrack, 0, 0
 	}
 
-	totalAudioBandwidth := maxAudioBitrates * uint32(audioTracks)
+	// reduce bandwidth left by audio total bitrates
+	bandwidthLeft = bandwidthLeft - audioTotalBitrates
+	bandwidthPerAudioTrack = maxAudioBitrates
 
-	if audioTracks == 0 {
-		bandwidthPerAudioTrack = maxAudioBitrates
+	if screenTrack != 0 && maxScreenBitrates*uint32(screenTrack) > bandwidthLeft {
+		// not enough bandwidth for screen tracks
+		// so we distribute the left bandwidth to screen tracks and no more for video tracks
+		bandwidthPerScreenTrack = bandwidthLeft / uint32(screenTrack)
+
+		glog.Warning("not enough bandwidth for all kind of tracks, so we distribute the bandwidth ", ThousandSeparator(int(bandwidthLeft)), " only for audio and screen tracks")
+		glog.Warning("bandwidth per audio track: ", ThousandSeparator(int(bandwidthPerAudioTrack)), " bandwidth per screen track: ", ThousandSeparator(int(bandwidthPerScreenTrack)))
+
+		return bandwidthPerAudioTrack, bandwidthPerScreenTrack, 0
+	}
+
+	bandwidthLeft = bandwidthLeft - screenTotalBitrates
+	if screenTrack != 0 {
+		if maxScreenBitrates > highBitrate || highBitrate > maxScreenBitrates && maxScreenBitrates > midBitrate {
+			bandwidthPerScreenTrack = highBitrate
+		} else if midBitrate > maxScreenBitrates && maxScreenBitrates > lowBitrate {
+			bandwidthPerScreenTrack = midBitrate
+		} else if maxScreenBitrates < lowBitrate {
+			bandwidthPerScreenTrack = lowBitrate
+		} else {
+			glog.Warning("client: screen bitrate is not in range")
+		}
 	} else {
-		bandwidthPerAudioTrack = bandwidth / uint32(audioTracks)
+		bandwidthPerScreenTrack = 0
 	}
 
-	if screenTrack == 0 {
-		bandwidthPerScreenTrack = maxScreenBitrates
+	if videoTracks != 0 && maxVideoBitrates*uint32(videoTracks) > bandwidthLeft {
+		// not enough bandwidth for video tracks
+		// so we distribute the left bandwidth to video tracks
+		bandwidthPerVideoTrack = bandwidthLeft / uint32(videoTracks)
+
+		glog.Warning("not enough bandwidth for video tracks, so we distribute the left bandwidth ", ThousandSeparator(int(bandwidthLeft)), " equally for video tracks")
+		glog.Warning("bandwidth per audio track: ", ThousandSeparator(int(bandwidthPerAudioTrack)), " bandwidth per screen track: ", ThousandSeparator(int(bandwidthPerScreenTrack)), " bandwidth per video track: ", ThousandSeparator(int(bandwidthPerVideoTrack)))
+
+		return bandwidthPerAudioTrack, bandwidthPerScreenTrack, bandwidthPerVideoTrack
+	}
+
+	if videoTracks != 0 {
+		if maxVideoBitrates > highBitrate || highBitrate > maxVideoBitrates && maxVideoBitrates > midBitrate {
+			bandwidthPerVideoTrack = highBitrate
+		} else if midBitrate > maxVideoBitrates && maxVideoBitrates > lowBitrate {
+			bandwidthPerVideoTrack = midBitrate
+		} else if maxVideoBitrates < lowBitrate {
+			bandwidthPerVideoTrack = lowBitrate
+		} else {
+			glog.Warning("client: video bitrate is not in range")
+		}
 	} else {
-		bandwidthPerScreenTrack = (bandwidth - totalAudioBandwidth) / uint32(screenTrack)
+		bandwidthPerVideoTrack = 0
 	}
 
-	if videoTracks == 0 {
-		bandwidthPerVideoTrack = maxVideoBitrates
-	} else {
-		bandwidthPerVideoTrack = (bandwidth - totalAudioBandwidth - bandwidthPerScreenTrack) / uint32(videoTracks)
-	}
-
-	return bandwidthPerAudioTrack, bandwidthPerVideoTrack
+	return bandwidthPerAudioTrack, bandwidthPerScreenTrack, bandwidthPerVideoTrack
 }
 
 func (c *Client) GetEstimatedBandwidth() uint32 {

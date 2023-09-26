@@ -21,6 +21,8 @@ import (
 	"github.com/pion/webrtc/v3"
 	"github.com/speps/go-hashids"
 	"golang.org/x/sys/unix"
+	"golang.org/x/text/language"
+	"golang.org/x/text/message"
 )
 
 const (
@@ -460,4 +462,9 @@ func Uint32ToQualityLevel(quality uint32) QualityLevel {
 	default:
 		return QualityLow
 	}
+}
+
+func ThousandSeparator(n int) string {
+	p := message.NewPrinter(language.English)
+	return p.Sprintf("%d", n)
 }

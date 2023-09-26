@@ -426,7 +426,7 @@ func (s *SFU) monitorAndAdjustBandwidth() {
 				minBitrate := uint32(lowBitrate)
 				clients := s.clients.GetClients()
 				for _, client := range clients {
-					_, bitrate := client.GetMaxBitratePerTrack()
+					_, _, bitrate := client.GetMaxBitratePerTrack()
 					if maxBitrate < bitrate {
 						maxBitrate = bitrate
 					}

@@ -19,17 +19,22 @@ type RemoteTrack struct {
 	mu                    sync.Mutex
 	track                 *webrtc.TrackRemote
 	onRead                func(*rtp.Packet)
-	previousBytesReceived atomic.Uint64
-	currentBytesReceived  atomic.Uint64
-	latestUpdatedTS       atomic.Uint64
+	bitrate               *atomic.Uint32
+	previousBytesReceived *atomic.Uint64
+	currentBytesReceived  *atomic.Uint64
+	latestUpdatedTS       *atomic.Uint64
 }
 
 func NewRemoteTrack(client *Client, track *webrtc.TrackRemote, onRead func(*rtp.Packet)) *RemoteTrack {
 	rt := &RemoteTrack{
-		client: client,
-		mu:     sync.Mutex{},
-		track:  track,
-		onRead: onRead,
+		client:                client,
+		mu:                    sync.Mutex{},
+		track:                 track,
+		onRead:                onRead,
+		bitrate:               &atomic.Uint32{},
+		previousBytesReceived: &atomic.Uint64{},
+		currentBytesReceived:  &atomic.Uint64{},
+		latestUpdatedTS:       &atomic.Uint64{},
 	}
 
 	rt.readRTP()
@@ -77,19 +82,25 @@ func (t *RemoteTrack) readRTP() {
 }
 
 func (t *RemoteTrack) updateStats(s stats.Stats) {
-	if t.latestUpdatedTS.Load() == 0 {
+	// update the stats if the last update equal or more than 1 second
+	latestUpdated := t.latestUpdatedTS.Load()
+	if time.Since(time.Unix(0, int64(latestUpdated))).Seconds() <= 1 {
+		return
+	}
+
+	if latestUpdated == 0 {
 		t.latestUpdatedTS.Store(uint64(s.LastPacketReceivedTimestamp.UnixNano()))
 		return
 	}
 
-	// update the bitrate if the last update equal or more than 1 second
-	lastTS := time.Unix(0, int64(t.latestUpdatedTS.Load()))
-	if time.Since(lastTS) >= time.Second {
-		t.latestUpdatedTS.Store(uint64(s.LastPacketReceivedTimestamp.UnixNano()))
-		current := t.currentBytesReceived.Load()
-		t.previousBytesReceived.Store(current)
-		t.currentBytesReceived.Store(s.BytesReceived)
-	}
+	t.latestUpdatedTS.Store(uint64(s.LastPacketReceivedTimestamp.UnixNano()))
+
+	deltaTime := time.Since(time.Unix(0, int64(latestUpdated)))
+	current := t.currentBytesReceived.Load()
+	t.previousBytesReceived.Store(current)
+	t.currentBytesReceived.Store(s.BytesReceived)
+
+	t.bitrate.Store(uint32((s.BytesReceived-current)*8) / uint32(deltaTime.Seconds()))
 
 }
 
@@ -98,21 +109,5 @@ func (t *RemoteTrack) Track() *webrtc.TrackRemote {
 }
 
 func (t *RemoteTrack) GetCurrentBitrate() uint32 {
-	if t.currentBytesReceived.Load() == 0 {
-		switch RIDToQuality(t.track.RID()) {
-		case QualityHigh:
-			return highBitrate
-		case QualityMid:
-			return midBitrate
-		case QualityLow:
-			return lowBitrate
-		default:
-			return 0
-		}
-	}
-
-	current := t.currentBytesReceived.Load()
-	previous := t.previousBytesReceived.Load()
-
-	return uint32((current - previous) * 8)
+	return t.bitrate.Load()
 }
