@@ -243,6 +243,9 @@ func (s *SFU) NewClient(id string, opts ClientOptions) *Client {
 
 		// broadcast to client with auto subscribe tracks
 		s.broadcastTracksToAutoSubscribeClients(availableTracks)
+
+		// reset after published
+		client.pendingPublishedTracks.Reset()
 	}
 
 	// request keyframe from new client for existing clients
@@ -401,11 +404,12 @@ func (s *SFU) removeClient(client *Client) error {
 	return nil
 }
 
-func (s *SFU) SetClientsMinMaxBitrate(minBitrate, maxBitrate uint32) {
-	for _, client := range s.clients.GetClients() {
+func (s *SFU) setClientsMinMaxBitrate(minBitrate, maxBitrate, totalClient uint32) {
+	clients := s.clients.GetClients()
+	for _, client := range clients {
 		client.mu.Lock()
 		if client.OnMinMaxBitrateAdjusted != nil {
-			client.OnMinMaxBitrateAdjusted(s.context, minBitrate, maxBitrate)
+			client.OnMinMaxBitrateAdjusted(s.context, minBitrate, maxBitrate, totalClient)
 		}
 		client.mu.Unlock()
 	}
@@ -423,7 +427,8 @@ func (s *SFU) monitorAndAdjustBandwidth() {
 			case <-t.C:
 				maxBitrate := uint32(highBitrate)
 				minBitrate := uint32(lowBitrate)
-				for _, client := range s.clients.GetClients() {
+				clients := s.clients.GetClients()
+				for _, client := range clients {
 					_, bitrate := client.GetMaxBitratePerTrack()
 					if maxBitrate < bitrate {
 						maxBitrate = bitrate
@@ -444,7 +449,7 @@ func (s *SFU) monitorAndAdjustBandwidth() {
 					minBitrate = MinBitrateLowerCap
 				}
 
-				s.SetClientsMinMaxBitrate(minBitrate, maxBitrate)
+				s.setClientsMinMaxBitrate(minBitrate, maxBitrate, uint32(len(clients)))
 			}
 		}
 	}()

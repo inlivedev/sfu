@@ -75,6 +75,7 @@
             justify-content: center;
             align-items: center;
             gap: 1rem;
+            z-index: 10;
         }
 
         aside {
@@ -126,6 +127,7 @@
     </aside>
     <footer>
         <button onclick="start()">Start</button>
+        <button onclick="shareScreen()">Share Screen</button>
         <button onclick="toggleStats()">Toggle Stats</button>
         <span><label>Quality</label> <select id="selectQuality" onchange="switchQuality()">
             <option selected value="high">high</option>
@@ -198,6 +200,11 @@
                     } else if (msg.type == 'bitrate_adjusted') {
                         const bitrates = msg.data
                         adjustBitrate(bitrates.min,bitrates.max)
+                    } else if(msg.type =='is_allow_renegotiation'){
+                        const isAllowRenegotiation = msg.data
+                        if (isAllowRenegotiation){
+                            negotiate()
+                        }
                     }
                 } catch (error) {
                     console.log(error);
@@ -292,19 +299,19 @@
                 sendEncodings: [
                     {
                         rid: 'high',
-                        maxBitrate: 700*1000,
+                        maxBitrate: 1200*1000,
                         maxFramerate: 30,
                     },
                     {
                         rid: 'mid',
                         scaleResolutionDownBy: 2.0,
                         maxFramerate: 20,
-                        maxBitrate: 300*1000,
+                        maxBitrate: 400*1000,
                     },
                     {
                         rid: 'low',
                         scaleResolutionDownBy: 4.0,
-                        maxBitrate: 100*1000,
+                        maxBitrate: 150*1000,
                         maxFramerate:15,
                     }
                 ]
@@ -511,60 +518,60 @@
         };
 
         const adjustBitrate = (min,max) =>{
-            if (max > bwController.available){
-                max = bwController.available
-            }
+            // if (max > bwController.available){
+            //     max = bwController.available
+            // }
 
-            const idealMin = Math.floor(max/9)
+            // const idealMin = Math.floor(max/9)
 
-            if (min>idealMin){
-                min = idealMin
-            }
+            // if (min>idealMin){
+            //     min = idealMin
+            // }
 
-            let updatedParams = false
-            const delta = max - min
-            const mid = min + Math.floor(delta * 1/3)
-            const total =max+mid+min
+            // let updatedParams = false
+            // const delta = max - min
+            // const mid = min + Math.floor(delta * 1/3)
+            // const total =max+mid+min
             
-            peerConnection.getSenders().forEach(sender => {
-                    if (sender.track!= null && sender.track.kind == "video") {
-                        const params = sender.getParameters()
+            // peerConnection.getSenders().forEach(sender => {
+            //         if (sender.track!= null && sender.track.kind == "video") {
+            //             const params = sender.getParameters()
 
-                        if (params.encodings.length == 1) {
-                            return
-                        }
+            //             if (params.encodings.length == 1) {
+            //                 return
+            //             }
 
-                        params.encodings.forEach((encoding,i) => {
+            //             params.encodings.forEach((encoding,i) => {
 
-                        switch (encoding.rid ) {
-                            case 'high':
-                                params.encodings[i].maxBitrate = max
-                                updatedParams = true
-                                break;
+            //             switch (encoding.rid ) {
+            //                 case 'high':
+            //                     params.encodings[i].maxBitrate = max
+            //                     updatedParams = true
+            //                     break;
                         
-                            case 'mid':
-                                params.encodings[i].maxBitrate = mid
-                                updatedParams = true
-                                break;
-                            case 'low':
-                                params.encodings[i].maxBitrate = min
-                                updatedParams = true
-                                break;
-                        }
+            //                 case 'mid':
+            //                     params.encodings[i].maxBitrate = mid
+            //                     updatedParams = true
+            //                     break;
+            //                 case 'low':
+            //                     params.encodings[i].maxBitrate = min
+            //                     updatedParams = true
+            //                     break;
+            //             }
                                              
-                    });
+            //         });
 
-                    const nextTotalBw = params.encodings.reduce((acc,encoding) => {
-                        return acc + encoding.maxBitrate
-                    },0)
+            //         const nextTotalBw = params.encodings.reduce((acc,encoding) => {
+            //             return acc + encoding.maxBitrate
+            //         },0)
 
-                    if(updatedParams){
-                        console.log(`min: ${min}, mid: ${mid}, max: ${max}, nextTotalBw: ${nextTotalBw}`)
-                        sender.setParameters(params)
-                    }
+            //         if(updatedParams){
+            //             console.log(`min: ${min}, mid: ${mid}, max: ${max}, nextTotalBw: ${nextTotalBw}`)
+            //             sender.setParameters(params)
+            //         }
                        
-                    }
-                })
+            //         }
+            //     })
         }
 
         const toggleStats = () => {
@@ -581,6 +588,58 @@
         const switchQuality= () =>{
             const quality = document.getElementById("selectQuality").value
             ws.send(JSON.stringify({type:'switch_quality',data:quality}));
+        }
+
+        const shareScreen = async () =>{
+            const stream = await navigator.mediaDevices.getDisplayMedia({
+                video: true,
+                audio: true
+            })
+
+            const videoTrack = stream.getVideoTracks()[0]
+            const audioTrack = stream.getAudioTracks()[0]
+
+            peerConnection.addTransceiver(audioTrack, {
+                direction: 'sendonly',
+                streams: [stream],
+                sendEncodings: [{priority: 'high'}],
+            })
+
+            const tscv=peerConnection.addTransceiver(videoTrack, {
+                direction: 'sendonly',
+                streams: [stream],
+                sendEncodings: [{priority: 'medium'}]
+            })
+
+            container = document.createElement("div");
+            container.className = "container";
+            container.id = "container-"+videoTrack.id;
+            
+            const video = document.createElement("video");
+            video.id = "video-"+videoTrack.id;
+            video.autoplay = true;
+            video.srcObject = stream;
+            container.appendChild(video);
+
+            document.querySelector('main').appendChild(container);
+
+            videoTrack.addEventListener('ended', () => {
+                console.log('Video track ended, stopping screen sharing');
+                document.querySelector('main').removeChild(container);
+            });
+
+            isAllowRenegotiation()
+        }
+
+        const isAllowRenegotiation = ()=>{
+            ws.send(JSON.stringify({type:'is_allow_renegotiation'}));
+        }
+
+        const negotiate = async () => {
+            const offer=await peerConnection.createOffer()
+          
+            await peerConnection.setLocalDescription(offer)
+            ws.send(JSON.stringify({type:'offer',data:offer.sdp}));
         }
         </script>
 </body>

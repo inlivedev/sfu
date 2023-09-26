@@ -29,16 +29,17 @@ type Respose struct {
 }
 
 const (
-	TypeOffer              = "offer"
-	TypeAnswer             = "answer"
-	TypeCandidate          = "candidate"
-	TypeError              = "error"
-	TypeAllowRenegotiation = "allow_renegotiation"
-	TypeTrackAdded         = "tracks_added"
-	TypeTrackAvailable     = "tracks_available"
-	TypeSwitchQuality      = "switch_quality"
-	TypeUpdateBandwidth    = "update_bandwidth"
-	TypeBitrateAdjusted    = "bitrate_adjusted"
+	TypeOffer                = "offer"
+	TypeAnswer               = "answer"
+	TypeCandidate            = "candidate"
+	TypeError                = "error"
+	TypeAllowRenegotiation   = "allow_renegotiation"
+	TypeIsAllowRenegotiation = "is_allow_renegotiation"
+	TypeTrackAdded           = "tracks_added"
+	TypeTrackAvailable       = "tracks_available"
+	TypeSwitchQuality        = "switch_quality"
+	TypeUpdateBandwidth      = "update_bandwidth"
+	TypeBitrateAdjusted      = "bitrate_adjusted"
 )
 
 func main() {
@@ -244,15 +245,16 @@ func clientHandler(conn *websocket.Conn, messageChan chan Request, r *sfu.Room) 
 	}
 
 	type Bitrates struct {
-		Min uint32 `json:"min"`
-		Max uint32 `json:"max"`
+		Min         uint32 `json:"min"`
+		Max         uint32 `json:"max"`
+		TotalClient uint32 `json:"total_client"`
 	}
 
-	client.OnMinMaxBitrateAdjusted = func(ctx context.Context, minBitrate, maxBitrate uint32) {
+	client.OnMinMaxBitrateAdjusted = func(ctx context.Context, minBitrate, maxBitrate, totalClient uint32) {
 		resp := Respose{
 			Status: true,
 			Type:   TypeBitrateAdjusted,
-			Data:   Bitrates{Min: minBitrate, Max: maxBitrate},
+			Data:   Bitrates{Min: minBitrate, Max: maxBitrate, TotalClient: totalClient},
 		}
 		respBytes, _ := json.Marshal(resp)
 		_, _ = conn.Write(respBytes)
@@ -356,6 +358,17 @@ func clientHandler(conn *websocket.Conn, messageChan chan Request, r *sfu.Room) 
 			} else if req.Type == TypeUpdateBandwidth {
 				bandwidth := uint32(req.Data.(float64))
 				client.UpdatePublisherBandwidth(bandwidth)
+			} else if req.Type == TypeIsAllowRenegotiation {
+				resp := Respose{
+					Status: true,
+					Type:   TypeIsAllowRenegotiation,
+					Data:   client.IsAllowNegotiation(),
+				}
+
+				respBytes, _ := json.Marshal(resp)
+
+				conn.Write(respBytes)
+
 			} else {
 				glog.Error("unknown message type", req)
 			}

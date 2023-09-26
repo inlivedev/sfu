@@ -92,11 +92,16 @@ type Client struct {
 	onLeftCallbacks                   []func()
 	onTrackRemovedCallbacks           []func(sourceType string, track *webrtc.TrackLocalStaticRTP)
 	OnIceCandidate                    func(context.Context, *webrtc.ICECandidate)
-	OnMinMaxBitrateAdjusted           func(context.Context, uint32, uint32)
-	OnBeforeRenegotiation             func(context.Context) bool
-	OnRenegotiation                   func(context.Context, webrtc.SessionDescription) (webrtc.SessionDescription, error)
-	OnAllowedRemoteRenegotiation      func()
-	OnTracksAvailable                 func([]ITrack)
+
+	// OnMinMaxBitrateAdjusted will let the client knows that the range of other clients available bandwidth.
+	// This is useful for the client to adjust the bitrate of the track to fit into the available bandwidth.
+	// Please remind that the available bandwidth is use by all tracks, not a single track.
+	// Use min max bandwidth as reference to distribute and make sure all bitrates are fit into the available bandwidth.
+	OnMinMaxBitrateAdjusted      func(ctx context.Context, min, max, totalClient uint32)
+	OnBeforeRenegotiation        func(context.Context) bool
+	OnRenegotiation              func(context.Context, webrtc.SessionDescription) (webrtc.SessionDescription, error)
+	OnAllowedRemoteRenegotiation func()
+	OnTracksAvailable            func([]ITrack)
 	// onTrack is used by SFU to take action when a new track is added to the client
 	onTrack                 func(ITrack)
 	onTracksAdded           func([]ITrack)
@@ -290,7 +295,7 @@ func NewClient(s *SFU, id string, peerConnectionConfig webrtc.Configuration, opt
 			}
 
 			// only process track when the lowest quality is available
-			if simulcast.remoteTrackLow != nil {
+			if simulcast.remoteTrackLow != nil && !track.IsProcessed() {
 				client.onTrack(track)
 				track.SetAsProcessed()
 			}

@@ -486,6 +486,8 @@ func (t *TrackList) Add(track ITrack) error {
 		return ErrTrackExists
 	}
 
+	glog.Info("client: add track ", id)
+
 	t.tracks[id] = track
 
 	return nil
