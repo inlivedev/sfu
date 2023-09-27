@@ -422,31 +422,31 @@ func (s *SFU) monitorAndAdjustBandwidth() {
 			case <-ctx.Done():
 				return
 			case <-t.C:
-				maxBitrate := uint32(highBitrate)
-				minBitrate := uint32(lowBitrate)
-				clients := s.clients.GetClients()
-				for _, client := range clients {
-					_, _, bitrate := client.GetMaxBitratePerTrack()
-					if maxBitrate < bitrate {
-						maxBitrate = bitrate
-					}
+				// maxBitrate := uint32(highBitrate)
+				// minBitrate := uint32(lowBitrate)
+				// clients := s.clients.GetClients()
+				// for _, client := range clients {
+				// 	_, _, bitrate := client.GetMaxBitratePerTrack()
+				// 	if maxBitrate < bitrate {
+				// 		maxBitrate = bitrate
+				// 	}
 
-					if minBitrate > bitrate {
-						minBitrate = bitrate
-					}
-				}
+				// 	if minBitrate > bitrate {
+				// 		minBitrate = bitrate
+				// 	}
+				// }
 
-				if maxBitrate > MaxBitrateUpperCap {
-					maxBitrate = MaxBitrateUpperCap
-				}
+				// if maxBitrate > MaxBitrateUpperCap {
+				// 	maxBitrate = MaxBitrateUpperCap
+				// }
 
-				if minBitrate > MinBitrateUpperCap {
-					minBitrate = MinBitrateUpperCap
-				} else if minBitrate < MinBitrateLowerCap {
-					minBitrate = MinBitrateLowerCap
-				}
+				// if minBitrate > MinBitrateUpperCap {
+				// 	minBitrate = MinBitrateUpperCap
+				// } else if minBitrate < MinBitrateLowerCap {
+				// 	minBitrate = MinBitrateLowerCap
+				// }
 
-				s.setClientsMinMaxBitrate(minBitrate, maxBitrate, uint32(len(clients)))
+				// s.setClientsMinMaxBitrate(minBitrate, maxBitrate, uint32(len(clients)))
 			}
 		}
 	}()

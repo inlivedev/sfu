@@ -23,6 +23,7 @@ type RemoteTrack struct {
 	previousBytesReceived *atomic.Uint64
 	currentBytesReceived  *atomic.Uint64
 	latestUpdatedTS       *atomic.Uint64
+	onEndedCallbacks      []func()
 }
 
 func NewRemoteTrack(client *Client, track *webrtc.TrackRemote, onRead func(*rtp.Packet)) *RemoteTrack {
@@ -35,6 +36,7 @@ func NewRemoteTrack(client *Client, track *webrtc.TrackRemote, onRead func(*rtp.
 		previousBytesReceived: &atomic.Uint64{},
 		currentBytesReceived:  &atomic.Uint64{},
 		latestUpdatedTS:       &atomic.Uint64{},
+		onEndedCallbacks:      make([]func(), 0),
 	}
 
 	rt.readRTP()
@@ -42,12 +44,26 @@ func NewRemoteTrack(client *Client, track *webrtc.TrackRemote, onRead func(*rtp.
 	return rt
 }
 
+func (t *RemoteTrack) OnEnded(f func()) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	t.onEndedCallbacks = append(t.onEndedCallbacks, f)
+}
+
 func (t *RemoteTrack) onEnded() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
 	t.client.tracks.Remove([]string{t.track.ID()})
 	trackIDs := make([]string, 0)
 	trackIDs = append(trackIDs, t.track.ID())
 
 	t.client.sfu.removeTracks(trackIDs)
+
+	for _, f := range t.onEndedCallbacks {
+		f()
+	}
 }
 
 func (t *RemoteTrack) readRTP() {
@@ -72,7 +88,22 @@ func (t *RemoteTrack) readRTP() {
 					return
 				}
 
+				readDoneChan := make(chan bool)
+				go func() {
+					timeout, cancelTimeout := context.WithTimeout(ctxx, 5*time.Second)
+					defer cancelTimeout()
+					select {
+					case <-timeout.Done():
+						glog.Warning("remotetrack: timeout reading rtp , track id: ", t.track.ID())
+						return
+					case <-readDoneChan:
+						return
+					}
+				}()
+
 				t.onRead(rtp)
+
+				readDoneChan <- true
 
 				go t.client.updateReceiverStats(t)
 

@@ -1,6 +1,7 @@
 package sfu
 
 import (
+	"context"
 	"errors"
 	"sync"
 	"sync/atomic"
@@ -144,17 +145,26 @@ func (t *Track) Subscribe() iClientTrack {
 	isScreen := &atomic.Bool{}
 	isScreen.Store(t.IsScreen())
 	ct := &ClientTrack{
-		id:          t.base.id,
-		mu:          sync.RWMutex{},
-		client:      t.Client(),
-		kind:        t.base.kind,
-		mimeType:    t.remoteTrack.track.Codec().MimeType,
-		localTrack:  t.createLocalTrack(),
-		remoteTrack: t.remoteTrack,
-		isScreen:    isScreen,
+		id:                    t.base.id,
+		mu:                    sync.RWMutex{},
+		client:                t.Client(),
+		kind:                  t.base.kind,
+		mimeType:              t.remoteTrack.track.Codec().MimeType,
+		localTrack:            t.createLocalTrack(),
+		remoteTrack:           t.remoteTrack,
+		isScreen:              isScreen,
+		onTrackEndedCallbacks: make([]func(), 0),
 	}
 
+	t.remoteTrack.OnEnded(func() {
+		ct.onTrackEnded()
+	})
+
 	t.base.clientTracks.Add(ct)
+
+	if _, err := t.base.client.bitrateController.AddClaim(ct, QualityHigh); err != nil {
+		glog.Error("track: error adding bitrate claim ", err)
+	}
 
 	return ct
 }
@@ -282,7 +292,23 @@ func (t *SimulcastTrack) AddRemoteTrack(track *webrtc.TrackRemote) {
 
 		tracks := t.base.clientTracks.GetTracks()
 		for _, track := range tracks {
+			readChan := make(chan bool)
+
+			go func() {
+				timeout, cancel := context.WithTimeout(t.base.client.context, time.Second*5)
+				defer cancel()
+				select {
+				case <-timeout.Done():
+					glog.Warning("remotetrack: timeout push rtp , track id: ", t.ID())
+					return
+				case <-readChan:
+					return
+				}
+			}()
+
 			track.push(p, quality)
+
+			readChan <- true
 		}
 	}
 
@@ -318,24 +344,42 @@ func (t *SimulcastTrack) Subscribe(client *Client) iClientTrack {
 	isScreen.Store(t.IsScreen())
 
 	lastQuality := &atomic.Uint32{}
-	lastQuality.Store(uint32(QualityLow))
 
 	sequenceNumber := &atomic.Uint32{}
 
 	lastTimestamp := &atomic.Uint32{}
 
 	ct := &SimulcastClientTrack{
-		mu:             sync.RWMutex{},
-		id:             t.base.id,
-		kind:           t.base.kind,
-		mimeType:       t.base.codec.MimeType,
-		client:         client,
-		localTrack:     track,
-		remoteTrack:    t,
-		sequenceNumber: sequenceNumber,
-		lastQuality:    lastQuality,
-		lastTimestamp:  lastTimestamp,
-		isScreen:       isScreen,
+		mu:                    sync.RWMutex{},
+		id:                    t.base.id,
+		kind:                  t.base.kind,
+		mimeType:              t.base.codec.MimeType,
+		client:                client,
+		localTrack:            track,
+		remoteTrack:           t,
+		sequenceNumber:        sequenceNumber,
+		lastQuality:           lastQuality,
+		lastCheckQualityTS:    &atomic.Int64{},
+		lastTimestamp:         lastTimestamp,
+		isScreen:              isScreen,
+		isEnded:               &atomic.Bool{},
+		onTrackEndedCallbacks: make([]func(), 0),
+	}
+	if t.remoteTrackLow != nil {
+		t.remoteTrackLow.OnEnded(func() {
+			ct.onTrackEnded()
+		})
+	}
+
+	if t.remoteTrackMid != nil {
+		t.remoteTrackMid.OnEnded(func() {
+			ct.onTrackEnded()
+		})
+	}
+	if t.remoteTrackHigh != nil {
+		t.remoteTrackHigh.OnEnded(func() {
+			ct.onTrackEnded()
+		})
 	}
 
 	t.base.clientTracks.Add(ct)

@@ -37,6 +37,7 @@ const (
 	QualityNone = 0
 
 	// TODO: make this configurable
+	audioBitrate         = 48_000
 	lowBitrate           = 150_000
 	midBitrate           = 500_000
 	highBitrate          = 2_500_000
@@ -65,6 +66,7 @@ type ClientStats struct {
 
 type Client struct {
 	id                                string
+	bitrateController                 *BitrateController
 	context                           context.Context
 	cancel                            context.CancelFunc
 	canAddCandidate                   *atomic.Bool
@@ -84,7 +86,6 @@ type Client struct {
 	pendingPublishedTracks            *TrackList
 	pendingRemoteRenegotiation        *atomic.Bool
 	publishedTracks                   *TrackList
-	clientTracks                      *clientTrackList
 	queue                             *queue
 	state                             *atomic.Value
 	sfu                               *SFU
@@ -219,7 +220,6 @@ func NewClient(s *SFU, id string, peerConnectionConfig webrtc.Configuration, opt
 		estimatorChan: estimatorChan,
 		context:       localCtx,
 		cancel:        cancel,
-		clientTracks:  newClientTrackList(),
 		clientStats: &ClientStats{
 			mu:       sync.RWMutex{},
 			Sender:   make(map[webrtc.SSRC]stats.Stats),
@@ -247,6 +247,8 @@ func NewClient(s *SFU, id string, peerConnectionConfig webrtc.Configuration, opt
 		egressBandwidth:            &atomic.Uint32{},
 		ingressBandwidth:           &atomic.Uint32{},
 	}
+
+	client.bitrateController = NewBitrateController(client)
 
 	// make sure the exisiting data channels is created on new clients
 	s.createExistingDataChannels(client)
@@ -578,7 +580,6 @@ func (c *Client) setClientTrack(track ITrack) bool {
 		outputTrack = singleTrack.Subscribe()
 	}
 
-	c.clientTracks.Add(outputTrack)
 	localTrack := outputTrack.LocalTrack()
 
 	transc, err := c.peerConnection.AddTransceiverFromTrack(localTrack, webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionSendonly})
@@ -643,7 +644,7 @@ func (c *Client) enableReportAndStats(rtpSender *webrtc.RTPSender) {
 
 	go func() {
 		localCtx, cancel := context.WithCancel(c.context)
-		tick := time.NewTicker(3 * time.Second)
+		tick := time.NewTicker(1 * time.Second)
 		defer cancel()
 		for {
 			select {
@@ -947,141 +948,9 @@ func (c *Client) SetQuality(quality QualityLevel) {
 	c.quality.Store(uint32(quality))
 }
 
-// This function is to calculate maximum bitrate allowed per audio or video track.
-// The bitrate is calculated based on the estimated bandwidth and the number of tracks.
-// Because we prioritize audio tracks, then the audio tracks will get the maximum bitrate allowed per track. TODO: this should be configurable
-// The video tracks will get the rest of the bandwidth.
-//
-// TODO:
-// - This should pass the track as parameter to it's maximum allowed bitrate, so we can check the priority of the track compare with the others.
-// - For example if the track is speaking, then it should get the maximum bitrate allowed together with the other tracks in the same stream_id.
-// - Check if the client has a manual overide quality, then use it instead of the estimated quality
-// - Current check the bitrate from remote track, but it should be from the local track because there is a possibility that some tracks are not forwarded to the client
-//
-// Currently the audio max bitrate has no affect, but we might able to control it with RTCP report
-// return audio, screen and video max bitrate allowed per track
-func (c *Client) GetMaxBitratePerTrack() (uint32, uint32, uint32) {
-	var bandwidthPerVideoTrack, bandwidthPerAudioTrack, bandwidthPerScreenTrack uint32
-
-	// initial track count is set 1 considering there might be a new track without a bitrate yet
-	audioTracks := 1
-	videoTracks := 1
-	screenTrack := 0
-	audioTotalBitrates := uint32(0)
-	videoTotalBitrates := uint32(0)
-	screenTotalBitrates := uint32(0)
-
-	maxAudioBitrates := uint32(0)
-	maxVideoBitrates := uint32(0)
-	maxScreenBitrates := uint32(0)
-
-	bandwidthLeft := c.GetEstimatedBandwidth()
-
-	for _, track := range c.clientTracks.GetTracks() {
-		var currentBitrate uint32
-
-		if track.Kind() == webrtc.RTPCodecTypeAudio {
-			audioTracks++
-			currentBitrate = track.getCurrentBitrate()
-			audioTotalBitrates += currentBitrate
-			if currentBitrate > maxAudioBitrates {
-				maxAudioBitrates = currentBitrate
-			}
-
-		}
-
-		if track.Kind() == webrtc.RTPCodecTypeVideo {
-			if track.IsScreen() {
-				screenTrack++
-				currentBitrate := track.getCurrentBitrate()
-				screenTotalBitrates += currentBitrate
-				if currentBitrate > maxScreenBitrates {
-					maxScreenBitrates = currentBitrate
-				}
-			} else {
-				videoTracks++
-				currentBitrate = track.getCurrentBitrate()
-				videoTotalBitrates += currentBitrate
-				if currentBitrate > maxVideoBitrates {
-					maxVideoBitrates = currentBitrate
-				}
-			}
-
-		}
-	}
-
-	if maxAudioBitrates < 24_000 {
-		maxAudioBitrates = 48_000
-	}
-
-	if maxAudioBitrates*uint32(audioTracks) > bandwidthLeft {
-		// not enough bandwidth for audio tracks
-		// no need to calculate the screen and video bitrate because it doesn't have enough bandwidth
-		bandwidthPerAudioTrack = bandwidthLeft / uint32(audioTracks)
-		return bandwidthPerAudioTrack, 0, 0
-	}
-
-	// reduce bandwidth left by audio total bitrates
-	bandwidthLeft = bandwidthLeft - audioTotalBitrates
-	bandwidthPerAudioTrack = maxAudioBitrates
-
-	if screenTrack != 0 && maxScreenBitrates*uint32(screenTrack) > bandwidthLeft {
-		// not enough bandwidth for screen tracks
-		// so we distribute the left bandwidth to screen tracks and no more for video tracks
-		bandwidthPerScreenTrack = bandwidthLeft / uint32(screenTrack)
-
-		glog.Warning("not enough bandwidth for all kind of tracks, so we distribute the bandwidth ", ThousandSeparator(int(bandwidthLeft)), " only for audio and screen tracks")
-		glog.Warning("bandwidth per audio track: ", ThousandSeparator(int(bandwidthPerAudioTrack)), " bandwidth per screen track: ", ThousandSeparator(int(bandwidthPerScreenTrack)))
-
-		return bandwidthPerAudioTrack, bandwidthPerScreenTrack, 0
-	}
-
-	bandwidthLeft = bandwidthLeft - screenTotalBitrates
-	if screenTrack != 0 {
-		if maxScreenBitrates > highBitrate || highBitrate > maxScreenBitrates && maxScreenBitrates > midBitrate {
-			bandwidthPerScreenTrack = highBitrate
-		} else if midBitrate > maxScreenBitrates && maxScreenBitrates > lowBitrate {
-			bandwidthPerScreenTrack = midBitrate
-		} else if maxScreenBitrates < lowBitrate {
-			bandwidthPerScreenTrack = lowBitrate
-		} else {
-			glog.Warning("client: screen bitrate is not in range")
-		}
-	} else {
-		bandwidthPerScreenTrack = 0
-	}
-
-	if videoTracks != 0 && maxVideoBitrates*uint32(videoTracks) > bandwidthLeft {
-		// not enough bandwidth for video tracks
-		// so we distribute the left bandwidth to video tracks
-		bandwidthPerVideoTrack = bandwidthLeft / uint32(videoTracks)
-
-		glog.Warning("not enough bandwidth for video tracks, so we distribute the left bandwidth ", ThousandSeparator(int(bandwidthLeft)), " equally for video tracks")
-		glog.Warning("bandwidth per audio track: ", ThousandSeparator(int(bandwidthPerAudioTrack)), " bandwidth per screen track: ", ThousandSeparator(int(bandwidthPerScreenTrack)), " bandwidth per video track: ", ThousandSeparator(int(bandwidthPerVideoTrack)))
-
-		return bandwidthPerAudioTrack, bandwidthPerScreenTrack, bandwidthPerVideoTrack
-	}
-
-	if videoTracks != 0 {
-		if maxVideoBitrates > highBitrate || highBitrate > maxVideoBitrates && maxVideoBitrates > midBitrate {
-			bandwidthPerVideoTrack = highBitrate
-		} else if midBitrate > maxVideoBitrates && maxVideoBitrates > lowBitrate {
-			bandwidthPerVideoTrack = midBitrate
-		} else if maxVideoBitrates < lowBitrate {
-			bandwidthPerVideoTrack = lowBitrate
-		} else {
-			glog.Warning("client: video bitrate is not in range")
-		}
-	} else {
-		bandwidthPerVideoTrack = 0
-	}
-
-	return bandwidthPerAudioTrack, bandwidthPerScreenTrack, bandwidthPerVideoTrack
-}
-
 func (c *Client) GetEstimatedBandwidth() uint32 {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	// c.mu.Lock()
+	// defer c.mu.Unlock()
 
 	if c.estimator == nil {
 		return uint32(initialSendBandwidth)
