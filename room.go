@@ -58,8 +58,8 @@ type Room struct {
 	OnEvent                 func(event Event)
 }
 
-func newRoom(ctx context.Context, id, name string, sfu *SFU, roomType string) *Room {
-	localContext, cancel := context.WithCancel(ctx)
+func newRoom(id, name string, sfu *SFU, roomType string) *Room {
+	localContext, cancel := context.WithCancel(sfu.context)
 
 	room := &Room{
 		ID:         id,
@@ -259,4 +259,8 @@ func (r *Room) CreateDataChannel(label string, opts DataChannelOptions) error {
 
 func (r *Room) GetBitratesConfig() BitratesConfig {
 	return r.sfu.bitratesConfig
+}
+
+func (r *Room) Context() context.Context {
+	return r.context
 }
