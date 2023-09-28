@@ -24,7 +24,7 @@ func TestRoomCreateAndClose(t *testing.T) {
 	roomName := "test-room"
 
 	// create new room
-	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal)
+	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal, DefaultBitrates())
 	require.NoErrorf(t, err, "error creating new room: %v", err)
 
 	// add a new client to room
@@ -68,7 +68,7 @@ func TestRoomJoinLeftEvent(t *testing.T) {
 	clients := make(map[string]*Client)
 
 	// create new room
-	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal)
+	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal, DefaultBitrates())
 	require.NoError(t, err, "error creating room: %v", err)
 	leftChan := make(chan bool)
 	joinChan := make(chan bool)
@@ -139,7 +139,7 @@ func TestRoomStats(t *testing.T) {
 	clients := make(map[string]*Client)
 
 	// create new room
-	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal)
+	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal, DefaultBitrates())
 	require.NoError(t, err, "error creating room: %v", err)
 	joinChan := make(chan bool)
 	peerCount := 0

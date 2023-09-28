@@ -72,7 +72,7 @@ func TestManagerExtension(t *testing.T) {
 	m.AddExtension(managerExt)
 	roomID := m.CreateRoomID()
 
-	room, err := m.NewRoom(roomID, "test", "p2p")
+	room, err := m.NewRoom(roomID, "test", "p2p", DefaultBitrates())
 	require.NotNil(t, room, "room is nil")
 	require.NoError(t, err, "error creating room")
 
@@ -102,7 +102,7 @@ func TestExtension(t *testing.T) {
 	})
 
 	// create new room
-	testRoom, err := m.NewRoom("test", "test", RoomTypeLocal)
+	testRoom, err := m.NewRoom("test", "test", RoomTypeLocal, DefaultBitrates())
 	ext := NewTestExtension()
 	testRoom.AddExtension(ext)
 

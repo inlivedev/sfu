@@ -27,10 +27,10 @@ func TestRoomDataChannel(t *testing.T) {
 	roomName := "test-room"
 
 	// create new room
-	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal)
+	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal, DefaultBitrates())
 	require.NoError(t, err, "error creating room: %v", err)
-	pc1, client1, _ := CreateDataPair(ctx, testRoom, roomManager.Options.IceServers, "peer1")
-	pc2, client2, _ := CreateDataPair(ctx, testRoom, roomManager.Options.IceServers, "peer2")
+	pc1, client1, _ := CreateDataPair(ctx, testRoom, roomManager.options.IceServers, "peer1")
+	pc2, client2, _ := CreateDataPair(ctx, testRoom, roomManager.options.IceServers, "peer2")
 
 	defer func() {
 		_ = client1.Stop()
@@ -113,11 +113,11 @@ func TestRoomDataChannelWithClientID(t *testing.T) {
 	roomName := "test-room"
 
 	// create new room
-	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal)
+	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal, DefaultBitrates())
 	require.NoError(t, err, "error creating room: %v", err)
-	pc1, client1, _ := CreateDataPair(ctx, testRoom, roomManager.Options.IceServers, "peer1")
-	pc2, client2, _ := CreateDataPair(ctx, testRoom, roomManager.Options.IceServers, "peer2")
-	pc3, client3, _ := CreateDataPair(ctx, testRoom, roomManager.Options.IceServers, "peer2")
+	pc1, client1, _ := CreateDataPair(ctx, testRoom, roomManager.options.IceServers, "peer1")
+	pc2, client2, _ := CreateDataPair(ctx, testRoom, roomManager.options.IceServers, "peer2")
+	pc3, client3, _ := CreateDataPair(ctx, testRoom, roomManager.options.IceServers, "peer2")
 
 	defer func() {
 		_ = client1.Stop()

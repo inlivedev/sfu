@@ -88,13 +88,17 @@ func (bc *BitrateController) TotalBitrates(all bool) uint32 {
 func (bc *BitrateController) canIncreaseBitrate(clientTrackID string, quality QualityLevel) bool {
 	delta := uint32(0)
 
-	newBitrate := QualityLevelToBitrate(quality)
+	newBitrate := bc.client.sfu.QualityLevelToBitrate(quality)
 
 	bc.mu.Lock()
-	if claim, ok := bc.claims[clientTrackID]; ok {
-		delta = newBitrate - claim.bitrate
-	}
+	claim, ok := bc.claims[clientTrackID]
 	bc.mu.Unlock()
+
+	if !ok {
+		return false
+	}
+
+	delta = newBitrate - claim.bitrate
 
 	newEstimatedBandwidth := bc.TotalBitrates(true) + delta
 	bandwidth := bc.client.GetEstimatedBandwidth()
@@ -123,7 +127,7 @@ func (bc *BitrateController) setQuality(clientTrackID string, quality QualityLev
 	defer bc.mu.RUnlock()
 
 	if claim, ok := bc.claims[clientTrackID]; ok {
-		bitrate := QualityLevelToBitrate(quality)
+		bitrate := bc.client.sfu.QualityLevelToBitrate(quality)
 		claim.quality = quality
 		claim.bitrate = bitrate
 		bc.claims[clientTrackID] = claim
@@ -150,7 +154,7 @@ func (bc *BitrateController) getNextTrackQuality(clientTrackID string) QualityLe
 
 	needBitrates := bc.inactiveClaimBitrates()
 
-	if needBitrates > 0 {
+	if needBitrates > 0 && claim.active {
 		// need to reduce the quality
 		// TODO: check if need to reduce from high to low
 		// do we need to set it as inactive?
@@ -203,9 +207,9 @@ func (bc *BitrateController) AddClaim(clientTrack iClientTrack, quality QualityL
 	var bitrate uint32
 
 	if clientTrack.Kind() == webrtc.RTPCodecTypeAudio {
-		bitrate = audioBitrate
+		bitrate = bc.client.sfu.bitratesConfig.Audio
 	} else {
-		bitrate = QualityLevelToBitrate(quality)
+		bitrate = bc.client.sfu.QualityLevelToBitrate(quality)
 	}
 
 	// if the new total bitrate is less than the estimated bandwidth, then the track is active

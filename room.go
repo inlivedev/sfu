@@ -44,8 +44,8 @@ type Room struct {
 	onRoomClosedCallbacks   []func(id string)
 	onClientJoinedCallbacks []func(*Client)
 	onClientLeftCallbacks   []func(*Client)
-	Context                 context.Context
-	cancelContext           context.CancelFunc
+	context                 context.Context
+	cancel                  context.CancelFunc
 	ID                      string `json:"id"`
 	RenegotiationChan       map[string]chan bool
 	Name                    string `json:"name"`
@@ -62,16 +62,16 @@ func newRoom(ctx context.Context, id, name string, sfu *SFU, roomType string) *R
 	localContext, cancel := context.WithCancel(ctx)
 
 	room := &Room{
-		ID:            id,
-		Context:       localContext,
-		cancelContext: cancel,
-		sfu:           sfu,
-		stats:         make(map[string]ClientStats),
-		State:         StateRoomOpen,
-		Name:          name,
-		mutex:         &sync.Mutex{},
-		extensions:    make([]IExtension, 0),
-		Type:          roomType,
+		ID:         id,
+		context:    localContext,
+		cancel:     cancel,
+		sfu:        sfu,
+		stats:      make(map[string]ClientStats),
+		State:      StateRoomOpen,
+		Name:       name,
+		mutex:      &sync.Mutex{},
+		extensions: make([]IExtension, 0),
+		Type:       roomType,
 	}
 
 	sfu.OnClientRemoved(func(client *Client) {
@@ -95,7 +95,7 @@ func (r *Room) Close() error {
 		return ErrRoomIsNotEmpty
 	}
 
-	r.cancelContext()
+	r.cancel()
 
 	r.sfu.Stop()
 

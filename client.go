@@ -35,13 +35,6 @@ const (
 	QualityMid  = 2
 	QualityLow  = 1
 	QualityNone = 0
-
-	// TODO: make this configurable
-	audioBitrate         = 48_000
-	lowBitrate           = 150_000
-	midBitrate           = 500_000
-	highBitrate          = 2_500_000
-	initialSendBandwidth = 1_000_000
 )
 
 type QualityLevel uint32
@@ -162,7 +155,7 @@ func NewClient(s *SFU, id string, peerConnectionConfig webrtc.Configuration, opt
 	if opts.EnableCongestionController {
 		glog.Info("client: enable congestion controller")
 		congestionController, err = cc.NewInterceptor(func() (cc.BandwidthEstimator, error) {
-			return gcc.NewSendSideBWE(gcc.SendSideBWEInitialBitrate(initialSendBandwidth))
+			return gcc.NewSendSideBWE(gcc.SendSideBWEInitialBitrate(int(s.bitratesConfig.InitialBandwidth)))
 		})
 		if err != nil {
 			panic(err)
@@ -932,7 +925,7 @@ func (c *Client) SubscribeTracks(req []SubscribeTrackRequest) error {
 func (c *Client) SubscribeAllTracks() {
 	c.IsSubscribeAllTracks.Store(true)
 
-	negotiateNeeded := c.sfu.SyncTrack(c)
+	negotiateNeeded := c.sfu.syncTrack(c)
 
 	if negotiateNeeded {
 		c.renegotiate()
@@ -953,7 +946,7 @@ func (c *Client) GetEstimatedBandwidth() uint32 {
 	// defer c.mu.Unlock()
 
 	if c.estimator == nil {
-		return uint32(initialSendBandwidth)
+		return uint32(c.sfu.bitratesConfig.InitialBandwidth)
 	}
 
 	bw := uint32(c.estimator.GetTargetBitrate())

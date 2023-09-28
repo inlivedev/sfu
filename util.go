@@ -468,16 +468,3 @@ func ThousandSeparator(n int) string {
 	p := message.NewPrinter(language.English)
 	return p.Sprintf("%d", n)
 }
-
-func QualityLevelToBitrate(level QualityLevel) uint32 {
-	switch level {
-	case QualityLow:
-		return lowBitrate
-	case QualityMid:
-		return midBitrate
-	case QualityHigh:
-		return highBitrate
-	default:
-		return 0
-	}
-}

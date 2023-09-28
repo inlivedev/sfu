@@ -18,15 +18,15 @@ var (
 
 // Manager is a struct that manages all the rooms
 type Manager struct {
-	rooms         map[string]*Room
-	Context       context.Context
-	CancelContext context.CancelFunc
-	iceServers    []webrtc.ICEServer
-	UDPMux        *UDPMux
-	Name          string
-	mutex         sync.RWMutex
-	Options       Options
-	extension     []IManagerExtension
+	rooms      map[string]*Room
+	context    context.Context
+	cancel     context.CancelFunc
+	iceServers []webrtc.ICEServer
+	udpMux     *UDPMux
+	Name       string
+	mutex      sync.RWMutex
+	options    Options
+	extension  []IManagerExtension
 }
 
 func NewManager(ctx context.Context, name string, options Options) *Manager {
@@ -35,15 +35,15 @@ func NewManager(ctx context.Context, name string, options Options) *Manager {
 	udpMux := NewUDPMux(ctx, options.WebRTCPort)
 
 	m := &Manager{
-		rooms:         make(map[string]*Room),
-		Context:       localCtx,
-		CancelContext: cancel,
-		iceServers:    options.IceServers,
-		UDPMux:        udpMux,
-		Name:          name,
-		mutex:         sync.RWMutex{},
-		Options:       options,
-		extension:     make([]IManagerExtension, 0),
+		rooms:      make(map[string]*Room),
+		context:    localCtx,
+		cancel:     cancel,
+		iceServers: options.IceServers,
+		udpMux:     udpMux,
+		Name:       name,
+		mutex:      sync.RWMutex{},
+		options:    options,
+		extension:  make([]IManagerExtension, 0),
 	}
 
 	return m
@@ -57,7 +57,7 @@ func (m *Manager) CreateRoomID() string {
 	return GenerateID([]int{len(m.rooms)})
 }
 
-func (m *Manager) NewRoom(id, name, roomType string) (*Room, error) {
+func (m *Manager) NewRoom(id, name, roomType string, bitrates BitratesConfig) (*Room, error) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
@@ -66,9 +66,15 @@ func (m *Manager) NewRoom(id, name, roomType string) (*Room, error) {
 		return nil, err
 	}
 
-	newSFU := New(m.Context, m.iceServers, m.UDPMux)
+	sfuOpts := sfuOptions{
+		Bitrates:   bitrates,
+		IceServers: m.iceServers,
+		Mux:        m.udpMux,
+	}
 
-	room := newRoom(m.Context, id, name, newSFU, roomType)
+	newSFU := New(m.context, sfuOpts)
+
+	room := newRoom(m.context, id, name, newSFU, roomType)
 
 	for _, ext := range m.extension {
 		ext.OnNewRoom(m, room)
@@ -160,7 +166,7 @@ func (m *Manager) EndRoom(id string) error {
 }
 
 func (m *Manager) Stop() {
-	defer m.CancelContext()
+	defer m.cancel()
 
 	for _, room := range m.rooms {
 		room.StopAllClients()

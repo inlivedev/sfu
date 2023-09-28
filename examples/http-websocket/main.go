@@ -58,7 +58,7 @@ func main() {
 	roomName := "test-room"
 
 	// create new room
-	defaultRoom, _ := roomManager.NewRoom(roomID, roomName, sfu.RoomTypeLocal)
+	defaultRoom, _ := roomManager.NewRoom(roomID, roomName, sfu.RoomTypeLocal, sfu.DefaultBitrates())
 
 	fakeClientCount := 0
 	localIp, _ := sfu.GetLocalIp()

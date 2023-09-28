@@ -10,11 +10,25 @@ import (
 	"golang.org/x/exp/slices"
 )
 
-const (
-	MaxBitrateUpperCap = 4_000_000
-	MinBitrateUpperCap = 300_000
-	MinBitrateLowerCap = 100_000
-)
+type BitratesConfig struct {
+	Audio            uint32 `json:"audio,omitempty" yaml:"audio,omitempty" mapstructure:"audio,omitempty"`
+	Video            uint32 `json:"video,omitempty" yaml:"video,omitempty" mapstructure:"video,omitempty"`
+	VideoHigh        uint32 `json:"video_high,omitempty" yaml:"video_high,omitempty" mapstructure:"video_high,omitempty"`
+	VideoMid         uint32 `json:"video_mid,omitempty" yaml:"video_mid,omitempty" mapstructure:"video_mid,omitempty"`
+	VideoLow         uint32 `json:"video_low,omitempty" yaml:"video_low,omitempty" mapstructure:"video_low,omitempty"`
+	InitialBandwidth uint32 `json:"initial_bandwidth,omitempty" yaml:"initial_bandwidth,omitempty" mapstructure:"initial_bandwidth,omitempty"`
+}
+
+func DefaultBitrates() BitratesConfig {
+	return BitratesConfig{
+		Audio:            128_000,
+		Video:            1_500_000,
+		VideoHigh:        1_500_000,
+		VideoMid:         500_000,
+		VideoLow:         150_000,
+		InitialBandwidth: 1_000_000,
+	}
+}
 
 type SFUClients struct {
 	clients map[string]*Client
@@ -78,6 +92,7 @@ func (s *SFUClients) Remove(client *Client) error {
 }
 
 type SFU struct {
+	bitratesConfig           BitratesConfig
 	clients                  *SFUClients
 	context                  context.Context
 	cancel                   context.CancelFunc
@@ -98,19 +113,26 @@ type PublishedTrack struct {
 	Track    webrtc.TrackLocal
 }
 
+type sfuOptions struct {
+	IceServers []webrtc.ICEServer
+	Mux        *UDPMux
+	Bitrates   BitratesConfig
+}
+
 // @Param muxPort: port for udp mux
-func New(ctx context.Context, iceServers []webrtc.ICEServer, mux *UDPMux) *SFU {
+func New(ctx context.Context, opts sfuOptions) *SFU {
 	localCtx, cancel := context.WithCancel(ctx)
 
 	sfu := &SFU{
-		clients:      &SFUClients{clients: make(map[string]*Client), mutex: sync.Mutex{}},
-		Counter:      0,
-		context:      localCtx,
-		cancel:       cancel,
-		dataChannels: NewSFUDataChannelList(),
-		mutex:        sync.Mutex{},
-		iceServers:   iceServers,
-		mux:          mux,
+		clients:        &SFUClients{clients: make(map[string]*Client), mutex: sync.Mutex{}},
+		Counter:        0,
+		context:        localCtx,
+		cancel:         cancel,
+		dataChannels:   NewSFUDataChannelList(),
+		mutex:          sync.Mutex{},
+		iceServers:     opts.IceServers,
+		mux:            opts.Mux,
+		bitratesConfig: opts.Bitrates,
 	}
 
 	go func() {
@@ -271,7 +293,7 @@ func (s *SFU) removeTracks(trackIDs []string) {
 
 // Syncs track from connected client to other clients
 // returns true if need renegotiation
-func (s *SFU) SyncTrack(client *Client) bool {
+func (s *SFU) syncTrack(client *Client) bool {
 	publishedTrackIDs := make([]string, 0)
 	for _, track := range client.publishedTracks.GetTracks() {
 		publishedTrackIDs = append(publishedTrackIDs, track.ID())
@@ -535,4 +557,17 @@ func (s *SFU) TotalActiveSessions() int {
 	}
 
 	return count
+}
+
+func (s *SFU) QualityLevelToBitrate(level QualityLevel) uint32 {
+	switch level {
+	case QualityLow:
+		return s.bitratesConfig.VideoLow
+	case QualityMid:
+		return s.bitratesConfig.VideoMid
+	case QualityHigh:
+		return s.bitratesConfig.VideoHigh
+	default:
+		return 0
+	}
 }
