@@ -512,7 +512,7 @@ type SubscribeTrackRequest struct {
 
 type TrackList struct {
 	tracks map[string]ITrack
-	mutex  sync.Mutex
+	mutex  sync.RWMutex
 }
 
 func newTrackList() *TrackList {
@@ -522,8 +522,8 @@ func newTrackList() *TrackList {
 }
 
 func (t *TrackList) Add(track ITrack) error {
-	t.mutex.Lock()
-	defer t.mutex.Unlock()
+	t.mutex.RLock()
+	defer t.mutex.RUnlock()
 	id := track.ID()
 	if _, ok := t.tracks[id]; ok {
 		glog.Warning("client: track already added ", id)
@@ -550,8 +550,8 @@ func (t *TrackList) Get(ID string) (ITrack, error) {
 
 //nolint:copylocks // This is a read only operation
 func (t *TrackList) Remove(ids []string) {
-	t.mutex.Lock()
-	defer t.mutex.Unlock()
+	t.mutex.RLock()
+	defer t.mutex.RUnlock()
 	for _, id := range ids {
 		delete(t.tracks, id)
 	}
@@ -559,8 +559,8 @@ func (t *TrackList) Remove(ids []string) {
 }
 
 func (t *TrackList) Reset() {
-	t.mutex.Lock()
-	defer t.mutex.Unlock()
+	t.mutex.RLock()
+	defer t.mutex.RUnlock()
 
 	t.tracks = make(map[string]ITrack)
 }

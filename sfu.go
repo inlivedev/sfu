@@ -3,7 +3,6 @@ package sfu
 import (
 	"context"
 	"sync"
-	"time"
 
 	"github.com/golang/glog"
 	"github.com/pion/webrtc/v3"
@@ -151,8 +150,6 @@ func New(ctx context.Context, opts sfuOptions) *SFU {
 		cancel()
 		sfu.Stop()
 	}()
-
-	sfu.monitorAndAdjustBandwidth()
 
 	return sfu
 }
@@ -421,57 +418,6 @@ func (s *SFU) removeClient(client *Client) error {
 	s.onClientRemoved(client)
 
 	return nil
-}
-
-func (s *SFU) setClientsMinMaxBitrate(minBitrate, maxBitrate, totalClient uint32) {
-	clients := s.clients.GetClients()
-	for _, client := range clients {
-		client.mu.Lock()
-		if client.OnMinMaxBitrateAdjusted != nil {
-			client.OnMinMaxBitrateAdjusted(s.context, minBitrate, maxBitrate, totalClient)
-		}
-		client.mu.Unlock()
-	}
-}
-
-func (s *SFU) monitorAndAdjustBandwidth() {
-	go func() {
-		ctx, cancel := context.WithCancel(s.context)
-		t := time.NewTicker(2 * time.Second)
-		defer cancel()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-t.C:
-				// maxBitrate := uint32(highBitrate)
-				// minBitrate := uint32(lowBitrate)
-				// clients := s.clients.GetClients()
-				// for _, client := range clients {
-				// 	_, _, bitrate := client.GetMaxBitratePerTrack()
-				// 	if maxBitrate < bitrate {
-				// 		maxBitrate = bitrate
-				// 	}
-
-				// 	if minBitrate > bitrate {
-				// 		minBitrate = bitrate
-				// 	}
-				// }
-
-				// if maxBitrate > MaxBitrateUpperCap {
-				// 	maxBitrate = MaxBitrateUpperCap
-				// }
-
-				// if minBitrate > MinBitrateUpperCap {
-				// 	minBitrate = MinBitrateUpperCap
-				// } else if minBitrate < MinBitrateLowerCap {
-				// 	minBitrate = MinBitrateLowerCap
-				// }
-
-				// s.setClientsMinMaxBitrate(minBitrate, maxBitrate, uint32(len(clients)))
-			}
-		}
-	}()
 }
 
 func (s *SFU) CreateDataChannel(label string, opts DataChannelOptions) error {

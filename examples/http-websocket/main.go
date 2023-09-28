@@ -251,16 +251,6 @@ func clientHandler(conn *websocket.Conn, messageChan chan Request, r *sfu.Room) 
 		TotalClient uint32 `json:"total_client"`
 	}
 
-	client.OnMinMaxBitrateAdjusted = func(ctx context.Context, minBitrate, maxBitrate, totalClient uint32) {
-		resp := Respose{
-			Status: true,
-			Type:   TypeBitrateAdjusted,
-			Data:   Bitrates{Min: minBitrate, Max: maxBitrate, TotalClient: totalClient},
-		}
-		respBytes, _ := json.Marshal(resp)
-		_, _ = conn.Write(respBytes)
-	}
-
 	client.OnIceCandidate = func(ctx context.Context, candidate *webrtc.ICECandidate) {
 		// SFU send an ICE candidate to client
 		resp := Respose{
