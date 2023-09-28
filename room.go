@@ -253,6 +253,10 @@ func (r *Room) updateStats() {
 	}
 }
 
-func (r Room) CreateDataChannel(label string, opts DataChannelOptions) error {
+func (r *Room) CreateDataChannel(label string, opts DataChannelOptions) error {
 	return r.sfu.CreateDataChannel(label, opts)
+}
+
+func (r *Room) GetBitratesConfig() BitratesConfig {
+	return r.sfu.bitratesConfig
 }
