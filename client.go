@@ -454,7 +454,7 @@ func (c *Client) renegotiate() {
 // The renegotiation can be in race condition when a client is renegotiating and new track is added to the client because another client is publishing to the room.
 // We can block the renegotiation until the current renegotiation is finish, but it will block the negotiation process for a while.
 func (c *Client) renegotiateQueuOp() {
-	glog.Info("client: renegotiation started ", c.ID)
+
 	if c.OnRenegotiation == nil {
 		glog.Error("client: onRenegotiation is not set, can't do renegotiation")
 		return

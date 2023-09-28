@@ -16,6 +16,7 @@ type iClientTrack interface {
 	Kind() webrtc.RTPCodecType
 	LocalTrack() *webrtc.TrackLocalStaticRTP
 	IsScreen() bool
+	IsSimulcast() bool
 	SetSourceType(TrackType)
 	OnTrackEnded(func())
 }
@@ -80,6 +81,10 @@ func (t *ClientTrack) onTrackEnded() {
 	for _, callback := range t.onTrackEndedCallbacks {
 		callback()
 	}
+}
+
+func (t *ClientTrack) IsSimulcast() bool {
+	return false
 }
 
 type SimulcastClientTrack struct {
@@ -242,40 +247,8 @@ func (t *SimulcastClientTrack) onTrackEnded() {
 	t.isEnded.Store(true)
 }
 
-func (t *SimulcastClientTrack) getDistributedQuality(availableBandwidth uint32) QualityLevel {
-	audioTracksCount := 0
-	videoTracksCount := 0
-	simulcastTracksCount := 0
-
-	clients := t.client.sfu.clients.GetClients()
-
-	for _, client := range clients {
-		if t.client.ID() != client.ID() {
-			for _, track := range client.tracks.GetTracks() {
-				if track.Kind() == webrtc.RTPCodecTypeAudio {
-					audioTracksCount++
-				} else {
-					if track.IsSimulcast() {
-						simulcastTracksCount++
-					} else {
-						videoTracksCount++
-					}
-				}
-			}
-		}
-	}
-
-	leftBandwidth := availableBandwidth - (uint32(audioTracksCount) * t.client.sfu.bitratesConfig.Audio) - (uint32(videoTracksCount) * t.client.sfu.bitratesConfig.Video)
-
-	distributedBandwidth := leftBandwidth / uint32(simulcastTracksCount)
-
-	if distributedBandwidth > t.client.sfu.bitratesConfig.VideoHigh {
-		return QualityHigh
-	} else if distributedBandwidth < t.client.sfu.bitratesConfig.VideoHigh && distributedBandwidth > t.client.sfu.bitratesConfig.VideoMid {
-		return QualityMid
-	} else {
-		return QualityLow
-	}
+func (t *SimulcastClientTrack) IsSimulcast() bool {
+	return true
 }
 
 type clientTrackList struct {

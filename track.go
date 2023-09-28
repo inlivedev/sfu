@@ -530,8 +530,6 @@ func (t *TrackList) Add(track ITrack) error {
 		return ErrTrackExists
 	}
 
-	glog.Info("client: add track ", id)
-
 	t.tracks[id] = track
 
 	return nil
@@ -550,8 +548,9 @@ func (t *TrackList) Get(ID string) (ITrack, error) {
 
 //nolint:copylocks // This is a read only operation
 func (t *TrackList) Remove(ids []string) {
-	t.mutex.RLock()
-	defer t.mutex.RUnlock()
+	t.mutex.Lock()
+	defer t.mutex.Unlock()
+
 	for _, id := range ids {
 		delete(t.tracks, id)
 	}

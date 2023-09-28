@@ -82,7 +82,6 @@ func (q *queue) run(ctx context.Context) {
 				opItem.AnswerChan <- *answer
 			case renegotiateQueue:
 				opItem.Client.renegotiateQueuOp()
-				glog.Info("sfu: renegotiation done")
 			case allowRemoteRenegotiationQueue:
 				opItem.Client.allowRemoteRenegotiationQueuOp()
 			}

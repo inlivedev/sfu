@@ -156,11 +156,13 @@ func (bc *BitrateController) getNextTrackQuality(clientTrackID string) QualityLe
 			inActiveBitrates += claim.bitrate
 		}
 
-		switch claim.quality {
-		case QualityHigh:
-			highCount++
-		case QualityLow:
-			lowCount++
+		if claim.track.IsSimulcast() {
+			switch claim.quality {
+			case QualityHigh:
+				highCount++
+			case QualityLow:
+				lowCount++
+			}
 		}
 	}
 
@@ -300,7 +302,7 @@ func (bc *BitrateController) GetQuality(t *SimulcastClientTrack) QualityLevel {
 	if !exist {
 		// new track
 
-		quality = t.getDistributedQuality(availableBandwidth)
+		quality = bc.getDistributedQuality(availableBandwidth)
 
 		claim, err := bc.addClaim(t, quality, true)
 
@@ -341,4 +343,71 @@ func (bc *BitrateController) GetQuality(t *SimulcastClientTrack) QualityLevel {
 	}
 
 	return quality
+}
+
+func (bc *BitrateController) getDistributedQuality(availableBandwidth uint32) QualityLevel {
+	audioTracksCount := 0
+	videoTracksCount := 0
+	simulcastTracksCount := 0
+
+	for _, track := range bc.client.publishedTracks.GetTracks() {
+		if track.Kind() == webrtc.RTPCodecTypeAudio {
+			audioTracksCount++
+		} else {
+			if track.IsSimulcast() {
+				simulcastTracksCount++
+			} else {
+				videoTracksCount++
+			}
+		}
+	}
+
+	audioClaimsCount := 0
+	videoClaimsCount := 0
+	simulcastClaimsCount := 0
+
+	highCount := 0
+	midCount := 0
+	lowCount := 0
+
+	for _, claim := range bc.claims {
+		if claim.track.Kind() == webrtc.RTPCodecTypeAudio {
+			audioClaimsCount++
+		} else {
+			if claim.track.IsSimulcast() {
+				simulcastClaimsCount++
+
+				switch claim.quality {
+				case QualityHigh:
+					highCount++
+				case QualityMid:
+					midCount++
+				case QualityLow:
+					lowCount++
+				}
+
+			} else {
+				videoClaimsCount++
+			}
+		}
+	}
+
+	leftBandwidth := availableBandwidth - (uint32(audioTracksCount-audioClaimsCount) * bc.client.sfu.bitratesConfig.Audio) - (uint32(videoTracksCount-videoClaimsCount) * bc.client.sfu.bitratesConfig.Video)
+
+	newTrackCount := uint32(simulcastTracksCount - simulcastClaimsCount)
+
+	if newTrackCount == 0 {
+		// all tracks already claimed bitrates, return none
+		return QualityNone
+	}
+
+	distributedBandwidth := leftBandwidth / newTrackCount
+
+	if distributedBandwidth > bc.client.sfu.bitratesConfig.VideoHigh && highCount > 0 {
+		return QualityHigh
+	} else if distributedBandwidth < bc.client.sfu.bitratesConfig.VideoHigh && distributedBandwidth > bc.client.sfu.bitratesConfig.VideoMid && (midCount > 0 || highCount > 0) {
+		return QualityMid
+	} else {
+		return QualityLow
+	}
 }
