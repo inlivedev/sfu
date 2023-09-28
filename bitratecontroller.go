@@ -3,6 +3,7 @@ package sfu
 import (
 	"errors"
 	"sync"
+	"time"
 
 	"github.com/golang/glog"
 	"github.com/pion/webrtc/v3"
@@ -73,6 +74,10 @@ func (bc *BitrateController) TotalBitrates(all bool) uint32 {
 	bc.mu.Lock()
 	defer bc.mu.Unlock()
 
+	return bc.totalBitrates(all)
+}
+
+func (bc *BitrateController) totalBitrates(all bool) uint32 {
 	total := uint32(0)
 	for _, claim := range bc.claims {
 		if !all && !claim.active {
@@ -106,22 +111,6 @@ func (bc *BitrateController) canIncreaseBitrate(clientTrackID string, quality Qu
 	return newEstimatedBandwidth < bandwidth
 }
 
-// will return zero if there is no inactive claimed bitrate
-func (bc *BitrateController) inactiveClaimBitrates() uint32 {
-	bc.mu.Lock()
-	defer bc.mu.Unlock()
-
-	total := uint32(0)
-
-	for _, claim := range bc.claims {
-		if !claim.active {
-			total += claim.bitrate
-		}
-	}
-
-	return total
-}
-
 func (bc *BitrateController) setQuality(clientTrackID string, quality QualityLevel) {
 	bc.mu.RLock()
 	defer bc.mu.RUnlock()
@@ -145,6 +134,10 @@ func (bc *BitrateController) activateClaim(clientTrackID string) {
 }
 
 // this should be called to check if the quality must be reduced because there is an unactive claim need to fit in the bandwidth
+// TODO:
+// 1. Need to keep all claims distributed not more than 2 levels.
+// 2. If there is a level still in 1, then no level allowed to go up to 3
+// 3. The same with reducing level, no level allowed to go down to 1 if there is a level still in 3
 func (bc *BitrateController) getNextTrackQuality(clientTrackID string) QualityLevel {
 	claim := bc.GetClaim(clientTrackID)
 	if claim == nil {
@@ -152,14 +145,38 @@ func (bc *BitrateController) getNextTrackQuality(clientTrackID string) QualityLe
 		return QualityNone
 	}
 
-	needBitrates := bc.inactiveClaimBitrates()
+	inActiveBitrates := uint32(0)
+	highCount := 0
+	lowCount := 0
 
-	if needBitrates > 0 && claim.active {
+	bc.mu.Lock()
+
+	for _, claim := range bc.claims {
+		if !claim.active {
+			inActiveBitrates += claim.bitrate
+		}
+
+		switch claim.quality {
+		case QualityHigh:
+			highCount++
+		case QualityLow:
+			lowCount++
+		}
+	}
+
+	bc.mu.Unlock()
+
+	if inActiveBitrates > 0 && claim.active {
 		// need to reduce the quality
 		// TODO: check if need to reduce from high to low
 		// do we need to set it as inactive?
 		if claim.quality > QualityLow {
 			nextQuality := claim.quality - 1
+			// prevent reduce to low if there is other claims in high
+			if nextQuality == QualityLow && highCount > 0 {
+				return claim.quality
+			}
+
 			bc.setQuality(clientTrackID, nextQuality)
 
 			return nextQuality
@@ -184,6 +201,11 @@ func (bc *BitrateController) getNextTrackQuality(clientTrackID string) QualityLe
 		nextQuality := claim.quality + 1
 
 		if bc.canIncreaseBitrate(clientTrackID, nextQuality) {
+			// prevent increase to high if there is other claims in low
+			if nextQuality == QualityHigh && lowCount > 0 {
+				return claim.quality
+			}
+
 			bc.setQuality(clientTrackID, nextQuality)
 
 			return nextQuality
@@ -201,7 +223,19 @@ func (bc *BitrateController) AddClaim(clientTrack iClientTrack, quality QualityL
 	}
 	bc.mu.Unlock()
 
-	currentBitrates := bc.TotalBitrates(true)
+	return bc.addClaim(clientTrack, quality, false)
+
+}
+
+func (bc *BitrateController) addClaim(clientTrack iClientTrack, quality QualityLevel, locked bool) (BitrateClaim, error) {
+	var currentBitrates uint32
+
+	if locked {
+		currentBitrates = bc.totalBitrates(true)
+	} else {
+		currentBitrates = bc.TotalBitrates(true)
+	}
+
 	isActive := false
 
 	var bitrate uint32
@@ -217,8 +251,10 @@ func (bc *BitrateController) AddClaim(clientTrack iClientTrack, quality QualityL
 		isActive = true
 	}
 
-	bc.mu.RLock()
-	defer bc.mu.RUnlock()
+	if !locked {
+		bc.mu.RLock()
+		defer bc.mu.RUnlock()
+	}
 
 	bc.claims[clientTrack.ID()] = BitrateClaim{
 		track:   clientTrack,
@@ -247,4 +283,62 @@ func (bc *BitrateController) RemoveClaim(id string) {
 
 func (bc *BitrateController) GetAvailableBandwidth() uint32 {
 	return bc.client.GetEstimatedBandwidth() - bc.TotalBitrates(true)
+}
+
+func (bc *BitrateController) GetQuality(t *SimulcastClientTrack) QualityLevel {
+	track := t.remoteTrack
+
+	var quality QualityLevel
+
+	t.lastCheckQualityTS.Store(time.Now().UnixNano())
+	availableBandwidth := bc.GetAvailableBandwidth()
+
+	// need to manually lock to prevent a goroutine add claim while we are checking the claims
+	bc.mu.Lock()
+
+	_, exist := bc.claims[t.ID()]
+	if !exist {
+		// new track
+
+		quality = t.getDistributedQuality(availableBandwidth)
+
+		claim, err := bc.addClaim(t, quality, true)
+
+		// don't forget to unlock
+		bc.mu.Unlock()
+
+		if err != nil && err == ErrAlreadyClaimed {
+			if err != nil {
+				glog.Error("clienttrack: error on add claim ", err)
+			}
+
+			quality = QualityLevel(t.lastQuality.Load())
+		} else if !claim.active {
+			glog.Warning("clienttrack: claim is not active, claim bitrate ", ThousandSeparator(int(claim.bitrate)), " current bitrate ", ThousandSeparator(int(t.client.bitrateController.TotalBitrates(true))), " available bandwidth ", ThousandSeparator(int(availableBandwidth)))
+			quality = QualityNone
+		}
+
+	} else {
+		// don't forget to unlock
+		bc.mu.Unlock()
+
+		// check if the bitrate can be adjusted
+		quality = bc.getNextTrackQuality(t.ID())
+	}
+
+	clientQuality := Uint32ToQualityLevel(t.client.quality.Load())
+	if clientQuality != 0 && quality > clientQuality {
+		quality = clientQuality
+	}
+
+	lastQuality := t.LastQuality()
+	if !track.isTrackActive(quality) {
+		if !track.isTrackActive(lastQuality) {
+			return QualityNone
+		}
+
+		return lastQuality
+	}
+
+	return quality
 }

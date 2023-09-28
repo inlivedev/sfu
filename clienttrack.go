@@ -3,7 +3,6 @@ package sfu
 import (
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/golang/glog"
 	"github.com/pion/rtp"
@@ -100,109 +99,6 @@ type SimulcastClientTrack struct {
 	onTrackEndedCallbacks []func()
 }
 
-// func (t *SimulcastClientTrack) getAllowedQuality(kind webrtc.RTPCodecType) QualityLevel {
-// 	var estimatedQuality QualityLevel
-// 	var currentHighBitrate, currentMidBitrate, currentLowBitrate, maxAllowedBitrate uint32
-
-// 	if kind == webrtc.RTPCodecTypeAudio {
-// 		return QualityHigh
-// 	}
-
-// 	_, maxAllowedScreenBitrate, maxAllowedVideoBitrate := t.client.GetMaxBitratePerTrack()
-
-// 	if t.isScreen.Load() {
-// 		maxAllowedBitrate = maxAllowedScreenBitrate
-// 	} else {
-// 		maxAllowedBitrate = maxAllowedVideoBitrate
-// 	}
-
-// 	if t.remoteTrack.isTrackActive(QualityHigh) {
-// 		currentHighBitrate = t.remoteTrack.remoteTrackHigh.GetCurrentBitrate()
-// 	} else {
-// 		currentHighBitrate = highBitrate
-// 	}
-
-// 	if t.remoteTrack.isTrackActive(QualityMid) {
-// 		currentMidBitrate = t.remoteTrack.remoteTrackMid.GetCurrentBitrate()
-// 	} else {
-// 		currentMidBitrate = midBitrate
-// 	}
-
-// 	if t.remoteTrack.isTrackActive(QualityLow) {
-// 		currentLowBitrate = t.remoteTrack.remoteTrackLow.GetCurrentBitrate()
-// 	} else {
-// 		currentLowBitrate = lowBitrate
-// 	}
-
-// 	if currentHighBitrate != 0 && maxAllowedBitrate >= currentHighBitrate {
-// 		estimatedQuality = QualityHigh
-// 	} else if currentMidBitrate != 0 && maxAllowedBitrate < currentHighBitrate && maxAllowedBitrate >= currentMidBitrate {
-// 		estimatedQuality = QualityMid
-// 	} else if currentLowBitrate != 0 && maxAllowedBitrate < currentMidBitrate && maxAllowedBitrate >= currentLowBitrate {
-// 		estimatedQuality = QualityLow
-// 	} else {
-// 		estimatedQuality = QualityNone
-// 		glog.Warning("track: no quality level is fit into the current bandwidth,  max allowed bitrate: ", maxAllowedBitrate)
-// 		glog.Warning("track: current high bitrate ", currentHighBitrate, ", current mid bitrate: ", currentMidBitrate, ", current low bitrate: ", currentLowBitrate)
-// 		glog.Warning("track: client ", t.client.ID(), " bandwidth ", t.client.GetEstimatedBandwidth())
-// 	}
-
-// 	clientQuality := Uint32ToQualityLevel(t.client.quality.Load())
-// 	if clientQuality != 0 && estimatedQuality > clientQuality {
-// 		return clientQuality
-// 	}
-
-// 	return estimatedQuality
-// }
-
-// TODO: change to bandwidth controller
-func (t *SimulcastClientTrack) GetQuality() QualityLevel {
-	track := t.remoteTrack
-
-	var quality QualityLevel
-
-	t.lastCheckQualityTS.Store(time.Now().UnixNano())
-	availableBandwidth := t.client.bitrateController.GetAvailableBandwidth()
-
-	if !t.client.bitrateController.Exist(t.ID()) {
-		// new track
-
-		quality = t.getDistributedQuality(availableBandwidth)
-
-		claim, err := t.client.bitrateController.AddClaim(t, quality)
-		if err != nil && err == ErrAlreadyClaimed {
-			if err != nil {
-				glog.Error("clienttrack: error on add claim ", err)
-			}
-
-			quality = QualityLevel(t.lastQuality.Load())
-		} else if !claim.active {
-			glog.Warning("clienttrack: claim is not active, claim bitrate ", ThousandSeparator(int(claim.bitrate)), " current bitrate ", ThousandSeparator(int(t.client.bitrateController.TotalBitrates(false))), " available bandwidth ", ThousandSeparator(int(availableBandwidth)))
-			quality = QualityNone
-		}
-
-	} else {
-		// check if the bitrate can be adjusted
-		quality = t.client.bitrateController.getNextTrackQuality(t.ID())
-	}
-
-	clientQuality := Uint32ToQualityLevel(t.client.quality.Load())
-	if clientQuality != 0 && quality > clientQuality {
-		quality = clientQuality
-	}
-
-	lastQuality := t.LastQuality()
-	if !track.isTrackActive(quality) {
-		if !track.isTrackActive(lastQuality) {
-			return QualityNone
-		}
-
-		return lastQuality
-	}
-
-	return quality
-}
-
 func (t *SimulcastClientTrack) push(rtp *rtp.Packet, quality QualityLevel) {
 
 	var trackQuality QualityLevel
@@ -224,7 +120,7 @@ func (t *SimulcastClientTrack) push(rtp *rtp.Packet, quality QualityLevel) {
 	}
 
 	if isKeyframe && t.lastTimestamp.Load() != rtp.Timestamp { // && lastCheckQualityDuration.Seconds() >= 1 {
-		trackQuality = t.GetQuality()
+		trackQuality = t.client.bitrateController.GetQuality(t)
 		if trackQuality == QualityNone {
 			t.lastQuality.Store(uint32(trackQuality))
 			return
