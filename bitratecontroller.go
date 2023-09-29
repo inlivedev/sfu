@@ -123,12 +123,12 @@ func (bc *BitrateController) setQuality(clientTrackID string, quality QualityLev
 	}
 }
 
-func (bc *BitrateController) activateClaim(clientTrackID string) {
+func (bc *BitrateController) setClaim(clientTrackID string, active bool) {
 	bc.mu.RLock()
 	defer bc.mu.RUnlock()
 
 	if claim, ok := bc.claims[clientTrackID]; ok {
-		claim.active = true
+		claim.active = active
 		bc.claims[clientTrackID] = claim
 	}
 }
@@ -185,6 +185,12 @@ func (bc *BitrateController) getNextTrackQuality(clientTrackID string) QualityLe
 			return claim.quality
 		}
 
+		if nextQuality == QualityNone {
+			// unactivate the claim instead of reducing to none to make sure we still have claimed bitrate
+			bc.setClaim(clientTrackID, false)
+			return nextQuality
+		}
+
 		bc.setQuality(clientTrackID, nextQuality)
 
 		return nextQuality
@@ -200,7 +206,7 @@ func (bc *BitrateController) getNextTrackQuality(clientTrackID string) QualityLe
 			return QualityNone
 		}
 
-		bc.activateClaim(clientTrackID)
+		bc.setClaim(clientTrackID, true)
 	}
 
 	if claim.quality < QualityHigh && claim.active {
