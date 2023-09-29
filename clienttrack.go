@@ -3,6 +3,7 @@ package sfu
 import (
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/golang/glog"
 	"github.com/pion/rtp"
@@ -110,46 +111,65 @@ func (t *SimulcastClientTrack) push(rtp *rtp.Packet, quality QualityLevel) {
 
 	lastQuality := t.LastQuality()
 
-	if t.client.peerConnection.ConnectionState() != webrtc.PeerConnectionStateConnected {
-		return
-	}
+	// check if it's a first packet to send
+	if lastQuality == QualityNone && t.sequenceNumber.Load() == 0 {
+		trackQuality = QualityLow
+		t.lastQuality.Store(uint32(QualityLow))
 
-	isKeyframe := IsKeyframe(t.mimeType, rtp)
-	// lastCheckQualityDuration := time.Since(time.Unix(0, t.lastCheckQualityTS.Load()))
-
-	// prevent the packet to be written to the new local track if the packet is not a keyframe
-	// this is to avoid broken or froze video on client side
-	if !isKeyframe && lastQuality == 0 {
-		t.remoteTrack.sendPLI(trackQuality)
-		return
-	}
-
-	if isKeyframe && t.lastTimestamp.Load() != rtp.Timestamp { // && lastCheckQualityDuration.Seconds() >= 1 {
-		trackQuality = t.client.bitrateController.GetQuality(t)
-		if trackQuality == QualityNone {
-			t.lastQuality.Store(uint32(trackQuality))
-			return
-		}
+		// send PLI to make sure the client will receive the first frame
+		t.remoteTrack.sendPLI(QualityLow)
+		t.remoteTrack.onRemoteTrackAdded(func(remote *RemoteTrack) {
+			quality := RIDToQuality(remote.track.RID())
+			t.remoteTrack.sendPLI(quality)
+		})
 	} else {
 		trackQuality = lastQuality
+		isKeyframe := IsKeyframe(t.mimeType, rtp)
+		// lastCheckQualityDuration := time.Since(time.Unix(0, t.lastCheckQualityTS.Load()))
+
+		if isKeyframe && t.lastTimestamp.Load() != rtp.Timestamp { // && lastCheckQualityDuration.Seconds() >= 1 {
+			trackQuality = t.client.bitrateController.GetQuality(t)
+
+			// update latest keyframe timestamp
+			// TODO: currently not use anywhere but useful to detect if the track is active or need to refresh full picture
+			switch quality {
+			case QualityHigh:
+				t.remoteTrack.lastHighKeyframeTS.Store(time.Now().UnixNano())
+			case QualityMid:
+				t.remoteTrack.lastMidKeyframeTS.Store(time.Now().UnixNano())
+			case QualityLow:
+				t.remoteTrack.lastLowKeyframeTS.Store(time.Now().UnixNano())
+			}
+
+			if trackQuality == QualityNone {
+				// could be because not enough bandwidth to send any track
+				// TODO: should send a black frame instead
+				glog.Warning("clienttrack: no quality level to send")
+				t.lastQuality.Store(uint32(trackQuality))
+				return
+			}
+		}
 	}
 
 	if trackQuality == quality {
 		// set the last processed packet timestamp to identify if is begining of the new frame
 		t.lastTimestamp.Store(rtp.Timestamp)
 		// make sure the timestamp and sequence number is consistent from the previous packet even it is not the same track
-
+		sequenceDelta := uint16(0)
 		// credit to https://github.com/k0nserv for helping me with this on Pion Slack channel
 		switch quality {
 		case QualityHigh:
 			rtp.Timestamp = t.remoteTrack.baseTS + ((rtp.Timestamp - t.remoteTrack.remoteTrackHighBaseTS) - t.remoteTrack.remoteTrackHighBaseTS)
+			sequenceDelta = t.remoteTrack.highSequence - t.remoteTrack.lastHighSequence
 		case QualityMid:
 			rtp.Timestamp = t.remoteTrack.baseTS + ((rtp.Timestamp - t.remoteTrack.remoteTrackMidBaseTS) - t.remoteTrack.remoteTrackMidBaseTS)
+			sequenceDelta = t.remoteTrack.midSequence - t.remoteTrack.lastMidSequence
 		case QualityLow:
 			rtp.Timestamp = t.remoteTrack.baseTS + ((rtp.Timestamp - t.remoteTrack.remoteTrackLowBaseTS) - t.remoteTrack.remoteTrackLowBaseTS)
+			sequenceDelta = t.remoteTrack.lowSequence - t.remoteTrack.lastLowSequence
 		}
 
-		t.sequenceNumber.Add(1)
+		t.sequenceNumber.Add(uint32(sequenceDelta))
 		rtp.SequenceNumber = uint16(t.sequenceNumber.Load())
 
 		if lastQuality != quality {

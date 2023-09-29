@@ -537,34 +537,34 @@ func (c *Client) allowRemoteRenegotiationQueuOp() {
 }
 
 // return boolean if need a renegotiation after track added
-func (c *Client) addTrack(track ITrack) bool {
+func (c *Client) addTrack(track ITrack) iClientTrack {
 	// if the client is not connected, we wait until it's connected in go routine
 	if c.peerConnection.ICEConnectionState() != webrtc.ICEConnectionStateConnected {
 		if err := c.pendingReceivedTracks.Add(track); err != nil {
 			glog.Error("client: error add pending received track ", err)
 		}
 
-		return false
+		return nil
 	}
 
 	return c.setClientTrack(track)
 }
 
-func (c *Client) setClientTrack(track ITrack) bool {
+func (c *Client) setClientTrack(track ITrack) iClientTrack {
 	var outputTrack iClientTrack
 
 	err := c.publishedTracks.Add(track)
 	if err != nil {
-		return false
+		return nil
 	}
 
 	if track.IsSimulcast() {
 		simulcastTrack := track.(*SimulcastTrack)
-		outputTrack = simulcastTrack.Subscribe(c)
+		outputTrack = simulcastTrack.subscribe(c)
 
 	} else {
 		singleTrack := track.(*Track)
-		outputTrack = singleTrack.Subscribe()
+		outputTrack = singleTrack.subscribe()
 	}
 
 	localTrack := outputTrack.LocalTrack()
@@ -572,13 +572,13 @@ func (c *Client) setClientTrack(track ITrack) bool {
 	transc, err := c.peerConnection.AddTransceiverFromTrack(localTrack, webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionSendonly})
 	if err != nil {
 		glog.Error("client: error on adding track ", err)
-		return false
+		return nil
 	}
 
 	// enable RTCP report and stats
 	c.enableReportAndStats(transc.Sender())
 
-	return true
+	return outputTrack
 }
 
 func (c *Client) removePublishedTrack(trackIDs []string) {
@@ -644,20 +644,19 @@ func (c *Client) enableReportAndStats(rtpSender *webrtc.RTPSender) {
 	}()
 }
 
-func (c *Client) processPendingTracks() bool {
-	trackAdded := false
-
+func (c *Client) processPendingTracks() []iClientTrack {
+	clientTracks := make([]iClientTrack, 0)
 	for _, track := range c.pendingReceivedTracks.tracks {
 
-		isTrackAdded := c.setClientTrack(track)
-		if isTrackAdded {
-			trackAdded = true
+		clientTrack := c.setClientTrack(track)
+		if clientTrack != nil {
+			clientTracks = append(clientTracks, clientTrack)
 		}
 	}
 
 	c.pendingReceivedTracks.Reset()
 
-	return trackAdded
+	return clientTracks
 }
 
 func (c *Client) afterClosed() {
@@ -880,7 +879,7 @@ func (c *Client) SetTracksSourceType(trackTypes map[string]TrackType) {
 }
 
 func (c *Client) SubscribeTracks(req []SubscribeTrackRequest) error {
-	negotiationNeeded := false
+	clientTracks := make([]iClientTrack, 0)
 
 	for _, r := range req {
 		trackFound := false
@@ -893,8 +892,8 @@ func (c *Client) SubscribeTracks(req []SubscribeTrackRequest) error {
 		if client, err := c.sfu.clients.GetClient(r.ClientID); err == nil {
 			for _, track := range client.tracks.GetTracks() {
 				if track.ID() == r.TrackID {
-					if c.addTrack(track) {
-						negotiationNeeded = true
+					if clientTrack := c.addTrack(track); clientTrack != nil {
+						clientTracks = append(clientTracks, clientTrack)
 					}
 
 					trackFound = true
@@ -909,8 +908,13 @@ func (c *Client) SubscribeTracks(req []SubscribeTrackRequest) error {
 		}
 	}
 
-	if negotiationNeeded {
+	if len(clientTracks) > 0 {
 		c.renegotiate()
+	}
+
+	// claim bitrates
+	if err := c.bitrateController.AddClaims(clientTracks); err != nil {
+		glog.Error("sfu: failed to add claims ", err)
 	}
 
 	return nil

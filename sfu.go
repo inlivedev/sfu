@@ -211,18 +211,18 @@ func (s *SFU) NewClient(id string, opts ClientOptions) *Client {
 				}
 			}
 
-			needRenegotiation := false
-
 			if client.pendingReceivedTracks.Length() > 0 {
-				client.processPendingTracks()
+				clientTracks := client.processPendingTracks()
 
-				needRenegotiation = true
-			}
+				if len(clientTracks) > 0 {
+					// claim bitrates to bitrate controller
 
-			if needRenegotiation {
-				glog.Info("call renegotiate after sync ", client.ID())
+					if err := client.bitrateController.AddClaims(clientTracks); err != nil {
+						glog.Error("sfu: failed to add claims ", err)
+					}
 
-				client.renegotiate()
+					client.renegotiate()
+				}
 			}
 
 		case webrtc.PeerConnectionStateClosed:
@@ -296,25 +296,30 @@ func (s *SFU) syncTrack(client *Client) bool {
 		publishedTrackIDs = append(publishedTrackIDs, track.ID())
 	}
 
-	needRenegotiation := false
+	clientTracks := make([]iClientTrack, 0)
 
 	for _, clientPeer := range s.clients.GetClients() {
 		for _, track := range clientPeer.tracks.GetTracks() {
 			if client.ID() != clientPeer.ID() {
 				if !slices.Contains(publishedTrackIDs, track.ID()) {
-					isNeedRenegotiation := client.addTrack(track)
+					clientTrack := client.addTrack(track)
 
 					// request the keyframe from track publisher after added
 					s.requestKeyFrameFromClient(clientPeer.ID())
-					if isNeedRenegotiation {
-						needRenegotiation = true
+					if clientTrack != nil {
+						clientTracks = append(clientTracks, clientTrack)
 					}
 				}
 			}
 		}
 	}
 
-	return needRenegotiation
+	// claim bitrates to bitrate controller
+	if err := client.bitrateController.AddClaims(clientTracks); err != nil {
+		glog.Error("sfu: failed to add claims ", err)
+	}
+
+	return len(clientTracks) > 0
 }
 
 func (s *SFU) Stop() {

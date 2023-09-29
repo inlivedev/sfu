@@ -147,7 +147,9 @@ func (bc *BitrateController) getNextTrackQuality(clientTrackID string) QualityLe
 
 	inActiveBitrates := uint32(0)
 	highCount := 0
+	midCount := 0
 	lowCount := 0
+	noneCount := 0
 
 	bc.mu.Lock()
 
@@ -160,31 +162,33 @@ func (bc *BitrateController) getNextTrackQuality(clientTrackID string) QualityLe
 			switch claim.quality {
 			case QualityHigh:
 				highCount++
+			case QualityMid:
+				midCount++
 			case QualityLow:
 				lowCount++
+			case QualityNone:
+				noneCount++
 			}
 		}
 	}
 
 	bc.mu.Unlock()
 
-	if inActiveBitrates > 0 && claim.active {
-		// need to reduce the quality
+	if (inActiveBitrates > 0 && claim.active) ||
+		(claim.active && claim.quality == QualityHigh && lowCount > 0) {
+		// need to reduce the quality if there is an unactive claim and quality distribution is not balanced
 		// TODO: check if need to reduce from high to low
-		// do we need to set it as inactive?
-		if claim.quality > QualityLow {
-			nextQuality := claim.quality - 1
-			// prevent reduce to low if there is other claims in high
-			if nextQuality == QualityLow && highCount > 0 {
-				return claim.quality
-			}
+		nextQuality := claim.quality - 1
 
-			bc.setQuality(clientTrackID, nextQuality)
-
-			return nextQuality
+		// prevent reduce to low if there it make unbalanced quality distribution
+		if (nextQuality == QualityLow && highCount > 0) || (nextQuality == QualityNone && midCount > 0) {
+			return claim.quality
 		}
 
-		return claim.quality
+		bc.setQuality(clientTrackID, nextQuality)
+
+		return nextQuality
+
 	}
 
 	// if no need reduction, then check if we need to activate our claim if not yet
@@ -199,7 +203,7 @@ func (bc *BitrateController) getNextTrackQuality(clientTrackID string) QualityLe
 		bc.activateClaim(clientTrackID)
 	}
 
-	if claim.quality < QualityHigh {
+	if claim.quality < QualityHigh && claim.active {
 		nextQuality := claim.quality + 1
 
 		if bc.canIncreaseBitrate(clientTrackID, nextQuality) {
@@ -214,7 +218,39 @@ func (bc *BitrateController) getNextTrackQuality(clientTrackID string) QualityLe
 		}
 	}
 
+	if !claim.active {
+		return QualityNone
+	}
+
 	return claim.quality
+}
+
+func (bc *BitrateController) AddClaims(clientTracks []iClientTrack) error {
+	availableBandwidth := bc.GetAvailableBandwidth()
+	quality := bc.getDistributedQuality(availableBandwidth)
+
+	bc.mu.Lock()
+	defer bc.mu.Unlock()
+
+	errors := make([]error, 0)
+
+	for _, clientTrack := range clientTracks {
+		if _, ok := bc.claims[clientTrack.ID()]; ok {
+			errors = append(errors, ErrAlreadyClaimed)
+			continue
+		}
+
+		_, err := bc.addClaim(clientTrack, quality, true)
+		if err != nil {
+			errors = append(errors, err)
+		}
+	}
+
+	if len(errors) > 0 {
+		return FlattenErrors(errors)
+	}
+
+	return nil
 }
 
 func (bc *BitrateController) AddClaim(clientTrack iClientTrack, quality QualityLevel) (BitrateClaim, error) {
@@ -249,7 +285,8 @@ func (bc *BitrateController) addClaim(clientTrack iClientTrack, quality QualityL
 	}
 
 	// if the new total bitrate is less than the estimated bandwidth, then the track is active
-	if currentBitrates+bitrate < bc.client.GetEstimatedBandwidth() {
+	// except audio, we just added no matter if the bandwidth can't fit
+	if clientTrack.Kind() == webrtc.RTPCodecTypeAudio || currentBitrates+bitrate < bc.client.GetEstimatedBandwidth() {
 		isActive = true
 	}
 
@@ -316,7 +353,7 @@ func (bc *BitrateController) GetQuality(t *SimulcastClientTrack) QualityLevel {
 
 			quality = QualityLevel(t.lastQuality.Load())
 		} else if !claim.active {
-			glog.Warning("clienttrack: claim is not active, claim bitrate ", ThousandSeparator(int(claim.bitrate)), " current bitrate ", ThousandSeparator(int(t.client.bitrateController.TotalBitrates(true))), " available bandwidth ", ThousandSeparator(int(availableBandwidth)))
+			glog.Warning("clienttrack: claim is not active, claim bitrate ", ThousandSeparator(int(claim.bitrate)), " current active bitrate ", ThousandSeparator(int(t.client.bitrateController.TotalBitrates(false))), " available bandwidth ", ThousandSeparator(int(availableBandwidth)))
 			quality = QualityNone
 		}
 
@@ -334,10 +371,19 @@ func (bc *BitrateController) GetQuality(t *SimulcastClientTrack) QualityLevel {
 	}
 
 	lastQuality := t.LastQuality()
-	if !track.isTrackActive(quality) {
+	if quality != QualityNone && !track.isTrackActive(quality) {
+		if lastQuality == QualityNone && track.isTrackActive(QualityLow) {
+			glog.Warning("bitrate: send low quality because selected quality is not active and last quality is none")
+			return QualityLow
+		}
+
 		if !track.isTrackActive(lastQuality) {
+			glog.Warning("bitrate: quality ", quality, " and fallback quality ", lastQuality, " is not active, so sending no qualty. Available bandwidth: ", ThousandSeparator(int(availableBandwidth)), "active bitrate: ", ThousandSeparator(int(t.client.bitrateController.TotalBitrates(false))))
+
 			return QualityNone
 		}
+
+		glog.Warning("bitrate: quality ", quality, " is not active,  fallback to last quality ", lastQuality, ". Available bandwidth: ", ThousandSeparator(int(availableBandwidth)), "active bitrate: ", ThousandSeparator(int(t.client.bitrateController.TotalBitrates(false))))
 
 		return lastQuality
 	}
