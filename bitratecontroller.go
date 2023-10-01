@@ -180,6 +180,11 @@ func (bc *BitrateController) getNextTrackQuality(clientTrackID string) QualityLe
 		// TODO: check if need to reduce from high to low
 		nextQuality := claim.quality - 1
 
+		// no reduction to none or unactivate for screen and audio
+		if claim.track.IsScreen() || claim.track.Kind() == webrtc.RTPCodecTypeAudio {
+			return claim.quality
+		}
+
 		// prevent reduce to low if there it make unbalanced quality distribution
 		if (nextQuality == QualityLow && highCount > 0) || (nextQuality == QualityNone && midCount > 0) {
 			return claim.quality
@@ -272,28 +277,12 @@ func (bc *BitrateController) AddClaim(clientTrack iClientTrack, quality QualityL
 }
 
 func (bc *BitrateController) addClaim(clientTrack iClientTrack, quality QualityLevel, locked bool) (BitrateClaim, error) {
-	var currentBitrates uint32
-
-	if locked {
-		currentBitrates = bc.totalBitrates(true)
-	} else {
-		currentBitrates = bc.TotalBitrates(true)
-	}
-
-	isActive := false
-
 	var bitrate uint32
 
 	if clientTrack.Kind() == webrtc.RTPCodecTypeAudio {
 		bitrate = bc.client.sfu.bitratesConfig.Audio
 	} else {
 		bitrate = bc.client.sfu.QualityLevelToBitrate(quality)
-	}
-
-	// if the new total bitrate is less than the estimated bandwidth, then the track is active
-	// except audio, we just added no matter if the bandwidth can't fit
-	if clientTrack.Kind() == webrtc.RTPCodecTypeAudio || currentBitrates+bitrate < bc.client.GetEstimatedBandwidth() {
-		isActive = true
 	}
 
 	if !locked {
@@ -305,7 +294,7 @@ func (bc *BitrateController) addClaim(clientTrack iClientTrack, quality QualityL
 		track:   clientTrack,
 		quality: quality,
 		bitrate: bitrate,
-		active:  isActive,
+		active:  true,
 	}
 
 	clientTrack.OnTrackEnded(func() {
