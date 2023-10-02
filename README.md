@@ -61,8 +61,8 @@ When a client wants to publish a track to the SFU, usually the flow is like this
 1. Get the media tracks from either the camera or the screen sharing. You can use [getUserMedia](https://developer.mozilla.org/en-US/docs/Web/API/MediaDevices/getUserMedia) to get the media tracks.
 2. Add the media tracks to the WebRTC PeerConnection instance. You can use [addTrack](https://developer.mozilla.org/en-US/docs/Web/API/RTCPeerConnection/addTrack) to add the media tracks to the PeerConnection instance.
 3. This will add the tracks to SFU but won't be published until the client sets the track source type either `media` or `screen`.
-4. When the track is added to SFU, the client will trigger `client.OnTrackAdded([]*Tracks)`. We need to use this event to set the track source type by calling `client.`SetTracksSourceType(map[trackTypes string]TrackType)`
-5. When successful, this will trigger `client.OnTrackAvailable([]*Tracks)` event on other clients.
+4. When the track is added to SFU, the client will trigger `client.OnTrackAdded([]*tracks)`. We need to use this event to set the track source type by calling `client.`SetTracksSourceType(map[trackTypes string]TrackType)`
+5. When successful, this will trigger `client.OnTrackAvailable([]*tracks)` event on other clients.
 6. Use this event to subscribe to the tracks by calling `client.SubscribeTracks(tracksReq []SubscribeTrackRequest)` method. When successful, it will trigger `peerConnection.OnTrack()` event that we can use to attach the track to the HTML video element. Or instead of manually subscribing to each track, you can also use `client.SubscribeAllTracks()` method to subscribe to all available tracks. You only need to call it once, and all available tracks will automatically added to the PeerConnection instance.
 
 See the [client_test.go](./client_test.go) for more details on how to publish and subscribe to tracks.

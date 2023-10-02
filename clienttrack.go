@@ -22,27 +22,27 @@ type iClientTrack interface {
 	OnTrackEnded(func())
 }
 
-type ClientTrack struct {
+type clientTrack struct {
 	id                    string
 	mu                    sync.RWMutex
 	client                *Client
 	kind                  webrtc.RTPCodecType
 	mimeType              string
 	localTrack            *webrtc.TrackLocalStaticRTP
-	remoteTrack           *RemoteTrack
+	remoteTrack           *remoteTrack
 	isScreen              *atomic.Bool
 	onTrackEndedCallbacks []func()
 }
 
-func (t *ClientTrack) ID() string {
+func (t *clientTrack) ID() string {
 	return t.id
 }
 
-func (t *ClientTrack) Kind() webrtc.RTPCodecType {
+func (t *clientTrack) Kind() webrtc.RTPCodecType {
 	return t.remoteTrack.track.Kind()
 }
 
-func (t *ClientTrack) push(rtp *rtp.Packet, quality QualityLevel) {
+func (t *clientTrack) push(rtp *rtp.Packet, quality QualityLevel) {
 	if t.client.peerConnection.ConnectionState() != webrtc.PeerConnectionStateConnected {
 		return
 	}
@@ -56,7 +56,7 @@ func (t *ClientTrack) push(rtp *rtp.Packet, quality QualityLevel) {
 	}
 }
 
-func (t *ClientTrack) getAudioLevel(p *rtp.Packet) rtp.AudioLevelExtension {
+func (t *clientTrack) getAudioLevel(p *rtp.Packet) rtp.AudioLevelExtension {
 	audioLevel := rtp.AudioLevelExtension{}
 	headerID := t.remoteTrack.getAudioLevelExtensionID()
 	if headerID != 0 {
@@ -70,30 +70,30 @@ func (t *ClientTrack) getAudioLevel(p *rtp.Packet) rtp.AudioLevelExtension {
 
 }
 
-func (t *ClientTrack) getCurrentBitrate() uint32 {
+func (t *clientTrack) getCurrentBitrate() uint32 {
 	return t.remoteTrack.GetCurrentBitrate()
 }
 
-func (t *ClientTrack) LocalTrack() *webrtc.TrackLocalStaticRTP {
+func (t *clientTrack) LocalTrack() *webrtc.TrackLocalStaticRTP {
 	return t.localTrack
 }
 
-func (t *ClientTrack) IsScreen() bool {
+func (t *clientTrack) IsScreen() bool {
 	return t.isScreen.Load()
 }
 
-func (t *ClientTrack) SetSourceType(sourceType TrackType) {
+func (t *clientTrack) SetSourceType(sourceType TrackType) {
 	t.isScreen.Store(sourceType == TrackTypeScreen)
 }
 
-func (t *ClientTrack) OnTrackEnded(callback func()) {
+func (t *clientTrack) OnTrackEnded(callback func()) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	t.onTrackEndedCallbacks = append(t.onTrackEndedCallbacks, callback)
 }
 
-func (t *ClientTrack) onTrackEnded() {
+func (t *clientTrack) onTrackEnded() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -102,7 +102,7 @@ func (t *ClientTrack) onTrackEnded() {
 	}
 }
 
-func (t *ClientTrack) IsSimulcast() bool {
+func (t *clientTrack) IsSimulcast() bool {
 	return false
 }
 
@@ -113,7 +113,7 @@ type SimulcastClientTrack struct {
 	kind                  webrtc.RTPCodecType
 	mimeType              string
 	localTrack            *webrtc.TrackLocalStaticRTP
-	remoteTrack           *SimulcastTrack
+	remoteTrack           *simulcastTrack
 	sequenceNumber        *atomic.Uint32
 	lastQuality           *atomic.Uint32
 	lastTimestamp         *atomic.Uint32
@@ -180,7 +180,7 @@ func (t *SimulcastClientTrack) push(p *rtp.Packet, quality QualityLevel) {
 
 		// send PLI to make sure the client will receive the first frame
 		t.remoteTrack.sendPLI(QualityLow)
-		t.remoteTrack.onRemoteTrackAdded(func(remote *RemoteTrack) {
+		t.remoteTrack.onRemoteTrackAdded(func(remote *remoteTrack) {
 			quality := RIDToQuality(remote.track.RID())
 			t.remoteTrack.sendPLI(quality)
 		})
@@ -225,7 +225,7 @@ func (t *SimulcastClientTrack) push(p *rtp.Packet, quality QualityLevel) {
 	}
 }
 
-func (t *SimulcastClientTrack) GetRemoteTrack() *RemoteTrack {
+func (t *SimulcastClientTrack) GetRemoteTrack() *remoteTrack {
 	lastQuality := Uint32ToQualityLevel(t.lastQuality.Load())
 	// lastQuality := t.lastQuality
 	switch lastQuality {

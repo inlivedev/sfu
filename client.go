@@ -59,7 +59,7 @@ type ClientStats struct {
 
 type Client struct {
 	id                                string
-	bitrateController                 *BitrateController
+	bitrateController                 *bitrateController
 	context                           context.Context
 	cancel                            context.CancelFunc
 	canAddCandidate                   *atomic.Bool
@@ -75,10 +75,10 @@ type Client struct {
 	idleTimeoutCancel                 context.CancelFunc
 	mu                                sync.Mutex
 	peerConnection                    *webrtc.PeerConnection
-	pendingReceivedTracks             *TrackList
-	pendingPublishedTracks            *TrackList
+	pendingReceivedTracks             *trackList
+	pendingPublishedTracks            *trackList
 	pendingRemoteRenegotiation        *atomic.Bool
-	publishedTracks                   *TrackList
+	publishedTracks                   *trackList
 	queue                             *queue
 	state                             *atomic.Value
 	sfu                               *SFU
@@ -96,7 +96,7 @@ type Client struct {
 	onTracksAdded           func([]ITrack)
 	options                 ClientOptions
 	statsGetter             stats.Getter
-	tracks                  *TrackList
+	tracks                  *trackList
 	negotiationNeeded       *atomic.Bool
 	pendingRemoteCandidates []webrtc.ICECandidateInit
 	pendingLocalCandidates  []*webrtc.ICECandidate
@@ -236,7 +236,7 @@ func NewClient(s *SFU, id string, peerConnectionConfig webrtc.Configuration, opt
 		ingressBandwidth:           &atomic.Uint32{},
 	}
 
-	client.bitrateController = NewBitrateController(client)
+	client.bitrateController = newbitrateController(client)
 
 	// make sure the exisiting data channels is created on new clients
 	s.createExistingDataChannels(client)
@@ -257,7 +257,7 @@ func NewClient(s *SFU, id string, peerConnectionConfig webrtc.Configuration, opt
 
 		if remoteTrack.RID() == "" {
 			// not simulcast
-			track = NewTrack(client, remoteTrack, receiver)
+			track = newTrack(client, remoteTrack, receiver)
 			if err := client.tracks.Add(track); err != nil {
 				glog.Error("client: error add track ", err)
 			}
@@ -266,7 +266,7 @@ func NewClient(s *SFU, id string, peerConnectionConfig webrtc.Configuration, opt
 			track.SetAsProcessed()
 		} else {
 			// simulcast
-			var simulcast *SimulcastTrack
+			var simulcast *simulcastTrack
 			var ok bool
 
 			id := remoteTrack.Msid()
@@ -274,14 +274,14 @@ func NewClient(s *SFU, id string, peerConnectionConfig webrtc.Configuration, opt
 			track, err = client.tracks.Get(id) // not found because the track is not added yet due to race condition
 			if err != nil {
 				// if track not found, add it
-				track = NewSimulcastTrack(client, remoteTrack, receiver)
+				track = newSimulcastTrack(client, remoteTrack, receiver)
 				if err := client.tracks.Add(track); err != nil {
 					glog.Error("client: error add track ", err)
 				}
 
-				simulcast = track.(*SimulcastTrack)
+				simulcast = track.(*simulcastTrack)
 
-			} else if simulcast, ok = track.(*SimulcastTrack); ok {
+			} else if simulcast, ok = track.(*simulcastTrack); ok {
 				simulcast.AddRemoteTrack(remoteTrack, receiver)
 			}
 
@@ -538,33 +538,33 @@ func (c *Client) allowRemoteRenegotiationQueuOp() {
 }
 
 // return boolean if need a renegotiation after track added
-func (c *Client) addTrack(track ITrack) iClientTrack {
+func (c *Client) addTrack(t ITrack) iClientTrack {
 	// if the client is not connected, we wait until it's connected in go routine
 	if c.peerConnection.ICEConnectionState() != webrtc.ICEConnectionStateConnected {
-		if err := c.pendingReceivedTracks.Add(track); err != nil {
+		if err := c.pendingReceivedTracks.Add(t); err != nil {
 			glog.Error("client: error add pending received track ", err)
 		}
 
 		return nil
 	}
 
-	return c.setClientTrack(track)
+	return c.setClientTrack(t)
 }
 
-func (c *Client) setClientTrack(track ITrack) iClientTrack {
+func (c *Client) setClientTrack(t ITrack) iClientTrack {
 	var outputTrack iClientTrack
 
-	err := c.publishedTracks.Add(track)
+	err := c.publishedTracks.Add(t)
 	if err != nil {
 		return nil
 	}
 
-	if track.IsSimulcast() {
-		simulcastTrack := track.(*SimulcastTrack)
+	if t.IsSimulcast() {
+		simulcastTrack := t.(*simulcastTrack)
 		outputTrack = simulcastTrack.subscribe(c)
 
 	} else {
-		singleTrack := track.(*Track)
+		singleTrack := t.(*track)
 		outputTrack = singleTrack.subscribe()
 	}
 
@@ -810,7 +810,7 @@ func (c *Client) Stats() *ClientStats {
 	return c.clientStats
 }
 
-func (c *Client) updateReceiverStats(remoteTrack *RemoteTrack) {
+func (c *Client) updateReceiverStats(remoteTrack *remoteTrack) {
 	if c.statsGetter == nil {
 		return
 	}

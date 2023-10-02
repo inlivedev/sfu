@@ -14,32 +14,32 @@ var (
 	ErrorInsufficientBandwidth = errors.New("bwcontroller: bandwidth is insufficient")
 )
 
-type BitrateClaim struct {
+type bitrateClaim struct {
 	track   iClientTrack
 	bitrate uint32
 	quality QualityLevel
 	active  bool
 }
 
-type BitrateController struct {
+type bitrateController struct {
 	mu     sync.RWMutex
 	client *Client
-	claims map[string]BitrateClaim
+	claims map[string]bitrateClaim
 }
 
-func NewBitrateController(client *Client) *BitrateController {
-	return &BitrateController{
+func newbitrateController(client *Client) *bitrateController {
+	return &bitrateController{
 		mu:     sync.RWMutex{},
 		client: client,
-		claims: make(map[string]BitrateClaim, 0),
+		claims: make(map[string]bitrateClaim, 0),
 	}
 }
 
-func (bc *BitrateController) GetClaims() map[string]BitrateClaim {
+func (bc *bitrateController) GetClaims() map[string]bitrateClaim {
 	bc.mu.RLock()
 	defer bc.mu.RUnlock()
 
-	claims := make(map[string]BitrateClaim, 0)
+	claims := make(map[string]bitrateClaim, 0)
 	for k, v := range bc.claims {
 		claims[k] = v
 	}
@@ -47,7 +47,7 @@ func (bc *BitrateController) GetClaims() map[string]BitrateClaim {
 	return claims
 }
 
-func (bc *BitrateController) Exist(id string) bool {
+func (bc *bitrateController) Exist(id string) bool {
 	bc.mu.Lock()
 	defer bc.mu.Unlock()
 
@@ -58,7 +58,7 @@ func (bc *BitrateController) Exist(id string) bool {
 	return false
 }
 
-func (bc *BitrateController) GetClaim(id string) *BitrateClaim {
+func (bc *bitrateController) GetClaim(id string) *bitrateClaim {
 	bc.mu.Lock()
 	defer bc.mu.Unlock()
 
@@ -70,14 +70,14 @@ func (bc *BitrateController) GetClaim(id string) *BitrateClaim {
 }
 
 // if all is false, only active claims will be counted
-func (bc *BitrateController) TotalBitrates(all bool) uint32 {
+func (bc *bitrateController) TotalBitrates(all bool) uint32 {
 	bc.mu.Lock()
 	defer bc.mu.Unlock()
 
 	return bc.totalBitrates(all)
 }
 
-func (bc *BitrateController) totalBitrates(all bool) uint32 {
+func (bc *bitrateController) totalBitrates(all bool) uint32 {
 	total := uint32(0)
 	for _, claim := range bc.claims {
 		if !all && !claim.active {
@@ -90,7 +90,7 @@ func (bc *BitrateController) totalBitrates(all bool) uint32 {
 	return total
 }
 
-func (bc *BitrateController) canIncreaseBitrate(clientTrackID string, quality QualityLevel) bool {
+func (bc *bitrateController) canIncreaseBitrate(clientTrackID string, quality QualityLevel) bool {
 	delta := uint32(0)
 
 	newBitrate := bc.client.sfu.QualityLevelToBitrate(quality)
@@ -111,7 +111,7 @@ func (bc *BitrateController) canIncreaseBitrate(clientTrackID string, quality Qu
 	return newEstimatedBandwidth < bandwidth
 }
 
-func (bc *BitrateController) setQuality(clientTrackID string, quality QualityLevel) {
+func (bc *bitrateController) setQuality(clientTrackID string, quality QualityLevel) {
 	bc.mu.RLock()
 	defer bc.mu.RUnlock()
 
@@ -123,7 +123,7 @@ func (bc *BitrateController) setQuality(clientTrackID string, quality QualityLev
 	}
 }
 
-func (bc *BitrateController) setClaim(clientTrackID string, active bool) {
+func (bc *bitrateController) setClaim(clientTrackID string, active bool) {
 	bc.mu.RLock()
 	defer bc.mu.RUnlock()
 
@@ -138,7 +138,7 @@ func (bc *BitrateController) setClaim(clientTrackID string, active bool) {
 // 1. Need to keep all claims distributed not more than 2 levels.
 // 2. If there is a level still in 1, then no level allowed to go up to 3
 // 3. The same with reducing level, no level allowed to go down to 1 if there is a level still in 3
-func (bc *BitrateController) getNextTrackQuality(clientTrackID string) QualityLevel {
+func (bc *bitrateController) getNextTrackQuality(clientTrackID string) QualityLevel {
 	claim := bc.GetClaim(clientTrackID)
 	if claim == nil {
 		glog.Warning("client: claim is not exists")
@@ -233,7 +233,7 @@ func (bc *BitrateController) getNextTrackQuality(clientTrackID string) QualityLe
 	return claim.quality
 }
 
-func (bc *BitrateController) AddClaims(clientTracks []iClientTrack) error {
+func (bc *bitrateController) AddClaims(clientTracks []iClientTrack) error {
 	availableBandwidth := bc.GetAvailableBandwidth()
 	quality := bc.getDistributedQuality(availableBandwidth)
 
@@ -261,11 +261,11 @@ func (bc *BitrateController) AddClaims(clientTracks []iClientTrack) error {
 	return nil
 }
 
-func (bc *BitrateController) AddClaim(clientTrack iClientTrack, quality QualityLevel) (BitrateClaim, error) {
+func (bc *bitrateController) AddClaim(clientTrack iClientTrack, quality QualityLevel) (bitrateClaim, error) {
 	bc.mu.Lock()
 	if _, ok := bc.claims[clientTrack.ID()]; ok {
 		bc.mu.Unlock()
-		return BitrateClaim{}, ErrAlreadyClaimed
+		return bitrateClaim{}, ErrAlreadyClaimed
 	}
 	bc.mu.Unlock()
 
@@ -273,7 +273,7 @@ func (bc *BitrateController) AddClaim(clientTrack iClientTrack, quality QualityL
 
 }
 
-func (bc *BitrateController) addClaim(clientTrack iClientTrack, quality QualityLevel, locked bool) (BitrateClaim, error) {
+func (bc *bitrateController) addClaim(clientTrack iClientTrack, quality QualityLevel, locked bool) (bitrateClaim, error) {
 	var bitrate uint32
 
 	if clientTrack.Kind() == webrtc.RTPCodecTypeAudio {
@@ -287,7 +287,7 @@ func (bc *BitrateController) addClaim(clientTrack iClientTrack, quality QualityL
 		defer bc.mu.RUnlock()
 	}
 
-	bc.claims[clientTrack.ID()] = BitrateClaim{
+	bc.claims[clientTrack.ID()] = bitrateClaim{
 		track:   clientTrack,
 		quality: quality,
 		bitrate: bitrate,
@@ -301,7 +301,7 @@ func (bc *BitrateController) addClaim(clientTrack iClientTrack, quality QualityL
 	return bc.claims[clientTrack.ID()], nil
 }
 
-func (bc *BitrateController) RemoveClaim(id string) {
+func (bc *bitrateController) RemoveClaim(id string) {
 	bc.mu.Lock()
 	defer bc.mu.Unlock()
 
@@ -312,11 +312,11 @@ func (bc *BitrateController) RemoveClaim(id string) {
 	delete(bc.claims, id)
 }
 
-func (bc *BitrateController) GetAvailableBandwidth() uint32 {
+func (bc *bitrateController) GetAvailableBandwidth() uint32 {
 	return bc.client.GetEstimatedBandwidth() - bc.TotalBitrates(true)
 }
 
-func (bc *BitrateController) GetQuality(t *SimulcastClientTrack) QualityLevel {
+func (bc *bitrateController) GetQuality(t *SimulcastClientTrack) QualityLevel {
 	track := t.remoteTrack
 
 	var quality QualityLevel
@@ -383,7 +383,7 @@ func (bc *BitrateController) GetQuality(t *SimulcastClientTrack) QualityLevel {
 	return quality
 }
 
-func (bc *BitrateController) getDistributedQuality(availableBandwidth uint32) QualityLevel {
+func (bc *bitrateController) getDistributedQuality(availableBandwidth uint32) QualityLevel {
 	audioTracksCount := 0
 	videoTracksCount := 0
 	simulcastTracksCount := 0

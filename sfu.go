@@ -104,7 +104,7 @@ type SFU struct {
 	mutex                    sync.Mutex
 	mux                      *UDPMux
 	onStop                   func()
-	OnTracksAvailable        func(tracks []Track)
+	OnTracksAvailable        func(tracks []track)
 }
 
 type PublishedTrack struct {

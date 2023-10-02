@@ -15,7 +15,7 @@ import (
 	"github.com/pion/webrtc/v3"
 )
 
-type RemoteTrack struct {
+type remoteTrack struct {
 	client                *Client
 	mu                    sync.Mutex
 	track                 *webrtc.TrackRemote
@@ -28,8 +28,8 @@ type RemoteTrack struct {
 	onEndedCallbacks      []func()
 }
 
-func NewRemoteTrack(client *Client, track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver, onRead func(*rtp.Packet)) *RemoteTrack {
-	rt := &RemoteTrack{
+func newRemoteTrack(client *Client, track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver, onRead func(*rtp.Packet)) *remoteTrack {
+	rt := &remoteTrack{
 		client:                client,
 		mu:                    sync.Mutex{},
 		track:                 track,
@@ -47,14 +47,14 @@ func NewRemoteTrack(client *Client, track *webrtc.TrackRemote, receiver *webrtc.
 	return rt
 }
 
-func (t *RemoteTrack) OnEnded(f func()) {
+func (t *remoteTrack) OnEnded(f func()) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	t.onEndedCallbacks = append(t.onEndedCallbacks, f)
 }
 
-func (t *RemoteTrack) onEnded() {
+func (t *remoteTrack) onEnded() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -69,7 +69,7 @@ func (t *RemoteTrack) onEnded() {
 	}
 }
 
-func (t *RemoteTrack) readRTP() {
+func (t *remoteTrack) readRTP() {
 	go func() {
 		ctxx, cancel := context.WithCancel(t.client.context)
 
@@ -115,7 +115,7 @@ func (t *RemoteTrack) readRTP() {
 	}()
 }
 
-func (t *RemoteTrack) updateStats(s stats.Stats) {
+func (t *remoteTrack) updateStats(s stats.Stats) {
 	// update the stats if the last update equal or more than 1 second
 	latestUpdated := t.latestUpdatedTS.Load()
 	if time.Since(time.Unix(0, int64(latestUpdated))).Seconds() <= 1 {
@@ -138,15 +138,15 @@ func (t *RemoteTrack) updateStats(s stats.Stats) {
 
 }
 
-func (t *RemoteTrack) Track() *webrtc.TrackRemote {
+func (t *remoteTrack) Track() *webrtc.TrackRemote {
 	return t.track
 }
 
-func (t *RemoteTrack) GetCurrentBitrate() uint32 {
+func (t *remoteTrack) GetCurrentBitrate() uint32 {
 	return t.bitrate.Load()
 }
 
-func (t *RemoteTrack) getAudioLevelExtensionID() uint8 {
+func (t *remoteTrack) getAudioLevelExtensionID() uint8 {
 	for _, extension := range t.receiver.GetParameters().HeaderExtensions {
 		if extension.URI == sdp.AudioLevelURI {
 			return uint8(extension.ID)

@@ -29,7 +29,7 @@ func (t TrackType) String() string {
 	return string(t)
 }
 
-type BaseTrack struct {
+type baseTrack struct {
 	id           string
 	msid         string
 	streamid     string
@@ -54,13 +54,13 @@ type ITrack interface {
 	TotalTracks() int
 }
 
-type Track struct {
+type track struct {
 	mu          sync.Mutex
-	base        BaseTrack
-	remoteTrack *RemoteTrack
+	base        baseTrack
+	remoteTrack *remoteTrack
 }
 
-func NewTrack(client *Client, track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) ITrack {
+func newTrack(client *Client, trackRemote *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) ITrack {
 	ctList := newClientTrackList()
 	onTrackRead := func(p *rtp.Packet) {
 		// do
@@ -70,27 +70,27 @@ func NewTrack(client *Client, track *webrtc.TrackRemote, receiver *webrtc.RTPRec
 		}
 	}
 
-	baseTrack := BaseTrack{
-		id:           track.ID(),
+	baseTrack := baseTrack{
+		id:           trackRemote.ID(),
 		isScreen:     &atomic.Bool{},
-		msid:         track.Msid(),
-		streamid:     track.StreamID(),
+		msid:         trackRemote.Msid(),
+		streamid:     trackRemote.StreamID(),
 		client:       client,
-		kind:         track.Kind(),
-		codec:        track.Codec(),
+		kind:         trackRemote.Kind(),
+		codec:        trackRemote.Codec(),
 		clientTracks: ctList,
 	}
 
-	t := &Track{
+	t := &track{
 		mu:          sync.Mutex{},
 		base:        baseTrack,
-		remoteTrack: NewRemoteTrack(client, track, receiver, onTrackRead),
+		remoteTrack: newRemoteTrack(client, trackRemote, receiver, onTrackRead),
 	}
 
 	return t
 }
 
-func (t *Track) createLocalTrack() *webrtc.TrackLocalStaticRTP {
+func (t *track) createLocalTrack() *webrtc.TrackLocalStaticRTP {
 	track, newTrackErr := webrtc.NewTrackLocalStaticRTP(t.remoteTrack.track.Codec().RTPCodecCapability, t.base.id, t.base.streamid)
 	if newTrackErr != nil {
 		panic(newTrackErr)
@@ -99,52 +99,52 @@ func (t *Track) createLocalTrack() *webrtc.TrackLocalStaticRTP {
 	return track
 }
 
-func (t *Track) ID() string {
+func (t *track) ID() string {
 	return t.base.msid
 }
 
-func (t *Track) StreamID() string {
+func (t *track) StreamID() string {
 	return t.base.streamid
 }
 
-func (t *Track) Client() *Client {
+func (t *track) Client() *Client {
 	return t.base.client
 }
 
-func (t *Track) RemoteTrack() *RemoteTrack {
+func (t *track) RemoteTrack() *remoteTrack {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	return t.remoteTrack
 }
 
-func (t *Track) IsScreen() bool {
+func (t *track) IsScreen() bool {
 	return t.base.isScreen.Load()
 }
 
-func (t *Track) IsSimulcast() bool {
+func (t *track) IsSimulcast() bool {
 	return false
 }
 
-func (t *Track) IsProcessed() bool {
+func (t *track) IsProcessed() bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	return t.base.isProcessed
 }
 
-func (t *Track) Kind() webrtc.RTPCodecType {
+func (t *track) Kind() webrtc.RTPCodecType {
 	return t.base.kind
 }
 
-func (t *Track) TotalTracks() int {
+func (t *track) TotalTracks() int {
 	return 1
 }
 
-func (t *Track) subscribe() iClientTrack {
+func (t *track) subscribe() iClientTrack {
 	isScreen := &atomic.Bool{}
 	isScreen.Store(t.IsScreen())
-	ct := &ClientTrack{
+	ct := &clientTrack{
 		id:                    t.base.id,
 		mu:                    sync.RWMutex{},
 		client:                t.Client(),
@@ -169,37 +169,37 @@ func (t *Track) subscribe() iClientTrack {
 	return ct
 }
 
-func (t *Track) SetSourceType(sourceType TrackType) {
+func (t *track) SetSourceType(sourceType TrackType) {
 	t.base.isScreen.Store(sourceType == TrackTypeScreen)
 }
 
-func (t *Track) SetAsProcessed() {
+func (t *track) SetAsProcessed() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	t.base.isProcessed = true
 }
 
-func (t *Track) SendPLI() error {
+func (t *track) SendPLI() error {
 	return t.base.client.peerConnection.WriteRTCP([]rtcp.Packet{
 		&rtcp.PictureLossIndication{MediaSSRC: uint32(t.remoteTrack.track.SSRC())},
 	})
 }
 
-type SimulcastTrack struct {
+type simulcastTrack struct {
 	mu                          sync.Mutex
-	base                        *BaseTrack
+	base                        *baseTrack
 	baseTS                      uint32
 	onTrackComplete             func()
-	remoteTrackHigh             *RemoteTrack
+	remoteTrackHigh             *remoteTrack
 	remoteTrackHighBaseTS       uint32
 	highSequence                uint16
 	lastHighSequence            uint16
-	remoteTrackMid              *RemoteTrack
+	remoteTrackMid              *remoteTrack
 	remoteTrackMidBaseTS        uint32
 	midSequence                 uint16
 	lastMidSequence             uint16
-	remoteTrackLow              *RemoteTrack
+	remoteTrackLow              *remoteTrack
 	remoteTrackLowBaseTS        uint32
 	lowSequence                 uint16
 	lastLowSequence             uint16
@@ -209,13 +209,13 @@ type SimulcastTrack struct {
 	lastHighKeyframeTS          *atomic.Int64
 	lastMidKeyframeTS           *atomic.Int64
 	lastLowKeyframeTS           *atomic.Int64
-	onAddedRemoteTrackCallbacks []func(*RemoteTrack)
+	onAddedRemoteTrackCallbacks []func(*remoteTrack)
 }
 
-func NewSimulcastTrack(client *Client, track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) ITrack {
-	t := &SimulcastTrack{
+func newSimulcastTrack(client *Client, track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) ITrack {
+	t := &simulcastTrack{
 		mu: sync.Mutex{},
-		base: &BaseTrack{
+		base: &baseTrack{
 			id:           track.ID(),
 			isScreen:     &atomic.Bool{},
 			msid:         track.Msid(),
@@ -238,14 +238,14 @@ func NewSimulcastTrack(client *Client, track *webrtc.TrackRemote, receiver *webr
 	return t
 }
 
-func (t *SimulcastTrack) onRemoteTrackAdded(f func(*RemoteTrack)) {
+func (t *simulcastTrack) onRemoteTrackAdded(f func(*remoteTrack)) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	t.onAddedRemoteTrackCallbacks = append(t.onAddedRemoteTrackCallbacks, f)
 }
 
-func (t *SimulcastTrack) onRemoteTrackAddedCallbacks(track *RemoteTrack) {
+func (t *simulcastTrack) onRemoteTrackAddedCallbacks(track *remoteTrack) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -254,7 +254,7 @@ func (t *SimulcastTrack) onRemoteTrackAddedCallbacks(track *RemoteTrack) {
 	}
 }
 
-func (t *SimulcastTrack) OnTrackComplete(f func()) {
+func (t *simulcastTrack) OnTrackComplete(f func()) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -262,35 +262,35 @@ func (t *SimulcastTrack) OnTrackComplete(f func()) {
 }
 
 // TODO: this is contain multiple tracks, there is a possibility remote track high is not available yet
-func (t *SimulcastTrack) ID() string {
+func (t *simulcastTrack) ID() string {
 	return t.base.msid
 }
 
-func (t *SimulcastTrack) StreamID() string {
+func (t *simulcastTrack) StreamID() string {
 	return t.base.streamid
 }
 
-func (t *SimulcastTrack) Client() *Client {
+func (t *simulcastTrack) Client() *Client {
 	return t.base.client
 }
 
-func (t *SimulcastTrack) IsSimulcast() bool {
+func (t *simulcastTrack) IsSimulcast() bool {
 	return true
 }
 
-func (t *SimulcastTrack) IsProcessed() bool {
+func (t *simulcastTrack) IsProcessed() bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	return t.base.isProcessed
 }
 
-func (t *SimulcastTrack) Kind() webrtc.RTPCodecType {
+func (t *simulcastTrack) Kind() webrtc.RTPCodecType {
 	return t.base.kind
 }
 
-func (t *SimulcastTrack) AddRemoteTrack(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) *RemoteTrack {
-	var remoteTrack *RemoteTrack
+func (t *simulcastTrack) AddRemoteTrack(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) *remoteTrack {
+	var remoteTrack *remoteTrack
 
 	quality := RIDToQuality(track.RID())
 
@@ -351,13 +351,13 @@ func (t *SimulcastTrack) AddRemoteTrack(track *webrtc.TrackRemote, receiver *web
 
 	switch quality {
 	case QualityHigh:
-		remoteTrack = NewRemoteTrack(t.base.client, track, receiver, onRead)
+		remoteTrack = newRemoteTrack(t.base.client, track, receiver, onRead)
 		t.remoteTrackHigh = remoteTrack
 	case QualityMid:
-		remoteTrack = NewRemoteTrack(t.base.client, track, receiver, onRead)
+		remoteTrack = newRemoteTrack(t.base.client, track, receiver, onRead)
 		t.remoteTrackMid = remoteTrack
 	case QualityLow:
-		remoteTrack = NewRemoteTrack(t.base.client, track, receiver, onRead)
+		remoteTrack = newRemoteTrack(t.base.client, track, receiver, onRead)
 		t.remoteTrackLow = remoteTrack
 	default:
 		glog.Warning("client: unknown track quality ", track.RID())
@@ -376,7 +376,7 @@ func (t *SimulcastTrack) AddRemoteTrack(track *webrtc.TrackRemote, receiver *web
 	return remoteTrack
 }
 
-func (t *SimulcastTrack) subscribe(client *Client) iClientTrack {
+func (t *simulcastTrack) subscribe(client *Client) iClientTrack {
 	// Create a local track, all our SFU clients will be fed via this track
 	track, newTrackErr := webrtc.NewTrackLocalStaticRTP(t.base.codec.RTPCodecCapability, t.base.id, t.base.streamid)
 	if newTrackErr != nil {
@@ -430,22 +430,22 @@ func (t *SimulcastTrack) subscribe(client *Client) iClientTrack {
 	return ct
 }
 
-func (t *SimulcastTrack) SetSourceType(sourceType TrackType) {
+func (t *simulcastTrack) SetSourceType(sourceType TrackType) {
 	t.base.isScreen.Store(sourceType == TrackTypeScreen)
 }
 
-func (t *SimulcastTrack) SetAsProcessed() {
+func (t *simulcastTrack) SetAsProcessed() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	t.base.isProcessed = true
 }
 
-func (t *SimulcastTrack) IsScreen() bool {
+func (t *simulcastTrack) IsScreen() bool {
 	return t.base.isScreen.Load()
 }
 
-func (t *SimulcastTrack) SendPLI(currentTrack *webrtc.TrackRemote) error {
+func (t *simulcastTrack) SendPLI(currentTrack *webrtc.TrackRemote) error {
 	if currentTrack == nil {
 		return nil
 	}
@@ -455,7 +455,7 @@ func (t *SimulcastTrack) SendPLI(currentTrack *webrtc.TrackRemote) error {
 	})
 }
 
-func (t *SimulcastTrack) TotalTracks() int {
+func (t *simulcastTrack) TotalTracks() int {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -476,7 +476,7 @@ func (t *SimulcastTrack) TotalTracks() int {
 }
 
 // track is considered active if the track is not nil and the latest read operation was 500ms ago
-func (t *SimulcastTrack) isTrackActive(quality QualityLevel) bool {
+func (t *simulcastTrack) isTrackActive(quality QualityLevel) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -529,7 +529,7 @@ func (t *SimulcastTrack) isTrackActive(quality QualityLevel) bool {
 	return false
 }
 
-func (t *SimulcastTrack) sendPLI(quality QualityLevel) {
+func (t *simulcastTrack) sendPLI(quality QualityLevel) {
 	switch quality {
 	case QualityHigh:
 		if err := t.SendPLI(t.remoteTrackHigh.track); err != nil {
@@ -553,18 +553,18 @@ type SubscribeTrackRequest struct {
 	RID      string `json:"rid"`
 }
 
-type TrackList struct {
+type trackList struct {
 	tracks map[string]ITrack
 	mutex  sync.RWMutex
 }
 
-func newTrackList() *TrackList {
-	return &TrackList{
+func newTrackList() *trackList {
+	return &trackList{
 		tracks: make(map[string]ITrack),
 	}
 }
 
-func (t *TrackList) Add(track ITrack) error {
+func (t *trackList) Add(track ITrack) error {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 	id := track.ID()
@@ -578,7 +578,7 @@ func (t *TrackList) Add(track ITrack) error {
 	return nil
 }
 
-func (t *TrackList) Get(ID string) (ITrack, error) {
+func (t *trackList) Get(ID string) (ITrack, error) {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 
@@ -590,7 +590,7 @@ func (t *TrackList) Get(ID string) (ITrack, error) {
 }
 
 //nolint:copylocks // This is a read only operation
-func (t *TrackList) Remove(ids []string) {
+func (t *trackList) Remove(ids []string) {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 
@@ -600,14 +600,14 @@ func (t *TrackList) Remove(ids []string) {
 
 }
 
-func (t *TrackList) Reset() {
+func (t *trackList) Reset() {
 	t.mutex.RLock()
 	defer t.mutex.RUnlock()
 
 	t.tracks = make(map[string]ITrack)
 }
 
-func (t *TrackList) GetTracks() []ITrack {
+func (t *trackList) GetTracks() []ITrack {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
 
@@ -619,7 +619,7 @@ func (t *TrackList) GetTracks() []ITrack {
 	return tracks
 }
 
-func (t *TrackList) Length() int {
+func (t *trackList) Length() int {
 	return len(t.tracks)
 }
 
