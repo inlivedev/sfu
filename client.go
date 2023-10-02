@@ -122,6 +122,7 @@ func NewClient(s *SFU, id string, peerConnectionConfig webrtc.Configuration, opt
 	}
 
 	RegisterSimulcastHeaderExtensions(m, webrtc.RTPCodecTypeVideo)
+	RegisterAudioLevelHeaderExtension(m)
 
 	// // Create a InterceptorRegistry. This is the user configurable RTP/RTCP Pipeline.
 	// // This provides NACKs, RTCP Reports and other features. If you use `webrtc.NewPeerConnection`
@@ -256,7 +257,7 @@ func NewClient(s *SFU, id string, peerConnectionConfig webrtc.Configuration, opt
 
 		if remoteTrack.RID() == "" {
 			// not simulcast
-			track = NewTrack(client, remoteTrack)
+			track = NewTrack(client, remoteTrack, receiver)
 			if err := client.tracks.Add(track); err != nil {
 				glog.Error("client: error add track ", err)
 			}
@@ -273,7 +274,7 @@ func NewClient(s *SFU, id string, peerConnectionConfig webrtc.Configuration, opt
 			track, err = client.tracks.Get(id) // not found because the track is not added yet due to race condition
 			if err != nil {
 				// if track not found, add it
-				track = NewSimulcastTrack(client, remoteTrack)
+				track = NewSimulcastTrack(client, remoteTrack, receiver)
 				if err := client.tracks.Add(track); err != nil {
 					glog.Error("client: error add track ", err)
 				}
@@ -281,7 +282,7 @@ func NewClient(s *SFU, id string, peerConnectionConfig webrtc.Configuration, opt
 				simulcast = track.(*SimulcastTrack)
 
 			} else if simulcast, ok = track.(*SimulcastTrack); ok {
-				simulcast.AddRemoteTrack(remoteTrack)
+				simulcast.AddRemoteTrack(remoteTrack, receiver)
 			}
 
 			// only process track when the lowest quality is available

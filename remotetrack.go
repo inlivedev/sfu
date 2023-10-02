@@ -11,6 +11,7 @@ import (
 	"github.com/golang/glog"
 	"github.com/pion/interceptor/pkg/stats"
 	"github.com/pion/rtp"
+	"github.com/pion/sdp/v3"
 	"github.com/pion/webrtc/v3"
 )
 
@@ -18,6 +19,7 @@ type RemoteTrack struct {
 	client                *Client
 	mu                    sync.Mutex
 	track                 *webrtc.TrackRemote
+	receiver              *webrtc.RTPReceiver
 	onRead                func(*rtp.Packet)
 	bitrate               *atomic.Uint32
 	previousBytesReceived *atomic.Uint64
@@ -26,11 +28,12 @@ type RemoteTrack struct {
 	onEndedCallbacks      []func()
 }
 
-func NewRemoteTrack(client *Client, track *webrtc.TrackRemote, onRead func(*rtp.Packet)) *RemoteTrack {
+func NewRemoteTrack(client *Client, track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver, onRead func(*rtp.Packet)) *RemoteTrack {
 	rt := &RemoteTrack{
 		client:                client,
 		mu:                    sync.Mutex{},
 		track:                 track,
+		receiver:              receiver,
 		onRead:                onRead,
 		bitrate:               &atomic.Uint32{},
 		previousBytesReceived: &atomic.Uint64{},
@@ -141,4 +144,14 @@ func (t *RemoteTrack) Track() *webrtc.TrackRemote {
 
 func (t *RemoteTrack) GetCurrentBitrate() uint32 {
 	return t.bitrate.Load()
+}
+
+func (t *RemoteTrack) getAudioLevelExtensionID() uint8 {
+	for _, extension := range t.receiver.GetParameters().HeaderExtensions {
+		if extension.URI == sdp.AudioLevelURI {
+			return uint8(extension.ID)
+		}
+	}
+
+	return 0
 }

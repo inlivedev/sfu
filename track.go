@@ -60,7 +60,7 @@ type Track struct {
 	remoteTrack *RemoteTrack
 }
 
-func NewTrack(client *Client, track *webrtc.TrackRemote) ITrack {
+func NewTrack(client *Client, track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) ITrack {
 	ctList := newClientTrackList()
 	onTrackRead := func(p *rtp.Packet) {
 		// do
@@ -84,7 +84,7 @@ func NewTrack(client *Client, track *webrtc.TrackRemote) ITrack {
 	t := &Track{
 		mu:          sync.Mutex{},
 		base:        baseTrack,
-		remoteTrack: NewRemoteTrack(client, track, onTrackRead),
+		remoteTrack: NewRemoteTrack(client, track, receiver, onTrackRead),
 	}
 
 	return t
@@ -212,7 +212,7 @@ type SimulcastTrack struct {
 	onAddedRemoteTrackCallbacks []func(*RemoteTrack)
 }
 
-func NewSimulcastTrack(client *Client, track *webrtc.TrackRemote) ITrack {
+func NewSimulcastTrack(client *Client, track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) ITrack {
 	t := &SimulcastTrack{
 		mu: sync.Mutex{},
 		base: &BaseTrack{
@@ -233,7 +233,7 @@ func NewSimulcastTrack(client *Client, track *webrtc.TrackRemote) ITrack {
 		lastLowKeyframeTS:  &atomic.Int64{},
 	}
 
-	_ = t.AddRemoteTrack(track)
+	_ = t.AddRemoteTrack(track, receiver)
 
 	return t
 }
@@ -289,7 +289,7 @@ func (t *SimulcastTrack) Kind() webrtc.RTPCodecType {
 	return t.base.kind
 }
 
-func (t *SimulcastTrack) AddRemoteTrack(track *webrtc.TrackRemote) *RemoteTrack {
+func (t *SimulcastTrack) AddRemoteTrack(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) *RemoteTrack {
 	var remoteTrack *RemoteTrack
 
 	quality := RIDToQuality(track.RID())
@@ -351,13 +351,13 @@ func (t *SimulcastTrack) AddRemoteTrack(track *webrtc.TrackRemote) *RemoteTrack 
 
 	switch quality {
 	case QualityHigh:
-		remoteTrack = NewRemoteTrack(t.base.client, track, onRead)
+		remoteTrack = NewRemoteTrack(t.base.client, track, receiver, onRead)
 		t.remoteTrackHigh = remoteTrack
 	case QualityMid:
-		remoteTrack = NewRemoteTrack(t.base.client, track, onRead)
+		remoteTrack = NewRemoteTrack(t.base.client, track, receiver, onRead)
 		t.remoteTrackMid = remoteTrack
 	case QualityLow:
-		remoteTrack = NewRemoteTrack(t.base.client, track, onRead)
+		remoteTrack = NewRemoteTrack(t.base.client, track, receiver, onRead)
 		t.remoteTrackLow = remoteTrack
 	default:
 		glog.Warning("client: unknown track quality ", track.RID())

@@ -47,9 +47,28 @@ func (t *ClientTrack) push(rtp *rtp.Packet, quality QualityLevel) {
 		return
 	}
 
+	if t.Kind() == webrtc.RTPCodecTypeAudio {
+		audioLevel := t.getAudioLevel(rtp)
+		glog.Info("audio level: ", audioLevel.Level, "voice activity: ", audioLevel.Voice)
+	}
+
 	if err := t.localTrack.WriteRTP(rtp); err != nil {
 		glog.Error("clienttrack: error on write rtp", err)
 	}
+}
+
+func (t *ClientTrack) getAudioLevel(p *rtp.Packet) rtp.AudioLevelExtension {
+	audioLevel := rtp.AudioLevelExtension{}
+	headerID := t.remoteTrack.getAudioLevelExtensionID()
+	if headerID != 0 {
+		ext := p.Header.GetExtension(headerID)
+		if err := audioLevel.Unmarshal(ext); err != nil {
+			glog.Error("clienttrack: error on unmarshal audio level", err)
+		}
+	}
+
+	return audioLevel
+
 }
 
 func (t *ClientTrack) getCurrentBitrate() uint32 {

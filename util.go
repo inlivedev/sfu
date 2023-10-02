@@ -111,6 +111,12 @@ func RegisterSimulcastHeaderExtensions(m *webrtc.MediaEngine, codecType webrtc.R
 	}
 }
 
+func RegisterAudioLevelHeaderExtension(m *webrtc.MediaEngine) {
+	if err := m.RegisterHeaderExtension(webrtc.RTPHeaderExtensionCapability{URI: sdp.AudioLevelURI}, webrtc.RTPCodecTypeAudio); err != nil {
+		panic(err)
+	}
+}
+
 func IsKeyframe(codec string, packet *rtp.Packet) bool {
 	isIt1, isIt2 := Keyframe(codec, packet)
 	return isIt1 && isIt2
