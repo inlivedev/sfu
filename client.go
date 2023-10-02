@@ -117,7 +117,7 @@ func DefaultClientOptions() ClientOptions {
 func NewClient(s *SFU, id string, peerConnectionConfig webrtc.Configuration, opts ClientOptions) *Client {
 	m := &webrtc.MediaEngine{}
 
-	if err := RegisterDefaultCodecs(m); err != nil {
+	if err := RegisterCodecs(m, s.codecs); err != nil {
 		panic(err)
 	}
 

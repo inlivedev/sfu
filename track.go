@@ -393,21 +393,23 @@ func (t *simulcastTrack) subscribe(client *Client) iClientTrack {
 	lastTimestamp := &atomic.Uint32{}
 
 	ct := &SimulcastClientTrack{
-		mu:                    sync.RWMutex{},
-		id:                    t.base.id,
-		kind:                  t.base.kind,
-		mimeType:              t.base.codec.MimeType,
-		client:                client,
-		localTrack:            track,
-		remoteTrack:           t,
-		sequenceNumber:        sequenceNumber,
-		lastQuality:           lastQuality,
-		lastCheckQualityTS:    &atomic.Int64{},
-		lastTimestamp:         lastTimestamp,
-		isScreen:              isScreen,
-		isEnded:               &atomic.Bool{},
-		onTrackEndedCallbacks: make([]func(), 0),
+		mu:                      sync.RWMutex{},
+		id:                      t.base.id,
+		kind:                    t.base.kind,
+		mimeType:                t.base.codec.MimeType,
+		client:                  client,
+		localTrack:              track,
+		remoteTrack:             t,
+		sequenceNumber:          sequenceNumber,
+		lastQuality:             lastQuality,
+		lastCheckQualityTS:      &atomic.Int64{},
+		lastBlankSequenceNumber: &atomic.Uint32{},
+		lastTimestamp:           lastTimestamp,
+		isScreen:                isScreen,
+		isEnded:                 &atomic.Bool{},
+		onTrackEndedCallbacks:   make([]func(), 0),
 	}
+
 	if t.remoteTrackLow != nil {
 		t.remoteTrackLow.OnEnded(func() {
 			ct.onTrackEnded()

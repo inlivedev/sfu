@@ -2,66 +2,19 @@ package sfu
 
 import (
 	"encoding/binary"
+	"strings"
 
+	"github.com/pion/rtp"
+	"github.com/pion/rtp/codecs"
 	"github.com/pion/webrtc/v3"
+	"github.com/pion/webrtc/v3/pkg/media"
+	"golang.org/x/exp/slices"
 )
 
 var (
-	H264KeyFrame2x2SPS = []byte{
-		0x67, 0x42, 0xc0, 0x1f, 0x0f, 0xd9, 0x1f, 0x88,
-		0x88, 0x84, 0x00, 0x00, 0x03, 0x00, 0x04, 0x00,
-		0x00, 0x03, 0x00, 0xc8, 0x3c, 0x60, 0xc9, 0x20,
-	}
-	H264KeyFrame2x2PPS = []byte{
-		0x68, 0x87, 0xcb, 0x83, 0xcb, 0x20,
-	}
-	H264KeyFrame2x2IDR = []byte{
-		0x65, 0x88, 0x84, 0x0a, 0xf2, 0x62, 0x80, 0x00,
-		0xa7, 0xbe,
-	}
-	H264KeyFrame2x2 = [][]byte{H264KeyFrame2x2SPS, H264KeyFrame2x2PPS, H264KeyFrame2x2IDR}
+	videoRTCPFeedback = []webrtc.RTCPFeedback{{"goog-remb", ""}, {"ccm", "fir"}, {"nack", ""}, {"nack", "pli"}}
 
-	OpusSilenceFrame = []byte{
-		0xf8, 0xff, 0xfe, 0x00, 0x00, 0x00, 0x00, 0x00,
-		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-	}
-)
-
-func RegisterDefaultCodecs(m *webrtc.MediaEngine) error {
-	// Default Pion Audio Codecs
-	for _, codec := range []webrtc.RTPCodecParameters{
-		{
-			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypeOpus, 48000, 2, "minptime=10;useinbandfec=1", nil},
-			PayloadType:        111,
-		},
-		{
-			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypeG722, 8000, 0, "", nil},
-			PayloadType:        9,
-		},
-		{
-			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypePCMU, 8000, 0, "", nil},
-			PayloadType:        0,
-		},
-		{
-			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypePCMA, 8000, 0, "", nil},
-			PayloadType:        8,
-		},
-	} {
-		if err := m.RegisterCodec(codec, webrtc.RTPCodecTypeAudio); err != nil {
-			return err
-		}
-	}
-
-	videoRTCPFeedback := []webrtc.RTCPFeedback{{"goog-remb", ""}, {"ccm", "fir"}, {"nack", ""}, {"nack", "pli"}}
-	for _, codec := range []webrtc.RTPCodecParameters{
+	videoCodecs = []webrtc.RTPCodecParameters{
 		{
 			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypeVP9, 90000, 0, "profile-id=2", videoRTCPFeedback},
 			PayloadType:        100,
@@ -98,7 +51,87 @@ func RegisterDefaultCodecs(m *webrtc.MediaEngine) error {
 			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypeH264, 90000, 0, "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=4d001f", videoRTCPFeedback},
 			PayloadType:        127,
 		},
-	} {
+	}
+
+	audioCodecs = []webrtc.RTPCodecParameters{
+		{
+			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypeOpus, 48000, 2, "minptime=10;useinbandfec=1", nil},
+			PayloadType:        111,
+		},
+		{
+			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypeG722, 8000, 0, "", nil},
+			PayloadType:        9,
+		},
+		{
+			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypePCMU, 8000, 0, "", nil},
+			PayloadType:        0,
+		},
+		{
+			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypePCMA, 8000, 0, "", nil},
+			PayloadType:        8,
+		},
+	}
+
+	H264KeyFrame2x2SPS = []byte{
+		0x67, 0x42, 0xc0, 0x1f, 0x0f, 0xd9, 0x1f, 0x88,
+		0x88, 0x84, 0x00, 0x00, 0x03, 0x00, 0x04, 0x00,
+		0x00, 0x03, 0x00, 0xc8, 0x3c, 0x60, 0xc9, 0x20,
+	}
+	H264KeyFrame2x2PPS = []byte{
+		0x68, 0x87, 0xcb, 0x83, 0xcb, 0x20,
+	}
+	H264KeyFrame2x2IDR = []byte{
+		0x65, 0x88, 0x84, 0x0a, 0xf2, 0x62, 0x80, 0x00,
+		0xa7, 0xbe,
+	}
+	H264KeyFrame2x2 = [][]byte{H264KeyFrame2x2SPS, H264KeyFrame2x2PPS, H264KeyFrame2x2IDR}
+
+	OpusSilenceFrame = []byte{
+		0xf8, 0xff, 0xfe, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	}
+)
+
+func RegisterCodecs(m *webrtc.MediaEngine, codecs []string) error {
+	errors := []error{}
+
+	for _, codec := range audioCodecs {
+		if slices.Contains(codecs, codec.MimeType) {
+			if err := m.RegisterCodec(codec, webrtc.RTPCodecTypeAudio); err != nil {
+				errors = append(errors, err)
+			}
+		}
+
+	}
+
+	for _, codec := range videoCodecs {
+		if slices.Contains(codecs, codec.MimeType) {
+			if err := m.RegisterCodec(codec, webrtc.RTPCodecTypeVideo); err != nil {
+				errors = append(errors, err)
+			}
+		}
+	}
+
+	return FlattenErrors(errors)
+}
+
+func RegisterDefaultCodecs(m *webrtc.MediaEngine) error {
+	// Default Pion Audio Codecs
+	for _, codec := range audioCodecs {
+		if err := m.RegisterCodec(codec, webrtc.RTPCodecTypeAudio); err != nil {
+			return err
+		}
+	}
+
+	for _, codec := range videoCodecs {
 		if err := m.RegisterCodec(codec, webrtc.RTPCodecTypeVideo); err != nil {
 			return err
 		}
@@ -107,10 +140,10 @@ func RegisterDefaultCodecs(m *webrtc.MediaEngine) error {
 	return nil
 }
 
+// credit to Livekit code
+// taken from https://github.com/livekit/livekit/blob/989d621c9746f1912fc44f8f8021a0388fdd773f/pkg/sfu/downtrack.go#L1429
 func getH264BlankFrame() []byte {
-	// TODO - Jie Zeng
-	// now use STAP-A to compose sps, pps, idr together, most decoder support packetization-mode 1.
-	// if client only support packetization-mode 0, use single nalu unit packet
+
 	buf := make([]byte, 1000)
 	offset := 0
 	buf[0] = 0x18 // STAP-A
@@ -123,4 +156,66 @@ func getH264BlankFrame() []byte {
 	}
 
 	return buf[:offset]
+}
+
+// reuse from pion media engine and media sample
+func payloaderForCodec(codec webrtc.RTPCodecCapability) (rtp.Payloader, error) {
+	switch strings.ToLower(codec.MimeType) {
+	case strings.ToLower(webrtc.MimeTypeH264):
+		return &codecs.H264Payloader{}, nil
+	case strings.ToLower(webrtc.MimeTypeOpus):
+		return &codecs.OpusPayloader{}, nil
+	case strings.ToLower(webrtc.MimeTypeVP8):
+		return &codecs.VP8Payloader{
+			EnablePictureID: true,
+		}, nil
+	case strings.ToLower(webrtc.MimeTypeVP9):
+		return &codecs.VP9Payloader{}, nil
+	case strings.ToLower(webrtc.MimeTypeAV1):
+		return &codecs.AV1Payloader{}, nil
+	case strings.ToLower(webrtc.MimeTypeG722):
+		return &codecs.G722Payloader{}, nil
+	case strings.ToLower(webrtc.MimeTypePCMU), strings.ToLower(webrtc.MimeTypePCMA):
+		return &codecs.G711Payloader{}, nil
+	default:
+		return nil, webrtc.ErrNoPayloaderForCodec
+	}
+}
+
+func SendBlackImageFrames(startSequence uint16, localRTP *webrtc.TrackLocalStaticRTP, sample *media.Sample) (uint16, error) {
+	sequencer := rtp.NewFixedSequencer(startSequence)
+	payloader, _ := payloaderForCodec(localRTP.Codec())
+	p := rtp.NewPacketizer(
+		1450,
+		0, // Value is handled when writing
+		0, // Value is handled when writing
+		payloader,
+		sequencer,
+		localRTP.Codec().ClockRate,
+	)
+
+	clockRate := localRTP.Codec().ClockRate
+
+	lastSequenceNumber := startSequence
+
+	// skip packets by the number of previously dropped packets
+	for i := uint16(0); i < sample.PrevDroppedPackets; i++ {
+		lastSequenceNumber = sequencer.NextSequenceNumber()
+	}
+
+	samples := uint32(sample.Duration.Seconds()) * clockRate
+	if sample.PrevDroppedPackets > 0 {
+		p.SkipSamples(samples * uint32(sample.PrevDroppedPackets))
+	}
+
+	packets := p.Packetize(sample.Data, samples)
+
+	writeErrs := []error{}
+	for _, p := range packets {
+		if err := localRTP.WriteRTP(p); err != nil {
+			writeErrs = append(writeErrs, err)
+		}
+	}
+
+	return lastSequenceNumber + uint16(len(packets)), FlattenErrors(writeErrs)
 }

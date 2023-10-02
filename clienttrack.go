@@ -1,6 +1,8 @@
 package sfu
 
 import (
+	"image"
+	"image/color"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -8,6 +10,7 @@ import (
 	"github.com/golang/glog"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v3"
+	"github.com/pion/webrtc/v3/pkg/media"
 )
 
 type iClientTrack interface {
@@ -107,20 +110,21 @@ func (t *clientTrack) IsSimulcast() bool {
 }
 
 type SimulcastClientTrack struct {
-	id                    string
-	mu                    sync.RWMutex
-	client                *Client
-	kind                  webrtc.RTPCodecType
-	mimeType              string
-	localTrack            *webrtc.TrackLocalStaticRTP
-	remoteTrack           *simulcastTrack
-	sequenceNumber        *atomic.Uint32
-	lastQuality           *atomic.Uint32
-	lastTimestamp         *atomic.Uint32
-	lastCheckQualityTS    *atomic.Int64
-	isScreen              *atomic.Bool
-	isEnded               *atomic.Bool
-	onTrackEndedCallbacks []func()
+	id                      string
+	mu                      sync.RWMutex
+	client                  *Client
+	kind                    webrtc.RTPCodecType
+	mimeType                string
+	localTrack              *webrtc.TrackLocalStaticRTP
+	remoteTrack             *simulcastTrack
+	lastBlankSequenceNumber *atomic.Uint32
+	sequenceNumber          *atomic.Uint32
+	lastQuality             *atomic.Uint32
+	lastTimestamp           *atomic.Uint32
+	lastCheckQualityTS      *atomic.Int64
+	isScreen                *atomic.Bool
+	isEnded                 *atomic.Bool
+	onTrackEndedCallbacks   []func()
 }
 
 func (t *SimulcastClientTrack) isFirstKeyframePacket(p *rtp.Packet) bool {
@@ -162,9 +166,33 @@ func (t *SimulcastClientTrack) send(p *rtp.Packet, quality QualityLevel, lastQua
 	}
 }
 
-func (t *SimulcastClientTrack) sendBlankFrame(p *rtp.Packet, quality QualityLevel, lastQuality QualityLevel) {
-	p.Payload = getH264BlankFrame()
-	t.send(p, quality, lastQuality)
+// Currently not used, plan to use for other codec than h264
+func (t *SimulcastClientTrack) sendBlankFrame(packetRef *rtp.Packet) {
+	timestamp := t.remoteTrack.baseTS + ((packetRef.Timestamp - t.remoteTrack.remoteTrackLowBaseTS) - t.remoteTrack.remoteTrackLowBaseTS)
+	t.lastBlankSequenceNumber.Add(1)
+	sequenceNumber := t.lastBlankSequenceNumber.Load()
+
+	img := image.NewGray(image.Rect(0, 0, 8, 8))
+	for y := 0; y < 8; y++ {
+		for x := 0; x < 8; x++ {
+			img.SetGray(x, y, color.Gray{Y: 0}) // Set pixel to black
+		}
+	}
+
+	sample := &media.Sample{
+		Data:            img.Pix,
+		Timestamp:       time.Now(),
+		Duration:        time.Second,
+		PacketTimestamp: timestamp,
+	}
+
+	lastSequence, err := SendBlackImageFrames(uint16(sequenceNumber), t.localTrack, sample)
+	if err != nil {
+		glog.Error("track: error on write black frame", err)
+	}
+
+	t.sequenceNumber.Store(uint32(lastSequence))
+	t.lastBlankSequenceNumber.Store(uint32(lastSequence))
 }
 
 func (t *SimulcastClientTrack) push(p *rtp.Packet, quality QualityLevel) {
@@ -172,6 +200,8 @@ func (t *SimulcastClientTrack) push(p *rtp.Packet, quality QualityLevel) {
 	var trackQuality QualityLevel
 
 	lastQuality := t.LastQuality()
+
+	isFirstKeyframePacket := t.isFirstKeyframePacket(p)
 
 	// check if it's a first packet to send
 	if lastQuality == QualityNone && t.sequenceNumber.Load() == 0 {
@@ -189,7 +219,7 @@ func (t *SimulcastClientTrack) push(p *rtp.Packet, quality QualityLevel) {
 
 		// lastCheckQualityDuration := time.Since(time.Unix(0, t.lastCheckQualityTS.Load()))
 
-		if t.isFirstKeyframePacket(p) { // && lastCheckQualityDuration.Seconds() >= 1 {
+		if isFirstKeyframePacket { // && lastCheckQualityDuration.Seconds() >= 1 {
 			trackQuality = t.client.bitrateController.GetQuality(t)
 
 			// update latest keyframe timestamp
@@ -205,10 +235,8 @@ func (t *SimulcastClientTrack) push(p *rtp.Packet, quality QualityLevel) {
 
 			if trackQuality == QualityNone {
 				// could be because not enough bandwidth to send any track
-				// if quality none, we follow the pace of quality low packet to send the blank frame
-				glog.Warning("clienttrack: no quality level to send")
+
 				t.lastQuality.Store(uint32(trackQuality))
-				return
 			}
 		}
 	}
@@ -216,12 +244,18 @@ func (t *SimulcastClientTrack) push(p *rtp.Packet, quality QualityLevel) {
 	if trackQuality == quality {
 		t.send(p, trackQuality, lastQuality)
 	} else if trackQuality == QualityNone && quality == QualityLow {
-		// TODO:
-		// need to figure out how to send a blank frame to the client
-		// for now it will only send the low quality packet
-		//t.sendBlankFrame(p, trackQuality, lastQuality)
+		if isFirstKeyframePacket {
+			glog.Warning("clienttrack: no quality level to send")
+		}
 
-		t.send(p, QualityLow, lastQuality)
+		if t.localTrack.Codec().MimeType == webrtc.MimeTypeH264 && isFirstKeyframePacket {
+			// if codec is h264, send a blank frame once
+			p.Payload = getH264BlankFrame()
+			t.send(p, QualityLow, lastQuality)
+		} else if t.localTrack.Codec().MimeType != webrtc.MimeTypeH264 {
+			// if codec is not h264, send a low quality packet
+			t.send(p, QualityLow, lastQuality)
+		}
 	}
 }
 

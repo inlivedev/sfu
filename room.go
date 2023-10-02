@@ -58,6 +58,18 @@ type Room struct {
 	OnEvent                 func(event Event)
 }
 
+type RoomOptions struct {
+	Bitrates BitratesConfig
+	Codecs   []string
+}
+
+func DefaultRoomOptions() RoomOptions {
+	return RoomOptions{
+		Bitrates: DefaultBitrates(),
+		Codecs:   []string{webrtc.MimeTypeVP9, webrtc.MimeTypeOpus},
+	}
+}
+
 func newRoom(id, name string, sfu *SFU, roomType string) *Room {
 	localContext, cancel := context.WithCancel(sfu.context)
 

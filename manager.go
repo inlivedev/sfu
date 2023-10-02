@@ -57,7 +57,7 @@ func (m *Manager) CreateRoomID() string {
 	return GenerateID([]int{len(m.rooms)})
 }
 
-func (m *Manager) NewRoom(id, name, roomType string, bitrates BitratesConfig) (*Room, error) {
+func (m *Manager) NewRoom(id, name, roomType string, opts RoomOptions) (*Room, error) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
@@ -67,9 +67,10 @@ func (m *Manager) NewRoom(id, name, roomType string, bitrates BitratesConfig) (*
 	}
 
 	sfuOpts := sfuOptions{
-		Bitrates:   bitrates,
+		Bitrates:   opts.Bitrates,
 		IceServers: m.iceServers,
 		Mux:        m.udpMux,
+		Codecs:     opts.Codecs,
 	}
 
 	newSFU := New(m.context, sfuOpts)

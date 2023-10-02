@@ -98,6 +98,7 @@ type SFU struct {
 	callbacksOnClientRemoved []func(*Client)
 	callbacksOnClientAdded   []func(*Client)
 	Counter                  int
+	codecs                   []string
 	dataChannels             *SFUDataChannelList
 	idleChan                 chan bool
 	iceServers               []webrtc.ICEServer
@@ -116,6 +117,7 @@ type sfuOptions struct {
 	IceServers []webrtc.ICEServer
 	Mux        *UDPMux
 	Bitrates   BitratesConfig
+	Codecs     []string
 }
 
 // @Param muxPort: port for udp mux
@@ -127,6 +129,7 @@ func New(ctx context.Context, opts sfuOptions) *SFU {
 		Counter:        0,
 		context:        localCtx,
 		cancel:         cancel,
+		codecs:         opts.Codecs,
 		dataChannels:   NewSFUDataChannelList(),
 		mutex:          sync.Mutex{},
 		iceServers:     opts.IceServers,
