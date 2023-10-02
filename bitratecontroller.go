@@ -149,7 +149,6 @@ func (bc *BitrateController) getNextTrackQuality(clientTrackID string) QualityLe
 	highCount := 0
 	midCount := 0
 	lowCount := 0
-	noneCount := 0
 
 	bc.mu.Lock()
 
@@ -166,8 +165,6 @@ func (bc *BitrateController) getNextTrackQuality(clientTrackID string) QualityLe
 				midCount++
 			case QualityLow:
 				lowCount++
-			case QualityNone:
-				noneCount++
 			}
 		}
 	}
@@ -361,7 +358,7 @@ func (bc *BitrateController) GetQuality(t *SimulcastClientTrack) QualityLevel {
 	}
 
 	clientQuality := Uint32ToQualityLevel(t.client.quality.Load())
-	if clientQuality != 0 && quality > clientQuality {
+	if quality > clientQuality {
 		quality = clientQuality
 	}
 

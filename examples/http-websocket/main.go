@@ -344,8 +344,10 @@ func clientHandler(conn *websocket.Conn, messageChan chan Request, r *sfu.Room) 
 				case "high":
 					log.Println("switch to high quality")
 					client.SetQuality(sfu.QualityHigh)
+				case "none":
+					log.Println("switch to high quality")
+					client.SetQuality(sfu.QualityNone)
 				}
-
 			} else if req.Type == TypeUpdateBandwidth {
 				bandwidth := uint32(req.Data.(float64))
 				client.UpdatePublisherBandwidth(bandwidth)
