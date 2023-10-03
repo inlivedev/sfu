@@ -51,10 +51,20 @@ type ClientOptions struct {
 	EnableCongestionController bool
 }
 
+type SenderStats struct {
+	Track webrtc.TrackLocal
+	Stats stats.Stats
+}
+
+type ReceiverStats struct {
+	Track *webrtc.TrackRemote
+	Stats stats.Stats
+}
+
 type ClientStats struct {
 	mu       sync.RWMutex
-	Sender   map[webrtc.SSRC]stats.Stats
-	Receiver map[webrtc.SSRC]stats.Stats
+	Sender   map[webrtc.SSRC]SenderStats
+	Receiver map[webrtc.SSRC]ReceiverStats
 }
 
 type Client struct {
@@ -210,8 +220,8 @@ func NewClient(s *SFU, id string, peerConnectionConfig webrtc.Configuration, opt
 		cancel:        cancel,
 		clientStats: &ClientStats{
 			mu:       sync.RWMutex{},
-			Sender:   make(map[webrtc.SSRC]stats.Stats),
-			Receiver: make(map[webrtc.SSRC]stats.Stats),
+			Sender:   make(map[webrtc.SSRC]SenderStats),
+			Receiver: make(map[webrtc.SSRC]ReceiverStats),
 		},
 		canAddCandidate:            &atomic.Bool{},
 		isInRenegotiation:          &atomic.Bool{},
@@ -829,10 +839,13 @@ func (c *Client) updateReceiverStats(remoteTrack *remoteTrack) {
 
 	c.clientStats.mu.Lock()
 	defer c.clientStats.mu.Unlock()
+	senderStats := *c.statsGetter.Get(uint32(track.SSRC()))
+	c.clientStats.Receiver[track.SSRC()] = ReceiverStats{
+		Stats: senderStats,
+		Track: track,
+	}
 
-	c.clientStats.Receiver[track.SSRC()] = *c.statsGetter.Get(uint32(track.SSRC()))
-
-	remoteTrack.updateStats(c.clientStats.Receiver[track.SSRC()])
+	remoteTrack.updateStats(senderStats)
 }
 
 func (c *Client) updateSenderStats(sender *webrtc.RTPSender) {
@@ -858,7 +871,11 @@ func (c *Client) updateSenderStats(sender *webrtc.RTPSender) {
 		return
 	}
 
-	c.clientStats.Sender[ssrc] = *c.statsGetter.Get(uint32(ssrc))
+	senderStats := *c.statsGetter.Get(uint32(ssrc))
+	c.clientStats.Sender[ssrc] = SenderStats{
+		Stats: senderStats,
+		Track: sender.Track(),
+	}
 }
 
 func (c *Client) SetTracksSourceType(trackTypes map[string]TrackType) {

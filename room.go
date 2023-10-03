@@ -52,7 +52,7 @@ type Room struct {
 	mutex                   *sync.Mutex
 	sfu                     *SFU
 	State                   string
-	stats                   map[string]ClientStats
+	stats                   map[string]*ClientStats
 	Type                    string
 	extensions              []IExtension
 	OnEvent                 func(event Event)
@@ -78,7 +78,7 @@ func newRoom(id, name string, sfu *SFU, roomType string) *Room {
 		context:    localContext,
 		cancel:     cancel,
 		sfu:        sfu,
-		stats:      make(map[string]ClientStats),
+		stats:      make(map[string]*ClientStats),
 		State:      StateRoomOpen,
 		Name:       name,
 		mutex:      &sync.Mutex{},
@@ -195,7 +195,7 @@ func (r *Room) onClientLeft(client *Client) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
-	r.stats[client.ID()] = *client.Stats()
+	r.stats[client.ID()] = client.Stats()
 }
 
 func (r *Room) onClientJoined(client *Client) {
@@ -227,32 +227,79 @@ func (r *Room) GetName() string {
 //nolint:copylocks // Statistic won't use the mutex
 func (r *Room) GetStats() RoomStats {
 	var (
-		bytesReceived uint64
-		bytesSent     uint64
-		packet_lost   int64
+		bytesReceived      uint64
+		bytesSent          uint64
+		packetSentLost     int64
+		packetSent         uint64
+		packetReceivedLost int64
+		packetReceived     uint64
 	)
 
 	// make sure the stats is up to date
 	r.updateStats()
 
-	for _, cstats := range r.stats {
+	clientStats := make(map[string]*ClientTrackStats)
+
+	r.mutex.Lock()
+
+	defer r.mutex.Unlock()
+
+	for id, cstats := range r.stats {
+		cstats.mu.Lock()
+
+		if _, ok := clientStats[id]; !ok {
+			clientStats[id] = &ClientTrackStats{
+				Sents:    make([]TrackSentStats, 0),
+				Receives: make([]TrackReceiveStats, 0),
+			}
+		}
+
 		for _, stat := range cstats.Receiver {
-			bytesReceived += stat.InboundRTPStreamStats.BytesReceived
-			packet_lost += stat.InboundRTPStreamStats.PacketsLost
+			bytesReceived += stat.Stats.InboundRTPStreamStats.BytesReceived
+			packetReceivedLost += stat.Stats.InboundRTPStreamStats.PacketsLost
+			packetReceived += stat.Stats.InboundRTPStreamStats.PacketsReceived
+
+			receivedStats := TrackReceiveStats{
+				ID:             stat.Track.ID(),
+				Kind:           stat.Track.Kind().String(),
+				Codec:          stat.Track.Codec().MimeType,
+				PacketsLost:    stat.Stats.InboundRTPStreamStats.PacketsLost,
+				PacketReceived: stat.Stats.InboundRTPStreamStats.PacketsReceived,
+			}
+
+			clientStats[id].Receives = append(clientStats[id].Receives, receivedStats)
 		}
 
 		for _, stat := range cstats.Sender {
-			bytesSent += stat.OutboundRTPStreamStats.BytesSent
+			bytesSent += stat.Stats.OutboundRTPStreamStats.BytesSent
+			packetSentLost += stat.Stats.RemoteInboundRTPStreamStats.PacketsLost
+			packetSent += stat.Stats.OutboundRTPStreamStats.PacketsSent
+
+			sentStats := TrackSentStats{
+				ID:          stat.Track.ID(),
+				Kind:        stat.Track.Kind().String(),
+				PacketsLost: stat.Stats.RemoteInboundRTPStreamStats.PacketsLost,
+				PacketSent:  stat.Stats.OutboundRTPStreamStats.PacketsSent,
+				ByteSent:    stat.Stats.OutboundRTPStreamStats.BytesSent,
+			}
+
+			clientStats[id].Sents = append(clientStats[id].Sents, sentStats)
 		}
+
+		cstats.mu.Unlock()
 	}
 
 	return RoomStats{
-		ActiveSessions: r.sfu.TotalActiveSessions(),
-		Clients:        len(r.stats),
-		PacketLost:     packet_lost,
-		BytesReceived:  bytesReceived,
-		ByteSent:       bytesSent,
-		Timestamp:      time.Now(),
+		ActiveSessions:     r.sfu.TotalActiveSessions(),
+		ClientsCount:       len(r.stats),
+		PacketSentLost:     packetSentLost,
+		PacketReceivedLost: packetReceivedLost,
+		PacketReceived:     packetReceived,
+		PacketSent:         packetSent,
+		BytesReceived:      bytesReceived,
+		ByteSent:           bytesSent,
+		Timestamp:          time.Now(),
+		ClientStats:        clientStats,
 	}
 }
 
@@ -261,7 +308,7 @@ func (r *Room) updateStats() {
 	defer r.mutex.Unlock()
 
 	for _, client := range r.sfu.clients.GetClients() {
-		r.stats[client.ID()] = *client.Stats()
+		r.stats[client.ID()] = client.Stats()
 	}
 }
 
