@@ -206,17 +206,17 @@ func (t *SimulcastClientTrack) push(p *rtp.Packet, quality QualityLevel) {
 	// check if it's a first packet to send
 	if lastQuality == QualityNone && t.sequenceNumber.Load() == 0 {
 		// we try to send the low quality first	if the track is active and fallback to upper quality if not
-		if t.remoteTrack.isTrackActive(QualityLow) {
+		if t.remoteTrack.remoteTrackLow != nil && quality == QualityLow {
 			trackQuality = QualityLow
 			t.lastQuality.Store(uint32(QualityLow))
 			// send PLI to make sure the client will receive the first frame
 			t.remoteTrack.sendPLI(QualityLow)
-		} else if t.remoteTrack.isTrackActive(QualityMid) {
+		} else if t.remoteTrack.remoteTrackMid != nil && quality == QualityMid {
 			trackQuality = QualityMid
 			t.lastQuality.Store(uint32(QualityMid))
 			// send PLI to make sure the client will receive the first frame
 			t.remoteTrack.sendPLI(QualityMid)
-		} else if t.remoteTrack.isTrackActive(QualityHigh) {
+		} else if t.remoteTrack.remoteTrackHigh != nil && quality == QualityHigh {
 			trackQuality = QualityHigh
 			t.lastQuality.Store(uint32(QualityHigh))
 			// send PLI to make sure the client will receive the first frame
@@ -236,7 +236,6 @@ func (t *SimulcastClientTrack) push(p *rtp.Packet, quality QualityLevel) {
 
 		if isFirstKeyframePacket { // && lastCheckQualityDuration.Seconds() >= 1 {
 			trackQuality = t.client.bitrateController.GetQuality(t)
-
 			// update latest keyframe timestamp
 			// TODO: currently not use anywhere but useful to detect if the track is active or need to refresh full picture
 			switch quality {

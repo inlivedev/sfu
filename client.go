@@ -255,6 +255,8 @@ func NewClient(s *SFU, id string, peerConnectionConfig webrtc.Configuration, opt
 	peerConnection.OnTrack(func(remoteTrack *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
 		var track ITrack
 
+		glog.Info("client: new track ", remoteTrack.ID(), " Kind:", remoteTrack.Kind(), " Codec: ", remoteTrack.Codec().MimeType, " RID: ", remoteTrack.RID())
+
 		if remoteTrack.RID() == "" {
 			// not simulcast
 			track = newTrack(client, remoteTrack, receiver)
