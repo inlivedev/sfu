@@ -534,16 +534,22 @@ func (t *simulcastTrack) isTrackActive(quality QualityLevel) bool {
 func (t *simulcastTrack) sendPLI(quality QualityLevel) {
 	switch quality {
 	case QualityHigh:
-		if err := t.SendPLI(t.remoteTrackHigh.track); err != nil {
-			glog.Error("client: error sending PLI ", err)
+		if t.remoteTrackHigh != nil {
+			if err := t.SendPLI(t.remoteTrackHigh.track); err != nil {
+				glog.Error("client: error sending PLI ", err)
+			}
 		}
 	case QualityMid:
-		if err := t.SendPLI(t.remoteTrackMid.track); err != nil {
-			glog.Error("client: error sending PLI ", err)
+		if t.remoteTrackMid != nil {
+			if err := t.SendPLI(t.remoteTrackMid.track); err != nil {
+				glog.Error("client: error sending PLI ", err)
+			}
 		}
 	case QualityLow:
-		if err := t.SendPLI(t.remoteTrackLow.track); err != nil {
-			glog.Error("client: error sending PLI ", err)
+		if t.remoteTrackLow != nil {
+			if err := t.SendPLI(t.remoteTrackLow.track); err != nil {
+				glog.Error("client: error sending PLI ", err)
+			}
 		}
 	}
 }

@@ -27,7 +27,9 @@ func TestRoomDataChannel(t *testing.T) {
 	roomName := "test-room"
 
 	// create new room
-	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal, DefaultBitrates())
+	roomOpts := DefaultRoomOptions()
+	roomOpts.Codecs = []string{webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
+	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal, roomOpts)
 	require.NoError(t, err, "error creating room: %v", err)
 	pc1, client1, _ := CreateDataPair(ctx, testRoom, roomManager.options.IceServers, "peer1")
 	pc2, client2, _ := CreateDataPair(ctx, testRoom, roomManager.options.IceServers, "peer2")
@@ -113,7 +115,9 @@ func TestRoomDataChannelWithClientID(t *testing.T) {
 	roomName := "test-room"
 
 	// create new room
-	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal, DefaultBitrates())
+	roomOpts := DefaultRoomOptions()
+	roomOpts.Codecs = []string{webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
+	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal, roomOpts)
 	require.NoError(t, err, "error creating room: %v", err)
 	pc1, client1, _ := CreateDataPair(ctx, testRoom, roomManager.options.IceServers, "peer1")
 	pc2, client2, _ := CreateDataPair(ctx, testRoom, roomManager.options.IceServers, "peer2")

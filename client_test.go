@@ -30,7 +30,9 @@ func TestTracksManualSubscribe(t *testing.T) {
 	peerCount := 5
 
 	// create new room
-	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal, DefaultBitrates())
+	roomOpts := DefaultRoomOptions()
+	roomOpts.Codecs = []string{webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
+	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal, roomOpts)
 	require.NoError(t, err, "error creating room: %v", err)
 
 	tracksAddedChan := make(chan int)
@@ -117,7 +119,9 @@ func TestAutoSubscribeTracks(t *testing.T) {
 	peerCount := 5
 
 	// create new room
-	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal, DefaultBitrates())
+	roomOpts := DefaultRoomOptions()
+	roomOpts.Codecs = []string{webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
+	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal, roomOpts)
 	require.NoError(t, err, "error creating room: %v", err)
 
 	trackChan := make(chan bool)
@@ -182,7 +186,9 @@ func TestSimulcastTrack(t *testing.T) {
 	roomName := "test-room"
 
 	// create new room
-	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal, DefaultBitrates())
+	roomOpts := DefaultRoomOptions()
+	roomOpts.Codecs = []string{webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
+	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal, roomOpts)
 	require.NoError(t, err, "error creating room: %v", err)
 	client1, pc1 := addSimulcastPair(t, ctx, testRoom, "peer1")
 	client2, pc2 := addSimulcastPair(t, ctx, testRoom, "peer2")

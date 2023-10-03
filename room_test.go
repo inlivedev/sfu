@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/golang/glog"
+	"github.com/pion/webrtc/v3"
 	"github.com/stretchr/testify/require"
 )
 
@@ -24,7 +25,9 @@ func TestRoomCreateAndClose(t *testing.T) {
 	roomName := "test-room"
 
 	// create new room
-	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal, DefaultBitrates())
+	roomOpts := DefaultRoomOptions()
+	roomOpts.Codecs = []string{webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
+	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal, roomOpts)
 	require.NoErrorf(t, err, "error creating new room: %v", err)
 
 	// add a new client to room
@@ -68,7 +71,9 @@ func TestRoomJoinLeftEvent(t *testing.T) {
 	clients := make(map[string]*Client)
 
 	// create new room
-	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal, DefaultBitrates())
+	roomOpts := DefaultRoomOptions()
+	roomOpts.Codecs = []string{webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
+	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal, roomOpts)
 	require.NoError(t, err, "error creating room: %v", err)
 	leftChan := make(chan bool)
 	joinChan := make(chan bool)
@@ -139,7 +144,9 @@ func TestRoomStats(t *testing.T) {
 	clients := make(map[string]*Client)
 
 	// create new room
-	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal, DefaultBitrates())
+	roomOpts := DefaultRoomOptions()
+	roomOpts.Codecs = []string{webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
+	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal, roomOpts)
 	require.NoError(t, err, "error creating room: %v", err)
 	joinChan := make(chan bool)
 	peerCount := 0

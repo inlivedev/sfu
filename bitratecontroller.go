@@ -15,10 +15,11 @@ var (
 )
 
 type bitrateClaim struct {
-	track   iClientTrack
-	bitrate uint32
-	quality QualityLevel
-	active  bool
+	track     iClientTrack
+	bitrate   uint32
+	quality   QualityLevel
+	active    bool
+	simulcast bool
 }
 
 type bitrateController struct {
@@ -123,7 +124,7 @@ func (bc *bitrateController) setQuality(clientTrackID string, quality QualityLev
 	}
 }
 
-func (bc *bitrateController) setClaim(clientTrackID string, active bool) {
+func (bc *bitrateController) setClaimActive(clientTrackID string, active bool) {
 	bc.mu.RLock()
 	defer bc.mu.RUnlock()
 
@@ -131,6 +132,40 @@ func (bc *bitrateController) setClaim(clientTrackID string, active bool) {
 		claim.active = active
 		bc.claims[clientTrackID] = claim
 	}
+}
+
+func (bc *bitrateController) setSimulcastClaim(clientTrackID string, simulcast bool) {
+	bc.mu.RLock()
+	defer bc.mu.RUnlock()
+
+	if claim, ok := bc.claims[clientTrackID]; ok {
+		claim.simulcast = simulcast
+		bc.claims[clientTrackID] = claim
+	}
+}
+
+// this handle some simulcast failed to send mid and low track, only high track available
+// by default we just send the high track that is only available
+func (bc *bitrateController) checkAllTrackActive(claim *bitrateClaim) bool {
+	track, ok := claim.track.(*SimulcastClientTrack)
+	if !ok || (!track.remoteTrack.isTrackActive(QualityMid) && !track.remoteTrack.isTrackActive(QualityLow)) {
+		if !claim.active {
+			bc.setClaimActive(claim.track.ID(), true)
+		}
+
+		if claim.quality != QualityHigh {
+			bc.setQuality(claim.track.ID(), QualityHigh)
+		}
+
+		// this will force the current track identified as non simulcast track
+		if claim.simulcast {
+			bc.setSimulcastClaim(claim.track.ID(), false)
+		}
+
+		return false
+	}
+
+	return true
 }
 
 // this should be called to check if the quality must be reduced because there is an unactive claim need to fit in the bandwidth
@@ -145,6 +180,11 @@ func (bc *bitrateController) getNextTrackQuality(clientTrackID string) QualityLe
 		return QualityNone
 	}
 
+	// check if the simulcast tracks all available
+	if !bc.checkAllTrackActive(claim) {
+		return QualityHigh
+	}
+
 	inActiveBitrates := uint32(0)
 	highCount := 0
 	midCount := 0
@@ -157,7 +197,7 @@ func (bc *bitrateController) getNextTrackQuality(clientTrackID string) QualityLe
 			inActiveBitrates += claim.bitrate
 		}
 
-		if claim.track.IsSimulcast() {
+		if claim.simulcast {
 			switch claim.quality {
 			case QualityHigh:
 				highCount++
@@ -189,7 +229,7 @@ func (bc *bitrateController) getNextTrackQuality(clientTrackID string) QualityLe
 
 		if nextQuality == QualityNone {
 			// unactivate the claim instead of reducing to none to make sure we still have claimed bitrate
-			bc.setClaim(clientTrackID, false)
+			bc.setClaimActive(clientTrackID, false)
 			return nextQuality
 		}
 
@@ -208,7 +248,7 @@ func (bc *bitrateController) getNextTrackQuality(clientTrackID string) QualityLe
 			return QualityNone
 		}
 
-		bc.setClaim(clientTrackID, true)
+		bc.setClaimActive(clientTrackID, true)
 	}
 
 	if claim.quality < QualityHigh && claim.active {
@@ -288,10 +328,11 @@ func (bc *bitrateController) addClaim(clientTrack iClientTrack, quality QualityL
 	}
 
 	bc.claims[clientTrack.ID()] = bitrateClaim{
-		track:   clientTrack,
-		quality: quality,
-		bitrate: bitrate,
-		active:  true,
+		track:     clientTrack,
+		quality:   quality,
+		simulcast: clientTrack.IsSimulcast(),
+		bitrate:   bitrate,
+		active:    true,
 	}
 
 	clientTrack.OnTrackEnded(func() {

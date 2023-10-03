@@ -58,7 +58,9 @@ func main() {
 	roomName := "test-room"
 
 	// create new room
-	defaultRoom, _ := roomManager.NewRoom(roomID, roomName, sfu.RoomTypeLocal, sfu.DefaultRoomOptions())
+	roomsOpts := sfu.DefaultRoomOptions()
+	roomsOpts.Codecs = []string{webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
+	defaultRoom, _ := roomManager.NewRoom(roomID, roomName, sfu.RoomTypeLocal, roomsOpts)
 
 	fakeClientCount := 0
 	localIp, _ := sfu.GetLocalIp()
