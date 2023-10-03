@@ -261,9 +261,6 @@ func NewClient(s *SFU, id string, peerConnectionConfig webrtc.Configuration, opt
 			if err := client.tracks.Add(track); err != nil {
 				glog.Error("client: error add track ", err)
 			}
-
-			client.onTrack(track)
-			track.SetAsProcessed()
 		} else {
 			// simulcast
 			var simulcast *simulcastTrack
@@ -284,13 +281,11 @@ func NewClient(s *SFU, id string, peerConnectionConfig webrtc.Configuration, opt
 			} else if simulcast, ok = track.(*simulcastTrack); ok {
 				simulcast.AddRemoteTrack(remoteTrack, receiver)
 			}
+		}
 
-			// only process track when the lowest quality is available
-			if simulcast.remoteTrackLow != nil && !track.IsProcessed() {
-				client.onTrack(track)
-				track.SetAsProcessed()
-			}
-
+		if !track.IsProcessed() {
+			client.onTrack(track)
+			track.SetAsProcessed()
 		}
 	})
 

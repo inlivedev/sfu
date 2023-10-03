@@ -252,9 +252,12 @@ func (t *SimulcastClientTrack) push(p *rtp.Packet, quality QualityLevel) {
 			// if codec is h264, send a blank frame once
 			p.Payload = getH264BlankFrame()
 			t.send(p, QualityLow, lastQuality)
-		} else if t.localTrack.Codec().MimeType != webrtc.MimeTypeH264 {
+		} else if t.localTrack.Codec().MimeType != webrtc.MimeTypeH264 && t.remoteTrack.isTrackActive(QualityLow) {
 			// if codec is not h264, send a low quality packet
 			t.send(p, QualityLow, lastQuality)
+		} else {
+			// last effort, send the last quality
+			t.send(p, lastQuality, lastQuality)
 		}
 	}
 }
