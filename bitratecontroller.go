@@ -204,7 +204,7 @@ func (bc *bitrateController) getNextTrackQuality(clientTrackID string) QualityLe
 	}
 
 	// check if the simulcast tracks all available
-	if ok, quality := bc.checkAllTrackActive(claim); !ok {
+	if ok, quality := bc.checkAllTrackActive(claim); ok {
 		return quality
 	}
 

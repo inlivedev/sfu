@@ -254,6 +254,8 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		ingressQualityLimitationReason: &atomic.Value{},
 	}
 
+	client.ingressQualityLimitationReason.Store("none")
+
 	client.clientStats = &ClientStats{
 		senderMu:   sync.RWMutex{},
 		receiverMu: sync.RWMutex{},
@@ -899,8 +901,8 @@ func (c *Client) updateSenderStats(sender *webrtc.RTPSender) {
 		return
 	}
 
-	c.clientStats.senderMu.RLock()
-	defer c.clientStats.senderMu.RUnlock()
+	c.clientStats.senderMu.Lock()
+	defer c.clientStats.senderMu.Unlock()
 
 	ssrc := sender.GetParameters().Encodings[0].SSRC
 
