@@ -513,3 +513,14 @@ func (bc *bitrateController) getDistributedQuality(availableBandwidth uint32) Qu
 		return QualityLow
 	}
 }
+
+func (bc *bitrateController) totalSentBitrates() uint32 {
+	total := uint32(0)
+	bc.mu.Lock()
+	defer bc.mu.Unlock()
+	for _, claim := range bc.claims {
+		total += claim.track.getCurrentBitrate()
+	}
+
+	return total
+}

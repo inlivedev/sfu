@@ -42,21 +42,23 @@ func TestRoomDataChannel(t *testing.T) {
 	chatChan := make(chan string)
 
 	var onDataChannel = func(d *webrtc.DataChannel) {
-		t.Log("data channel opened ", d.Label())
+		if d.Label() == "chat" {
+			t.Log("data channel opened ", d.Label())
 
-		d.OnMessage(func(msg webrtc.DataChannelMessage) {
-			chatChan <- string(msg.Data)
-			if string(msg.Data) == "hello" {
-				d.Send([]byte("world"))
-			}
-		})
-
-		if d.ReadyState() == webrtc.DataChannelStateOpen {
-			d.Send([]byte("hello"))
-		} else {
-			d.OnOpen(func() {
-				d.Send([]byte("hello"))
+			d.OnMessage(func(msg webrtc.DataChannelMessage) {
+				chatChan <- string(msg.Data)
+				if string(msg.Data) == "hello" {
+					d.Send([]byte("world"))
+				}
 			})
+
+			if d.ReadyState() == webrtc.DataChannelStateOpen {
+				d.Send([]byte("hello"))
+			} else {
+				d.OnOpen(func() {
+					d.Send([]byte("hello"))
+				})
+			}
 		}
 	}
 

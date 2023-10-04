@@ -257,3 +257,43 @@ func addSimulcastPair(t *testing.T, ctx context.Context, room *Room, peerName st
 
 	return client, pc
 }
+
+func TestClientDataChannel(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// create room manager first before create new room
+	roomManager := NewManager(ctx, "test-room-datachannel", Options{
+		WebRTCPort:               40011,
+		ConnectRemoteRoomTimeout: 30 * time.Second,
+		IceServers:               DefaultTestIceServers(),
+	})
+
+	roomID := roomManager.CreateRoomID()
+	roomName := "test-room"
+
+	// create new room
+	roomOpts := DefaultRoomOptions()
+	roomOpts.Codecs = []string{webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
+	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal, roomOpts)
+	require.NoError(t, err, "error creating room: %v", err)
+	pc1, _, _ := CreateDataPair(ctx, testRoom, roomManager.options.IceServers, "peer1")
+
+	dcChan := make(chan *webrtc.DataChannel)
+	pc1.OnDataChannel(func(c *webrtc.DataChannel) {
+		dcChan <- c
+	})
+
+	timeout, cancelTimeout := context.WithTimeout(ctx, 10*time.Second)
+
+	defer cancelTimeout()
+
+	select {
+	case <-timeout.Done():
+		t.Fatal("timeout waiting for data channel")
+	case dc := <-dcChan:
+		require.Equal(t, "stats", dc.Label())
+	}
+}

@@ -102,12 +102,26 @@ func main() {
 		reader(conn, messageChan)
 	}))
 
+	http.HandleFunc("/stats", func(w http.ResponseWriter, r *http.Request) {
+		statsHandler(w, r, defaultRoom)
+	})
+
 	log.Print("Listening on http://localhost:8000 ...")
 
 	err := http.ListenAndServe(":8000", nil)
 	if err != nil {
 		log.Panic(err)
 	}
+}
+
+func statsHandler(w http.ResponseWriter, r *http.Request, room *sfu.Room) {
+	stats := room.Stats()
+
+	statsJSON, _ := json.Marshal(stats)
+
+	w.Header().Set("Content-Type", "application/json")
+
+	_, _ = w.Write([]byte(statsJSON))
 }
 
 func reader(conn *websocket.Conn, messageChan chan Request) {

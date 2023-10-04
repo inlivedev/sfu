@@ -27,10 +27,14 @@ type TrackReceiveStats struct {
 }
 
 type ClientTrackStats struct {
-	ID       string              `json:"id"`
-	Name     string              `json:"name"`
-	Sents    []TrackSentStats    `json:"sent_track_stats"`
-	Receives []TrackReceiveStats `json:"receive_track_stats"`
+	ID                       string              `json:"id"`
+	Name                     string              `json:"name"`
+	PublisherBandwidth       uint32              `json:"publisher_bandwidth"`
+	ConsumerBandwidth        uint32              `json:"consumer_bandwidth"`
+	CurrentConsumerBitrate   uint32              `json:"current_bitrate"`
+	CurrentPublishLimitation string              `json:"current_publish_limitation"`
+	Sents                    []TrackSentStats    `json:"sent_track_stats"`
+	Receives                 []TrackReceiveStats `json:"receive_track_stats"`
 }
 
 type RoomStats struct {

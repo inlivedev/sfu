@@ -2,6 +2,7 @@ package sfu
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -61,11 +62,19 @@ type ReceiverStats struct {
 	Stats stats.Stats
 }
 
+type RemoteClientStats struct {
+	AvailableOutgoingBitrate uint64 `json:"available_outgoing_bitrate"`
+	// this will be filled by the tracks stats
+	// possible value are "cpu","bandwidth","both","none"
+	QualityLimitationReason string `json:"quality_limitation_reason"`
+}
+
 type ClientStats struct {
-	mu       sync.RWMutex
-	Client   *Client
-	Sender   map[webrtc.SSRC]SenderStats
-	Receiver map[webrtc.SSRC]ReceiverStats
+	senderMu   sync.RWMutex
+	receiverMu sync.RWMutex
+	Client     *Client
+	Sender     map[webrtc.SSRC]SenderStats
+	Receiver   map[webrtc.SSRC]ReceiverStats
 }
 
 type Client struct {
@@ -104,17 +113,18 @@ type Client struct {
 	OnAllowedRemoteRenegotiation      func()
 	OnTracksAvailable                 func([]ITrack)
 	// onTrack is used by SFU to take action when a new track is added to the client
-	onTrack                 func(ITrack)
-	onTracksAdded           func([]ITrack)
-	options                 ClientOptions
-	statsGetter             stats.Getter
-	tracks                  *trackList
-	negotiationNeeded       *atomic.Bool
-	pendingRemoteCandidates []webrtc.ICECandidateInit
-	pendingLocalCandidates  []*webrtc.ICECandidate
-	quality                 *atomic.Uint32
-	egressBandwidth         *atomic.Uint32
-	ingressBandwidth        *atomic.Uint32
+	onTrack                        func(ITrack)
+	onTracksAdded                  func([]ITrack)
+	options                        ClientOptions
+	statsGetter                    stats.Getter
+	tracks                         *trackList
+	negotiationNeeded              *atomic.Bool
+	pendingRemoteCandidates        []webrtc.ICECandidateInit
+	pendingLocalCandidates         []*webrtc.ICECandidate
+	quality                        *atomic.Uint32
+	egressBandwidth                *atomic.Uint32
+	ingressBandwidth               *atomic.Uint32
+	ingressQualityLimitationReason *atomic.Value
 }
 
 func DefaultClientOptions() ClientOptions {
@@ -216,44 +226,56 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 	var quality atomic.Uint32
 	quality.Store(QualityHigh)
 	client := &Client{
-		id:                         id,
-		estimatorChan:              estimatorChan,
-		context:                    localCtx,
-		cancel:                     cancel,
-		canAddCandidate:            &atomic.Bool{},
-		isInRenegotiation:          &atomic.Bool{},
-		isInRemoteNegotiation:      &atomic.Bool{},
-		IsSubscribeAllTracks:       &atomic.Bool{},
-		dataChannels:               NewDataChannelList(),
-		mu:                         sync.Mutex{},
-		negotiationNeeded:          &atomic.Bool{},
-		peerConnection:             peerConnection,
-		state:                      &stateNew,
-		tracks:                     newTrackList(),
-		options:                    opts,
-		pendingReceivedTracks:      newTrackList(),
-		pendingPublishedTracks:     newTrackList(),
-		pendingRemoteRenegotiation: &atomic.Bool{},
-		publishedTracks:            newTrackList(),
-		queue:                      NewQueue(localCtx),
-		sfu:                        s,
-		statsGetter:                statsGetter,
-		quality:                    &quality,
-		egressBandwidth:            &atomic.Uint32{},
-		ingressBandwidth:           &atomic.Uint32{},
+		id:                             id,
+		estimatorChan:                  estimatorChan,
+		context:                        localCtx,
+		cancel:                         cancel,
+		canAddCandidate:                &atomic.Bool{},
+		isInRenegotiation:              &atomic.Bool{},
+		isInRemoteNegotiation:          &atomic.Bool{},
+		IsSubscribeAllTracks:           &atomic.Bool{},
+		dataChannels:                   NewDataChannelList(),
+		mu:                             sync.Mutex{},
+		negotiationNeeded:              &atomic.Bool{},
+		peerConnection:                 peerConnection,
+		state:                          &stateNew,
+		tracks:                         newTrackList(),
+		options:                        opts,
+		pendingReceivedTracks:          newTrackList(),
+		pendingPublishedTracks:         newTrackList(),
+		pendingRemoteRenegotiation:     &atomic.Bool{},
+		publishedTracks:                newTrackList(),
+		queue:                          NewQueue(localCtx),
+		sfu:                            s,
+		statsGetter:                    statsGetter,
+		quality:                        &quality,
+		egressBandwidth:                &atomic.Uint32{},
+		ingressBandwidth:               &atomic.Uint32{},
+		ingressQualityLimitationReason: &atomic.Value{},
 	}
 
 	client.clientStats = &ClientStats{
-		mu:       sync.RWMutex{},
-		Client:   client,
-		Sender:   make(map[webrtc.SSRC]SenderStats),
-		Receiver: make(map[webrtc.SSRC]ReceiverStats),
+		senderMu:   sync.RWMutex{},
+		receiverMu: sync.RWMutex{},
+		Client:     client,
+		Sender:     make(map[webrtc.SSRC]SenderStats),
+		Receiver:   make(map[webrtc.SSRC]ReceiverStats),
 	}
 
 	client.bitrateController = newbitrateController(client)
 
-	// make sure the exisiting data channels is created on new clients
-	s.createExistingDataChannels(client)
+	client.OnConnectionStateChanged(func(connectionState webrtc.PeerConnectionState) {
+		if connectionState == webrtc.PeerConnectionStateConnected {
+			// make sure the exisiting data channels is created on new clients
+			s.createExistingDataChannels(client)
+
+			if _, err := client.createInternalDataChannel("stats", client.onStatsMessage); err != nil {
+				glog.Error("client: error create stats data channel ", err)
+			}
+
+			client.renegotiate()
+		}
+	})
 
 	peerConnection.OnICEConnectionStateChange(func(connectionState webrtc.ICEConnectionState) {
 		glog.Info("client: ice connection state changed ", connectionState)
@@ -287,7 +309,9 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 
 			id := remoteTrack.Msid()
 
+			client.mu.Lock()
 			track, err = client.tracks.Get(id) // not found because the track is not added yet due to race condition
+
 			if err != nil {
 				// if track not found, add it
 				track = newSimulcastTrack(client, remoteTrack, receiver)
@@ -301,8 +325,14 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 				simulcast.AddRemoteTrack(remoteTrack, receiver)
 			}
 
-			// only process track when the lowest quality is available
-			if simulcast.remoteTrackHigh != nil && !track.IsProcessed() {
+			client.mu.Unlock()
+
+			// only process track when the highest quality is available
+			simulcast.mu.Lock()
+			isHighAvailable := simulcast.remoteTrackHigh != nil
+			simulcast.mu.Unlock()
+
+			if isHighAvailable && !track.IsProcessed() {
 				client.onTrack(track)
 				track.SetAsProcessed()
 			}
@@ -845,8 +875,8 @@ func (c *Client) updateReceiverStats(remoteTrack *remoteTrack) {
 		return
 	}
 
-	c.clientStats.mu.Lock()
-	defer c.clientStats.mu.Unlock()
+	c.clientStats.receiverMu.Lock()
+	defer c.clientStats.receiverMu.Unlock()
 	senderStats := *c.statsGetter.Get(uint32(track.SSRC()))
 	c.clientStats.Receiver[track.SSRC()] = ReceiverStats{
 		Stats: senderStats,
@@ -869,15 +899,10 @@ func (c *Client) updateSenderStats(sender *webrtc.RTPSender) {
 		return
 	}
 
-	c.clientStats.mu.RLock()
-	defer c.clientStats.mu.RUnlock()
+	c.clientStats.senderMu.RLock()
+	defer c.clientStats.senderMu.RUnlock()
 
 	ssrc := sender.GetParameters().Encodings[0].SSRC
-
-	_, ok := c.clientStats.Sender[ssrc]
-	if !ok {
-		return
-	}
 
 	senderStats := *c.statsGetter.Get(uint32(ssrc))
 	c.clientStats.Sender[ssrc] = SenderStats{
@@ -981,6 +1006,9 @@ func (c *Client) GetEstimatedBandwidth() uint32 {
 	return bw
 }
 
+// This should get from the publisher client using RTCIceCandidatePairStats.availableOutgoingBitrate
+// from client stats. It should be done through DataChannel so it won't required additional implementation on API endpoints
+// where this SFU is used.
 func (c *Client) UpdatePublisherBandwidth(bitrate uint32) {
 	if bitrate == 0 {
 		return
@@ -1003,7 +1031,32 @@ func (c *Client) createDataChannel(label string, initOpts *webrtc.DataChannelIni
 	c.sfu.setupMessageForwarder(c.ID(), newDc)
 	c.dataChannels.Add(newDc)
 
+	return nil
+}
+
+func (c *Client) createInternalDataChannel(label string, msgCallback func(msg webrtc.DataChannelMessage)) (*webrtc.DataChannel, error) {
+	ordered := true
+	newDc, err := c.peerConnection.CreateDataChannel(label, &webrtc.DataChannelInit{Ordered: &ordered})
+	if err != nil {
+		return nil, err
+	}
+
+	newDc.OnMessage(msgCallback)
+
 	c.renegotiate()
 
-	return nil
+	return newDc, nil
+}
+
+func (c *Client) onStatsMessage(msg webrtc.DataChannelMessage) {
+	var statsMessage RemoteClientStats
+
+	if err := json.Unmarshal(msg.Data, &statsMessage); err != nil {
+		glog.Error("client: error unmarshal stats message ", err)
+		return
+	}
+
+	c.ingressQualityLimitationReason.Store(statsMessage.QualityLimitationReason)
+
+	c.UpdatePublisherBandwidth(uint32(statsMessage.AvailableOutgoingBitrate))
 }

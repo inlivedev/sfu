@@ -228,14 +228,6 @@ func (r *Room) SFU() *SFU {
 	return r.sfu
 }
 
-func (r *Room) ID() string {
-	return r.id
-}
-
-func (r *Room) Name() string {
-	return r.name
-}
-
 //nolint:copylocks // Statistic won't use the mutex
 func (r *Room) Stats() RoomStats {
 	var (
@@ -257,17 +249,20 @@ func (r *Room) Stats() RoomStats {
 	defer r.mutex.Unlock()
 
 	for id, cstats := range r.stats {
-		cstats.mu.Lock()
-
 		if _, ok := clientStats[id]; !ok {
 			clientStats[id] = &ClientTrackStats{
-				ID:       cstats.Client.id,
-				Name:     cstats.Client.name,
-				Sents:    make([]TrackSentStats, 0),
-				Receives: make([]TrackReceiveStats, 0),
+				ID:                       cstats.Client.id,
+				Name:                     cstats.Client.name,
+				ConsumerBandwidth:        cstats.Client.egressBandwidth.Load(),
+				PublisherBandwidth:       cstats.Client.ingressBandwidth.Load(),
+				Sents:                    make([]TrackSentStats, 0),
+				Receives:                 make([]TrackReceiveStats, 0),
+				CurrentPublishLimitation: cstats.Client.ingressQualityLimitationReason.Load().(string),
+				CurrentConsumerBitrate:   cstats.Client.bitrateController.totalSentBitrates(),
 			}
 		}
 
+		cstats.receiverMu.Lock()
 		for _, stat := range cstats.Receiver {
 			bytesReceived += stat.Stats.InboundRTPStreamStats.BytesReceived
 			packetReceivedLost += stat.Stats.InboundRTPStreamStats.PacketsLost
@@ -284,6 +279,9 @@ func (r *Room) Stats() RoomStats {
 			clientStats[id].Receives = append(clientStats[id].Receives, receivedStats)
 		}
 
+		cstats.receiverMu.Unlock()
+
+		cstats.senderMu.Lock()
 		for _, stat := range cstats.Sender {
 			bytesSent += stat.Stats.OutboundRTPStreamStats.BytesSent
 			packetSentLost += stat.Stats.RemoteInboundRTPStreamStats.PacketsLost
@@ -300,7 +298,7 @@ func (r *Room) Stats() RoomStats {
 			clientStats[id].Sents = append(clientStats[id].Sents, sentStats)
 		}
 
-		cstats.mu.Unlock()
+		cstats.senderMu.Unlock()
 	}
 
 	return RoomStats{
