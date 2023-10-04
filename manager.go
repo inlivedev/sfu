@@ -79,7 +79,7 @@ func (m *Manager) NewRoom(id, name, roomType string, opts RoomOptions) (*Room, e
 
 	newSFU := New(m.context, sfuOpts)
 
-	room := newRoom(id, name, newSFU, roomType)
+	room := newRoom(id, name, newSFU, roomType, opts)
 
 	for _, ext := range m.extension {
 		ext.OnNewRoom(m, room)

@@ -265,3 +265,47 @@ Loop:
 
 	glog.Info(totalClientIngressBytes, roomStats.ByteSent)
 }
+
+func TestRoomAddClientTimeout(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// create room manager first before create new room
+	roomManager := NewManager(ctx, "test", Options{
+		WebRTCPort:               40012,
+		ConnectRemoteRoomTimeout: 30 * time.Second,
+		IceServers:               DefaultTestIceServers(),
+	})
+
+	roomID := roomManager.CreateRoomID()
+	roomName := "test-room"
+
+	// create new room
+	roomOpts := DefaultRoomOptions()
+	timeout := 5 * time.Second
+	roomOpts.ClientTimeout = timeout
+	roomOpts.Codecs = []string{webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
+	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal, roomOpts)
+	require.NoErrorf(t, err, "error creating new room: %v", err)
+
+	// add a new client to room
+	// you can also get the client by using r.GetClient(clientID)
+	id := testRoom.CreateClientID(testRoom.SFU().Counter)
+	client, err := testRoom.AddClient(id, id, DefaultClientOptions())
+
+	clientRemovedChan := make(chan *Client)
+
+	testRoom.SFU().OnClientRemoved(func(c *Client) {
+		clientRemovedChan <- c
+	})
+
+	ctxTimeout, cancelTimeout := context.WithTimeout(ctx, 20*time.Second)
+	defer cancelTimeout()
+
+	select {
+	case <-ctxTimeout.Done():
+		t.Fatal("timeout waiting for client removed event")
+	case c := <-clientRemovedChan:
+		require.Equal(t, c.ID(), client.ID())
+	}
+}

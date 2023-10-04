@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/golang/glog"
 	"github.com/pion/webrtc/v3"
 )
 
@@ -56,21 +57,24 @@ type Room struct {
 	kind                    string
 	extensions              []IExtension
 	OnEvent                 func(event Event)
+	options                 RoomOptions
 }
 
 type RoomOptions struct {
-	Bitrates BitratesConfig
-	Codecs   []string
+	Bitrates      BitratesConfig
+	Codecs        []string
+	ClientTimeout time.Duration
 }
 
 func DefaultRoomOptions() RoomOptions {
 	return RoomOptions{
-		Bitrates: DefaultBitrates(),
-		Codecs:   []string{webrtc.MimeTypeVP9, webrtc.MimeTypeOpus},
+		Bitrates:      DefaultBitrates(),
+		Codecs:        []string{webrtc.MimeTypeVP9, webrtc.MimeTypeOpus},
+		ClientTimeout: 5 * time.Minute,
 	}
 }
 
-func newRoom(id, name string, sfu *SFU, kind string) *Room {
+func newRoom(id, name string, sfu *SFU, kind string, opts RoomOptions) *Room {
 	localContext, cancel := context.WithCancel(sfu.context)
 
 	room := &Room{
@@ -84,6 +88,7 @@ func newRoom(id, name string, sfu *SFU, kind string) *Room {
 		mutex:      &sync.Mutex{},
 		extensions: make([]IExtension, 0),
 		kind:       kind,
+		options:    opts,
 	}
 
 	sfu.OnClientRemoved(func(client *Client) {
@@ -170,6 +175,28 @@ func (r *Room) AddClient(id, name string, opts ClientOptions) (*Client, error) {
 	}
 
 	client = r.sfu.NewClient(id, name, opts)
+
+	// stop client if not connecting for a specific time
+	go func() {
+		timeout, cancel := context.WithTimeout(client.context, r.options.ClientTimeout)
+		defer cancel()
+
+		connectingChan := make(chan bool)
+
+		client.OnConnectionStateChanged(func(state webrtc.PeerConnectionState) {
+			if state == webrtc.PeerConnectionStateConnected {
+				connectingChan <- true
+			}
+		})
+
+		select {
+		case <-timeout.Done():
+			glog.Warning("room: client is not connected after added, stopping client...")
+			client.Stop()
+		case <-connectingChan:
+			return
+		}
+	}()
 
 	client.OnJoined(func() {
 		r.onClientJoined(client)
