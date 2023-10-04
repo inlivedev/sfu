@@ -182,13 +182,13 @@ func (bc *bitrateController) checkAllTrackActive(claim *bitrateClaim) (bool, Qua
 				bc.setSimulcastClaim(claim.track.ID(), false)
 			}
 
-			return false, qualityLvl
+			return true, qualityLvl
 		}
 
-		return false, claim.quality
+		return true, claim.quality
 	}
 
-	return true, claim.quality
+	return false, claim.quality
 }
 
 // this should be called to check if the quality must be reduced because there is an unactive claim need to fit in the bandwidth
@@ -204,7 +204,7 @@ func (bc *bitrateController) getNextTrackQuality(clientTrackID string) QualityLe
 	}
 
 	// check if the simulcast tracks all available
-	if ok, quality := bc.checkAllTrackActive(claim); ok {
+	if ok, quality := bc.checkAllTrackActive(claim); !ok {
 		return quality
 	}
 
