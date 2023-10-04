@@ -46,9 +46,9 @@ type Room struct {
 	onClientLeftCallbacks   []func(*Client)
 	context                 context.Context
 	cancel                  context.CancelFunc
-	id                      string `json:"id"`
+	id                      string
 	RenegotiationChan       map[string]chan bool
-	name                    string `json:"name"`
+	name                    string
 	mutex                   *sync.Mutex
 	sfu                     *SFU
 	state                   string
@@ -91,6 +91,18 @@ func newRoom(id, name string, sfu *SFU, kind string) *Room {
 	})
 
 	return room
+}
+
+func (r *Room) ID() string {
+	return r.id
+}
+
+func (r *Room) Name() string {
+	return r.name
+}
+
+func (r *Room) Kind() string {
+	return r.kind
 }
 
 func (r *Room) AddExtension(extension IExtension) {
