@@ -23,7 +23,7 @@ type Manager struct {
 	cancel     context.CancelFunc
 	iceServers []webrtc.ICEServer
 	udpMux     *UDPMux
-	Name       string
+	name       string
 	mutex      sync.RWMutex
 	options    Options
 	extension  []IManagerExtension
@@ -40,7 +40,7 @@ func NewManager(ctx context.Context, name string, options Options) *Manager {
 		cancel:     cancel,
 		iceServers: options.IceServers,
 		udpMux:     udpMux,
-		Name:       name,
+		name:       name,
 		mutex:      sync.RWMutex{},
 		options:    options,
 		extension:  make([]IManagerExtension, 0),
@@ -55,6 +55,10 @@ func (m *Manager) AddExtension(extension IManagerExtension) {
 
 func (m *Manager) CreateRoomID() string {
 	return GenerateID([]int{len(m.rooms)})
+}
+
+func (m *Manager) Name() string {
+	return m.name
 }
 
 func (m *Manager) NewRoom(id, name, roomType string, opts RoomOptions) (*Room, error) {
@@ -94,7 +98,7 @@ func (m *Manager) NewRoom(id, name, roomType string, opts RoomOptions) (*Room, e
 
 	})
 
-	m.rooms[room.ID] = room
+	m.rooms[room.id] = room
 
 	return room, nil
 }

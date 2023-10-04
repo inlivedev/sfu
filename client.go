@@ -63,12 +63,14 @@ type ReceiverStats struct {
 
 type ClientStats struct {
 	mu       sync.RWMutex
+	Client   *Client
 	Sender   map[webrtc.SSRC]SenderStats
 	Receiver map[webrtc.SSRC]ReceiverStats
 }
 
 type Client struct {
 	id                                string
+	name                              string
 	bitrateController                 *bitrateController
 	context                           context.Context
 	cancel                            context.CancelFunc
@@ -124,7 +126,7 @@ func DefaultClientOptions() ClientOptions {
 	}
 }
 
-func NewClient(s *SFU, id string, peerConnectionConfig webrtc.Configuration, opts ClientOptions) *Client {
+func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Configuration, opts ClientOptions) *Client {
 	m := &webrtc.MediaEngine{}
 
 	if err := RegisterCodecs(m, s.codecs); err != nil {
@@ -214,15 +216,10 @@ func NewClient(s *SFU, id string, peerConnectionConfig webrtc.Configuration, opt
 	var quality atomic.Uint32
 	quality.Store(QualityHigh)
 	client := &Client{
-		id:            id,
-		estimatorChan: estimatorChan,
-		context:       localCtx,
-		cancel:        cancel,
-		clientStats: &ClientStats{
-			mu:       sync.RWMutex{},
-			Sender:   make(map[webrtc.SSRC]SenderStats),
-			Receiver: make(map[webrtc.SSRC]ReceiverStats),
-		},
+		id:                         id,
+		estimatorChan:              estimatorChan,
+		context:                    localCtx,
+		cancel:                     cancel,
 		canAddCandidate:            &atomic.Bool{},
 		isInRenegotiation:          &atomic.Bool{},
 		isInRemoteNegotiation:      &atomic.Bool{},
@@ -244,6 +241,13 @@ func NewClient(s *SFU, id string, peerConnectionConfig webrtc.Configuration, opt
 		quality:                    &quality,
 		egressBandwidth:            &atomic.Uint32{},
 		ingressBandwidth:           &atomic.Uint32{},
+	}
+
+	client.clientStats = &ClientStats{
+		mu:       sync.RWMutex{},
+		Client:   client,
+		Sender:   make(map[webrtc.SSRC]SenderStats),
+		Receiver: make(map[webrtc.SSRC]ReceiverStats),
 	}
 
 	client.bitrateController = newbitrateController(client)
@@ -335,6 +339,10 @@ func NewClient(s *SFU, id string, peerConnectionConfig webrtc.Configuration, opt
 
 func (c *Client) ID() string {
 	return c.id
+}
+
+func (c *Client) Name() string {
+	return c.name
 }
 
 func (c *Client) Context() context.Context {

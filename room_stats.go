@@ -27,6 +27,8 @@ type TrackReceiveStats struct {
 }
 
 type ClientTrackStats struct {
+	ID       string              `json:"id"`
+	Name     string              `json:"name"`
 	Sents    []TrackSentStats    `json:"sent_track_stats"`
 	Receives []TrackReceiveStats `json:"receive_track_stats"`
 }

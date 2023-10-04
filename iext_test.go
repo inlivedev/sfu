@@ -130,7 +130,8 @@ func TestExtension(t *testing.T) {
 
 	// add a new client to room
 	// you can also get the client by using r.GetClient(clientID)
-	client1, _ := testRoom.AddClient(testRoom.CreateClientID(testRoom.GetSFU().Counter), DefaultClientOptions())
+	id := testRoom.CreateClientID(testRoom.SFU().Counter)
+	client1, _ := testRoom.AddClient(id, id, DefaultClientOptions())
 
 	webrtcAPI := webrtc.NewAPI(webrtc.WithMediaEngine(mediaEngine))
 

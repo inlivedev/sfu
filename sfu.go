@@ -169,22 +169,22 @@ func (s *SFU) addClient(client *Client) {
 	s.onClientAdded(client)
 }
 
-func (s *SFU) createClient(id string, peerConnectionConfig webrtc.Configuration, opts ClientOptions) *Client {
+func (s *SFU) createClient(id string, name string, peerConnectionConfig webrtc.Configuration, opts ClientOptions) *Client {
 
-	client := NewClient(s, id, peerConnectionConfig, opts)
+	client := NewClient(s, id, name, peerConnectionConfig, opts)
 
 	// Get the LocalDescription and take it to base64 so we can paste in browser
 	return client
 }
 
-func (s *SFU) NewClient(id string, opts ClientOptions) *Client {
+func (s *SFU) NewClient(id, name string, opts ClientOptions) *Client {
 	s.Counter++
 
 	peerConnectionConfig := webrtc.Configuration{
 		ICEServers: s.iceServers,
 	}
 
-	client := s.createClient(id, peerConnectionConfig, opts)
+	client := s.createClient(id, name, peerConnectionConfig, opts)
 
 	client.OnConnectionStateChanged(func(connectionState webrtc.PeerConnectionState) {
 		glog.Info("client: connection state changed ", client.ID(), connectionState)

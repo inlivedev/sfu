@@ -143,19 +143,19 @@ func clientHandler(conn *websocket.Conn, messageChan chan Request, r *sfu.Room) 
 
 	// create new client id, you can pass a unique int value to this function
 	// or just use the SFU client counter
-	clientID := r.CreateClientID(r.GetSFU().Counter)
+	clientID := r.CreateClientID(r.SFU().Counter)
 
 	// add a new client to room
 	// you can also get the client by using r.GetClient(clientID)
 	opts := sfu.DefaultClientOptions()
 	opts.EnableCongestionController = true
-	client, err := r.AddClient(clientID, opts)
+	client, err := r.AddClient(clientID, clientID, opts)
 	if err != nil {
 		log.Panic(err)
 		return
 	}
 
-	glog.Info("client", clientID, "added to room. Total clients", r.GetSFU().Counter)
+	glog.Info("client", clientID, "added to room. Total clients", r.SFU().Counter)
 
 	defer client.Stop()
 

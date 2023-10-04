@@ -32,14 +32,15 @@ func TestRoomCreateAndClose(t *testing.T) {
 
 	// add a new client to room
 	// you can also get the client by using r.GetClient(clientID)
-	client1, err := testRoom.AddClient(testRoom.CreateClientID(testRoom.GetSFU().Counter), DefaultClientOptions())
+	id := testRoom.CreateClientID(testRoom.SFU().Counter)
+	client1, err := testRoom.AddClient(id, id, DefaultClientOptions())
 	require.NoErrorf(t, err, "error adding client to room: %v", err)
 
 	// stop client
 	err = testRoom.StopClient(client1.ID())
 	require.NoErrorf(t, err, "error stopping client: %v", err)
-
-	client2, err := testRoom.AddClient(testRoom.CreateClientID(testRoom.GetSFU().Counter), DefaultClientOptions())
+	id = testRoom.CreateClientID(testRoom.SFU().Counter)
+	client2, err := testRoom.AddClient(id, id, DefaultClientOptions())
 	require.NoErrorf(t, err, "error adding client to room: %v", err)
 
 	// stop all clients should error on not empty room
@@ -222,7 +223,7 @@ Loop:
 					totalClientEgressBytes += stat.OutboundRTPStreamStats.BytesSent
 				}
 
-				roomStats := testRoom.GetStats()
+				roomStats := testRoom.Stats()
 
 				diffPercentClientIgressRoomBytesSent := (float64(totalClientIngressBytes) - float64(roomStats.ByteSent)) / float64(totalClientIngressBytes) * 100
 				diffPercentClientEgressRoomBytesReceived := (float64(totalClientEgressBytes) - float64(roomStats.BytesReceived)) / float64(totalClientEgressBytes) * 100
@@ -246,7 +247,7 @@ Loop:
 	glog.Info("total client egress bytes: ", totalClientEgressBytes)
 
 	glog.Info("get room stats")
-	roomStats := testRoom.GetStats()
+	roomStats := testRoom.Stats()
 
 	require.NotEqual(t, uint64(0), totalClientEgressBytes)
 	require.NotEqual(t, uint64(0), totalClientIngressBytes)

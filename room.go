@@ -46,14 +46,14 @@ type Room struct {
 	onClientLeftCallbacks   []func(*Client)
 	context                 context.Context
 	cancel                  context.CancelFunc
-	ID                      string `json:"id"`
+	id                      string `json:"id"`
 	RenegotiationChan       map[string]chan bool
-	Name                    string `json:"name"`
+	name                    string `json:"name"`
 	mutex                   *sync.Mutex
 	sfu                     *SFU
-	State                   string
+	state                   string
 	stats                   map[string]*ClientStats
-	Type                    string
+	kind                    string
 	extensions              []IExtension
 	OnEvent                 func(event Event)
 }
@@ -70,20 +70,20 @@ func DefaultRoomOptions() RoomOptions {
 	}
 }
 
-func newRoom(id, name string, sfu *SFU, roomType string) *Room {
+func newRoom(id, name string, sfu *SFU, kind string) *Room {
 	localContext, cancel := context.WithCancel(sfu.context)
 
 	room := &Room{
-		ID:         id,
+		id:         id,
 		context:    localContext,
 		cancel:     cancel,
 		sfu:        sfu,
 		stats:      make(map[string]*ClientStats),
-		State:      StateRoomOpen,
-		Name:       name,
+		state:      StateRoomOpen,
+		name:       name,
 		mutex:      &sync.Mutex{},
 		extensions: make([]IExtension, 0),
-		Type:       roomType,
+		kind:       kind,
 	}
 
 	sfu.OnClientRemoved(func(client *Client) {
@@ -99,7 +99,7 @@ func (r *Room) AddExtension(extension IExtension) {
 
 // room can only closed once it's empty or it will return error
 func (r *Room) Close() error {
-	if r.State == StateRoomClosed {
+	if r.state == StateRoomClosed {
 		return ErrRoomIsClosed
 	}
 
@@ -112,10 +112,10 @@ func (r *Room) Close() error {
 	r.sfu.Stop()
 
 	for _, callback := range r.onRoomClosedCallbacks {
-		callback(r.ID)
+		callback(r.id)
 	}
 
-	r.State = StateRoomClosed
+	r.state = StateRoomClosed
 
 	return nil
 }
@@ -138,11 +138,11 @@ func (r *Room) StopAllClients() {
 	}
 }
 
-func (r *Room) AddClient(id string, opts ClientOptions) (*Client, error) {
+func (r *Room) AddClient(id, name string, opts ClientOptions) (*Client, error) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
-	if r.State == StateRoomClosed {
+	if r.state == StateRoomClosed {
 		return nil, ErrRoomIsClosed
 	}
 
@@ -157,7 +157,7 @@ func (r *Room) AddClient(id string, opts ClientOptions) (*Client, error) {
 		return nil, ErrClientExists
 	}
 
-	client = r.sfu.NewClient(id, opts)
+	client = r.sfu.NewClient(id, name, opts)
 
 	client.OnJoined(func() {
 		r.onClientJoined(client)
@@ -212,20 +212,20 @@ func (r *Room) OnClientJoined(callback func(client *Client)) {
 	r.onClientJoinedCallbacks = append(r.onClientJoinedCallbacks, callback)
 }
 
-func (r *Room) GetSFU() *SFU {
+func (r *Room) SFU() *SFU {
 	return r.sfu
 }
 
-func (r *Room) GetID() string {
-	return r.ID
+func (r *Room) ID() string {
+	return r.id
 }
 
-func (r *Room) GetName() string {
-	return r.Name
+func (r *Room) Name() string {
+	return r.name
 }
 
 //nolint:copylocks // Statistic won't use the mutex
-func (r *Room) GetStats() RoomStats {
+func (r *Room) Stats() RoomStats {
 	var (
 		bytesReceived      uint64
 		bytesSent          uint64
@@ -249,6 +249,8 @@ func (r *Room) GetStats() RoomStats {
 
 		if _, ok := clientStats[id]; !ok {
 			clientStats[id] = &ClientTrackStats{
+				ID:       cstats.Client.id,
+				Name:     cstats.Client.name,
 				Sents:    make([]TrackSentStats, 0),
 				Receives: make([]TrackReceiveStats, 0),
 			}
@@ -316,7 +318,7 @@ func (r *Room) CreateDataChannel(label string, opts DataChannelOptions) error {
 	return r.sfu.CreateDataChannel(label, opts)
 }
 
-func (r *Room) GetBitratesConfig() BitratesConfig {
+func (r *Room) BitratesConfig() BitratesConfig {
 	return r.sfu.bitratesConfig
 }
 

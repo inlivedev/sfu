@@ -461,7 +461,8 @@ func CreatePeerPair(ctx context.Context, room *Room, iceServers []webrtc.ICEServ
 
 	// add a new client to room
 	// you can also get the client by using r.GetClient(clientID)
-	client, _ = room.AddClient(room.CreateClientID(room.GetSFU().Counter), DefaultClientOptions())
+	id := room.CreateClientID(room.SFU().Counter)
+	client, _ = room.AddClient(id, id, DefaultClientOptions())
 
 	client.OnAllowedRemoteRenegotiation = func() {
 		glog.Info("allowed remote renegotiation")
@@ -584,7 +585,8 @@ func CreateDataPair(ctx context.Context, room *Room, iceServers []webrtc.ICEServ
 
 	// add a new client to room
 	// you can also get the client by using r.GetClient(clientID)
-	client, _ = room.AddClient(room.CreateClientID(room.GetSFU().Counter), DefaultClientOptions())
+	id := room.CreateClientID(room.SFU().Counter)
+	client, _ = room.AddClient(id, id, DefaultClientOptions())
 
 	client.OnAllowedRemoteRenegotiation = func() {
 		glog.Info("allowed remote renegotiation")
