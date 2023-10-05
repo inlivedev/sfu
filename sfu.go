@@ -158,9 +158,6 @@ func New(ctx context.Context, opts sfuOptions) *SFU {
 }
 
 func (s *SFU) addClient(client *Client) {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
-
 	if err := s.clients.Add(client); err != nil {
 		glog.Error("sfu: failed to add client ", err)
 		return
@@ -212,6 +209,15 @@ func (s *SFU) NewClient(id, name string, opts ClientOptions) *Client {
 						client.OnTracksAvailable(availableTracks)
 					}
 				}
+
+				// make sure the exisiting data channels is created on new clients
+				s.createExistingDataChannels(client)
+
+				if _, err := client.createInternalDataChannel("stats", client.onStatsMessage); err != nil {
+					glog.Error("client: error create stats data channel ", err)
+				}
+
+				client.renegotiate()
 			}
 
 			if client.pendingReceivedTracks.Length() > 0 {
@@ -229,9 +235,7 @@ func (s *SFU) NewClient(id, name string, opts ClientOptions) *Client {
 			}
 
 		case webrtc.PeerConnectionStateClosed:
-			if client.state.Load() != ClientStateEnded {
-				client.afterClosed()
-			}
+			client.afterClosed()
 		case webrtc.PeerConnectionStateFailed:
 			client.startIdleTimeout()
 		case webrtc.PeerConnectionStateConnecting:

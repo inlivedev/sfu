@@ -227,6 +227,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 	quality.Store(QualityHigh)
 	client := &Client{
 		id:                             id,
+		name:                           name,
 		estimatorChan:                  estimatorChan,
 		context:                        localCtx,
 		cancel:                         cancel,
@@ -266,24 +267,6 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 
 	client.bitrateController = newbitrateController(client)
 
-	client.OnConnectionStateChanged(func(connectionState webrtc.PeerConnectionState) {
-		if connectionState == webrtc.PeerConnectionStateConnected {
-			// make sure the exisiting data channels is created on new clients
-			s.createExistingDataChannels(client)
-
-			if _, err := client.createInternalDataChannel("stats", client.onStatsMessage); err != nil {
-				glog.Error("client: error create stats data channel ", err)
-			}
-
-			client.renegotiate()
-		}
-	})
-
-	peerConnection.OnICEConnectionStateChange(func(connectionState webrtc.ICEConnectionState) {
-		glog.Info("client: ice connection state changed ", connectionState)
-	})
-
-	// TODOL: replace this with callback
 	peerConnection.OnConnectionStateChange(func(connectionState webrtc.PeerConnectionState) {
 		client.onConnectionStateChanged(connectionState)
 	})
@@ -735,18 +718,10 @@ func (c *Client) Stop() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if c.state.Load() == ClientStateEnded {
-		return ErrClientStoped
-	}
-
-	c.state.Store(ClientStateEnded)
-
 	err := c.peerConnection.Close()
 	if err != nil {
 		return err
 	}
-
-	c.afterClosed()
 
 	return nil
 }
@@ -838,7 +813,7 @@ func (c *Client) startIdleTimeout() {
 	go func() {
 		<-c.idleTimeoutContext.Done()
 		glog.Info("client: idle timeout reached ", c.ID)
-		_ = c.Stop()
+		c.afterClosed()
 	}()
 }
 

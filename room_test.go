@@ -77,7 +77,7 @@ func TestRoomJoinLeftEvent(t *testing.T) {
 	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal, roomOpts)
 	require.NoError(t, err, "error creating room: %v", err)
 	leftChan := make(chan bool)
-	joinChan := make(chan bool)
+	joinChan := make(chan string)
 	peerCount := 0
 
 	testRoom.OnClientLeft(func(client *Client) {
@@ -87,15 +87,19 @@ func TestRoomJoinLeftEvent(t *testing.T) {
 	})
 
 	testRoom.OnClientJoined(func(client *Client) {
-		joinChan <- true
+		joinChan <- client.ID()
 		glog.Info("client join", client.ID())
 		clients[client.ID()] = client
 	})
 
 	_, client1, _, _ := CreatePeerPair(ctx, testRoom, DefaultTestIceServers(), "peer1", false, false)
+	_, client2, _, _ := CreatePeerPair(ctx, testRoom, DefaultTestIceServers(), "peer1", false, false)
+	_, client3, _, _ := CreatePeerPair(ctx, testRoom, DefaultTestIceServers(), "peer1", false, false)
 
 	timeout, cancelTimeout := context.WithTimeout(ctx, 20*time.Second)
 	defer cancelTimeout()
+
+	peerLeft := 0
 
 	for {
 		select {
@@ -103,22 +107,33 @@ func TestRoomJoinLeftEvent(t *testing.T) {
 			t.Fatal("timeout waiting for client left event")
 		case <-leftChan:
 			glog.Info("client left")
-			peerCount--
-		case <-joinChan:
+			peerLeft++
+		case id := <-joinChan:
 			glog.Info("client join")
 			peerCount++
 			// stop client in go routine so we can receive left event
 			go func() {
-				_ = testRoom.StopClient(client1.ID())
+				switch id {
+				case client1.ID():
+					_ = testRoom.StopClient(client1.ID())
+				case client2.ID():
+					err := client2.Stop()
+					require.NoError(t, err, "error stopping client: %v", err)
+				case client3.ID():
+					client3.PeerConnection().Close()
+					require.NoError(t, err, "error stopping client: %v", err)
+				}
 			}()
 
 		}
 
 		glog.Info("peer count", peerCount)
-		if peerCount == 0 {
+		if peerLeft == 3 {
 			break
 		}
 	}
+
+	require.Equal(t, 0, len(testRoom.sfu.clients.clients))
 
 	_ = testRoom.Close()
 }
