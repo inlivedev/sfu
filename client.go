@@ -838,6 +838,8 @@ func (c *Client) Stats() *ClientStats {
 }
 
 func (c *Client) updateReceiverStats(remoteTrack *remoteTrack) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if c.statsGetter == nil {
 		return
 	}
@@ -864,6 +866,9 @@ func (c *Client) updateReceiverStats(remoteTrack *remoteTrack) {
 }
 
 func (c *Client) updateSenderStats(sender *webrtc.RTPSender) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	if c.statsGetter == nil {
 		return
 	}
