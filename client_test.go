@@ -220,7 +220,7 @@ Loop:
 			t.Fatal("timeout waiting for track added")
 		case <-trackChan:
 			trackCount++
-			glog.Info("track added", trackCount)
+			glog.Info("track added ", trackCount)
 			if trackCount == 2 {
 				break Loop
 			}

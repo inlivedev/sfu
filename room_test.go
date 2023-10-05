@@ -24,11 +24,17 @@ func TestRoomCreateAndClose(t *testing.T) {
 	roomID := roomManager.CreateRoomID()
 	roomName := "test-room"
 
+	clientLeftChan := make(chan bool)
+
 	// create new room
 	roomOpts := DefaultRoomOptions()
 	roomOpts.Codecs = []string{webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
 	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal, roomOpts)
 	require.NoErrorf(t, err, "error creating new room: %v", err)
+
+	testRoom.OnClientLeft(func(client *Client) {
+		clientLeftChan <- true
+	})
 
 	// add a new client to room
 	// you can also get the client by using r.GetClient(clientID)
@@ -51,6 +57,24 @@ func TestRoomCreateAndClose(t *testing.T) {
 	err = testRoom.StopClient(client2.ID())
 	require.NoErrorf(t, err, "error stopping client: %v", err)
 
+	allClientLeft := make(chan bool)
+
+	go func() {
+		for {
+			select {
+			case <-clientLeftChan:
+				glog.Info("client left")
+				if len(testRoom.sfu.clients.clients) == 0 {
+					allClientLeft <- true
+					return
+				}
+			case <-time.After(5 * time.Second):
+				glog.Info("timeout waiting for client left")
+			}
+		}
+	}()
+
+	<-allClientLeft
 	err = testRoom.Close()
 	require.NoErrorf(t, err, "error closing room: %v", err)
 }

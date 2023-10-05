@@ -86,7 +86,7 @@ func GetStaticVideoTrack(ctx context.Context, trackID, streamID string, loop boo
 		rid = "low"
 	default:
 		videoFile = videoFileName
-		rid = "low"
+		rid = "high"
 	}
 
 	videoFileName := path.Join(path.Dir(filename), videoFile)
@@ -288,9 +288,14 @@ func AddSimulcastVideoTracks(ctx context.Context, pc *webrtc.PeerConnection, tra
 	}
 
 	videoMid, _ := GetStaticVideoTrack(ctx, trackID, streamID, true, "mid")
-	transcv.Sender().AddEncoding(videoMid)
+	if err = transcv.Sender().AddEncoding(videoMid); err != nil {
+		return err
+	}
+
 	videoLow, _ := GetStaticVideoTrack(ctx, trackID, streamID, true, "low")
-	transcv.Sender().AddEncoding(videoLow)
+	if err = transcv.Sender().AddEncoding(videoLow); err != nil {
+		return err
+	}
 
 	// read outgoing packet to enable NACK
 	go func() {

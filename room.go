@@ -137,6 +137,8 @@ func (r *Room) Close() error {
 	return nil
 }
 
+// Stopping client is async, it will just stop the client and return immediately
+// You should use OnClientLeft to get notified when the client is actually stopped
 func (r *Room) StopClient(id string) error {
 	var client *Client
 
@@ -208,6 +210,7 @@ func (r *Room) AddClient(id, name string, opts ClientOptions) (*Client, error) {
 	return client, nil
 }
 
+// Generate a unique client ID for this room
 func (r *Room) CreateClientID(id int) string {
 	if id == 0 {
 		return GenerateID([]int{r.sfu.Counter})
@@ -216,10 +219,12 @@ func (r *Room) CreateClientID(id int) string {
 	return GenerateID([]int{r.sfu.Counter, id})
 }
 
+// Use this to get notified when a room is closed
 func (r *Room) OnRoomClosed(callback func(id string)) {
 	r.onRoomClosedCallbacks = append(r.onRoomClosedCallbacks, callback)
 }
 
+// Use this to get notified when a client is stopped and completly removed from the room
 func (r *Room) OnClientLeft(callback func(client *Client)) {
 	r.onClientLeftCallbacks = append(r.onClientLeftCallbacks, callback)
 }
