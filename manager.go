@@ -65,6 +65,10 @@ func (m *Manager) NewRoom(id, name, roomType string, opts RoomOptions) (*Room, e
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
+	if _, ok := m.rooms[id]; ok {
+		return nil, errors.New("manager: room already exists")
+	}
+
 	err := m.onBeforeNewRoom(id, name, roomType)
 	if err != nil {
 		return nil, err
