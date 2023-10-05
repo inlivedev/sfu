@@ -266,7 +266,7 @@ func TestClientDataChannel(t *testing.T) {
 
 	// create room manager first before create new room
 	roomManager := NewManager(ctx, "test-room-datachannel", Options{
-		WebRTCPort:               40011,
+		WebRTCPort:               40012,
 		ConnectRemoteRoomTimeout: 30 * time.Second,
 		IceServers:               DefaultTestIceServers(),
 	})

@@ -308,7 +308,7 @@ func TestRoomAddClientTimeout(t *testing.T) {
 
 	// create room manager first before create new room
 	roomManager := NewManager(ctx, "test", Options{
-		WebRTCPort:               40012,
+		WebRTCPort:               40013,
 		ConnectRemoteRoomTimeout: 30 * time.Second,
 		IceServers:               DefaultTestIceServers(),
 	})
