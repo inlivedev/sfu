@@ -9,8 +9,9 @@ import (
 )
 
 var (
-	ErrRoomNotFound             = errors.New("room not found")
-	ErrRemoteRoomConnectTimeout = errors.New("timeout connecting to remote room")
+	ErrRoomNotFound             = errors.New("manager: room not found")
+	ErrRoomAlreadyExists        = errors.New("manager: room already exists")
+	ErrRemoteRoomConnectTimeout = errors.New("manager: timeout connecting to remote room")
 
 	RoomTypeLocal  = "local"
 	RoomTypeRemote = "remote"
@@ -66,7 +67,7 @@ func (m *Manager) NewRoom(id, name, roomType string, opts RoomOptions) (*Room, e
 	defer m.mutex.Unlock()
 
 	if _, ok := m.rooms[id]; ok {
-		return nil, errors.New("manager: room already exists")
+		return nil, ErrRoomAlreadyExists
 	}
 
 	err := m.onBeforeNewRoom(id, name, roomType)
