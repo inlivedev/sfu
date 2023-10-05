@@ -210,3 +210,8 @@ Loop:
 
 	require.Equal(t, "hellohelloworldworld", messages)
 }
+
+// TODO
+func TestStillUsableAfterReconnect(t *testing.T) {
+
+}

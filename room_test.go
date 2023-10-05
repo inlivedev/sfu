@@ -164,12 +164,9 @@ func TestRoomStats(t *testing.T) {
 	roomOpts.Codecs = []string{webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
 	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal, roomOpts)
 	require.NoError(t, err, "error creating room: %v", err)
-	joinChan := make(chan bool)
 	peerCount := 0
 
 	testRoom.OnClientJoined(func(client *Client) {
-		joinChan <- true
-		glog.Info("client join", client.ID())
 		clients[client.ID()] = client
 	})
 
@@ -306,7 +303,9 @@ func TestRoomAddClientTimeout(t *testing.T) {
 	// add a new client to room
 	// you can also get the client by using r.GetClient(clientID)
 	id := testRoom.CreateClientID(testRoom.SFU().Counter)
+
 	client, err := testRoom.AddClient(id, id, DefaultClientOptions())
+	require.NoErrorf(t, err, "error adding client to room: %v", err)
 
 	clientRemovedChan := make(chan *Client)
 
