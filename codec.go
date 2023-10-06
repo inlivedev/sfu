@@ -55,6 +55,50 @@ var (
 			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypeVP8, 90000, 0, "", videoRTCPFeedback},
 			PayloadType:        96,
 		},
+		{
+			RTPCodecCapability: webrtc.RTPCodecCapability{"video/rtx", 90000, 0, "apt=112", nil},
+			PayloadType:        113,
+		},
+		{
+			RTPCodecCapability: webrtc.RTPCodecCapability{"video/rtx", 90000, 0, "apt=100", nil},
+			PayloadType:        101,
+		},
+		{
+			RTPCodecCapability: webrtc.RTPCodecCapability{"video/rtx", 90000, 0, "apt=98", nil},
+			PayloadType:        99,
+		},
+		{
+			RTPCodecCapability: webrtc.RTPCodecCapability{"video/rtx", 90000, 0, "apt=45", nil},
+			PayloadType:        46,
+		},
+		{
+			RTPCodecCapability: webrtc.RTPCodecCapability{"video/rtx", 90000, 0, "apt=39", nil},
+			PayloadType:        40,
+		},
+		{
+			RTPCodecCapability: webrtc.RTPCodecCapability{"video/rtx", 90000, 0, "apt=127", nil},
+			PayloadType:        125,
+		},
+		{
+			RTPCodecCapability: webrtc.RTPCodecCapability{"video/rtx", 90000, 0, "apt=108", nil},
+			PayloadType:        109,
+		},
+		{
+			RTPCodecCapability: webrtc.RTPCodecCapability{"video/rtx", 90000, 0, "apt=106", nil},
+			PayloadType:        107,
+		},
+		{
+			RTPCodecCapability: webrtc.RTPCodecCapability{"video/rtx", 90000, 0, "apt=104", nil},
+			PayloadType:        105,
+		},
+		{
+			RTPCodecCapability: webrtc.RTPCodecCapability{"video/rtx", 90000, 0, "apt=96", nil},
+			PayloadType:        97,
+		},
+		{
+			RTPCodecCapability: webrtc.RTPCodecCapability{"video/rtx", 90000, 0, "apt=102", nil},
+			PayloadType:        103,
+		},
 	}
 
 	audioCodecs = []webrtc.RTPCodecParameters{
@@ -94,6 +138,10 @@ var (
 
 func RegisterCodecs(m *webrtc.MediaEngine, codecs []string) error {
 	errors := []error{}
+
+	if !slices.Contains(codecs, "video/rtx") {
+		codecs = append(codecs, "video/rtx")
+	}
 
 	for _, codec := range audioCodecs {
 		if slices.Contains(codecs, codec.MimeType) {

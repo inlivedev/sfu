@@ -220,7 +220,7 @@ func (bc *bitrateController) getNextTrackQuality(clientTrackID string) QualityLe
 			inActiveBitrates += claim.bitrate
 		}
 
-		if claim.simulcast {
+		if claim.simulcast && claim.active && claim.track.Kind() == webrtc.RTPCodecTypeVideo {
 			switch claim.quality {
 			case QualityHigh:
 				highCount++
@@ -240,13 +240,13 @@ func (bc *bitrateController) getNextTrackQuality(clientTrackID string) QualityLe
 		// TODO: check if need to reduce from high to low
 		nextQuality := claim.quality - 1
 
-		// no reduction to none or unactivate for screen and audio
-		if claim.track.IsScreen() || claim.track.Kind() == webrtc.RTPCodecTypeAudio {
+		// prevent reduce to low if there it make unbalanced quality distribution
+		if (nextQuality == QualityLow && highCount > 0) || (nextQuality == QualityNone && midCount > 0) {
 			return claim.quality
 		}
 
-		// prevent reduce to low if there it make unbalanced quality distribution
-		if (nextQuality == QualityLow && highCount > 0) || (nextQuality == QualityNone && midCount > 0) {
+		// no reduction to none or unactivate for screen
+		if nextQuality == QualityNone && claim.track.IsScreen() {
 			return claim.quality
 		}
 
