@@ -340,7 +340,11 @@ func (bc *bitrateController) addClaim(clientTrack iClientTrack, quality QualityL
 	var bitrate uint32
 
 	if clientTrack.Kind() == webrtc.RTPCodecTypeAudio {
-		bitrate = bc.client.sfu.bitratesConfig.Audio
+		if clientTrack.LocalTrack().Codec().MimeType == "audio/RED" {
+			bitrate = bc.client.sfu.bitratesConfig.AudioRed
+		} else {
+			bitrate = bc.client.sfu.bitratesConfig.Audio
+		}
 	} else {
 		bitrate = bc.client.sfu.QualityLevelToBitrate(quality)
 	}

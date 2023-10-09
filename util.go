@@ -465,6 +465,10 @@ func Uint32ToQualityLevel(quality uint32) QualityLevel {
 		return QualityMid
 	case 3:
 		return QualityHigh
+	case 4:
+		return QualityAudio
+	case 5:
+		return QualityAudioRed
 	default:
 		return QualityLow
 	}

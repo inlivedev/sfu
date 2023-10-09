@@ -32,10 +32,12 @@ const (
 	ClientTypeUpBridge   = "upbridge"
 	ClientTypeDownBridge = "downbridge"
 
-	QualityHigh = 3
-	QualityMid  = 2
-	QualityLow  = 1
-	QualityNone = 0
+	QualityAudioRed = 5
+	QualityAudio    = 4
+	QualityHigh     = 3
+	QualityMid      = 2
+	QualityLow      = 1
+	QualityNone     = 0
 )
 
 type QualityLevel uint32
@@ -122,6 +124,7 @@ type Client struct {
 	pendingRemoteCandidates        []webrtc.ICECandidateInit
 	pendingLocalCandidates         []*webrtc.ICECandidate
 	quality                        *atomic.Uint32
+	receivingBandwidth             *atomic.Uint32
 	egressBandwidth                *atomic.Uint32
 	ingressBandwidth               *atomic.Uint32
 	ingressQualityLimitationReason *atomic.Value
@@ -250,6 +253,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		sfu:                            s,
 		statsGetter:                    statsGetter,
 		quality:                        &quality,
+		receivingBandwidth:             &atomic.Uint32{},
 		egressBandwidth:                &atomic.Uint32{},
 		ingressBandwidth:               &atomic.Uint32{},
 		ingressQualityLimitationReason: &atomic.Value{},
@@ -974,18 +978,27 @@ func (c *Client) SetQuality(quality QualityLevel) {
 	c.quality.Store(uint32(quality))
 }
 
+// GetEstimatedBandwidth returns the estimated bandwidth in bits per second based on
+// Google Congestion Controller estimation. If the congestion controller is not enabled,
+// it will return the initial bandwidth. If the receiving bandwidth is not 0, it will return the smallest value between
+// the estimated bandwidth and the receiving bandwidth.
 func (c *Client) GetEstimatedBandwidth() uint32 {
-	// c.mu.Lock()
-	// defer c.mu.Unlock()
+	estimated := uint32(0)
 
 	if c.estimator == nil {
-		return uint32(c.sfu.bitratesConfig.InitialBandwidth)
+		estimated = uint32(c.sfu.bitratesConfig.InitialBandwidth)
+	} else {
+		estimated = uint32(c.estimator.GetTargetBitrate())
+		c.egressBandwidth.Store(estimated)
 	}
 
-	bw := uint32(c.estimator.GetTargetBitrate())
-	c.egressBandwidth.Store(bw)
+	receivingBandwidth := c.receivingBandwidth.Load()
 
-	return bw
+	if receivingBandwidth != 0 && receivingBandwidth < estimated {
+		return receivingBandwidth
+	}
+
+	return estimated
 }
 
 // This should get from the publisher client using RTCIceCandidatePairStats.availableOutgoingBitrate
@@ -1041,4 +1054,12 @@ func (c *Client) onStatsMessage(msg webrtc.DataChannelMessage) {
 	c.ingressQualityLimitationReason.Store(statsMessage.QualityLimitationReason)
 
 	c.UpdatePublisherBandwidth(uint32(statsMessage.AvailableOutgoingBitrate))
+}
+
+// SetReceivingBandwidthLimit will cap the receiving bandwidth and will overide the bandwidth estimation
+// if the value is lower than the estimated bandwidth.
+// This is useful to test how the SFU will behave when the bandwidth is limited
+// @param bandwidth uint32  bandwidth in bitrate per second
+func (c *Client) SetReceivingBandwidthLimit(bandwidth uint32) {
+	c.receivingBandwidth.Store(bandwidth)
 }

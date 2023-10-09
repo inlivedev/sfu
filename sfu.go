@@ -10,6 +10,7 @@ import (
 )
 
 type BitratesConfig struct {
+	AudioRed         uint32 `json:"audio_red,omitempty" yaml:"audio_red,omitempty" mapstructure:"audio_red,omitempty"`
 	Audio            uint32 `json:"audio,omitempty" yaml:"audio,omitempty" mapstructure:"audio,omitempty"`
 	Video            uint32 `json:"video,omitempty" yaml:"video,omitempty" mapstructure:"video,omitempty"`
 	VideoHigh        uint32 `json:"video_high,omitempty" yaml:"video_high,omitempty" mapstructure:"video_high,omitempty"`
@@ -20,7 +21,8 @@ type BitratesConfig struct {
 
 func DefaultBitrates() BitratesConfig {
 	return BitratesConfig{
-		Audio:            128_000,
+		AudioRed:         48_000 * 3,
+		Audio:            48_000,
 		Video:            1_500_000,
 		VideoHigh:        1_500_000,
 		VideoMid:         500_000,
@@ -519,6 +521,10 @@ func (s *SFU) TotalActiveSessions() int {
 
 func (s *SFU) QualityLevelToBitrate(level QualityLevel) uint32 {
 	switch level {
+	case QualityAudioRed:
+		return s.bitratesConfig.AudioRed
+	case QualityAudio:
+		return s.bitratesConfig.Audio
 	case QualityLow:
 		return s.bitratesConfig.VideoLow
 	case QualityMid:

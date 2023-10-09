@@ -322,12 +322,23 @@ func (r *Room) Stats() RoomStats {
 			packetSentLost += stat.Stats.RemoteInboundRTPStreamStats.PacketsLost
 			packetSent += stat.Stats.OutboundRTPStreamStats.PacketsSent
 
+			claim := cstats.Client.bitrateController.GetClaim(stat.Track.ID())
+			source := "media"
+
+			if claim.track.IsScreen() {
+				source = "screen"
+			}
+
 			sentStats := TrackSentStats{
-				ID:          stat.Track.ID(),
-				Kind:        stat.Track.Kind().String(),
-				PacketsLost: stat.Stats.RemoteInboundRTPStreamStats.PacketsLost,
-				PacketSent:  stat.Stats.OutboundRTPStreamStats.PacketsSent,
-				ByteSent:    stat.Stats.OutboundRTPStreamStats.BytesSent,
+				ID:             stat.Track.ID(),
+				Kind:           stat.Track.Kind().String(),
+				PacketsLost:    stat.Stats.RemoteInboundRTPStreamStats.PacketsLost,
+				PacketSent:     stat.Stats.OutboundRTPStreamStats.PacketsSent,
+				ByteSent:       stat.Stats.OutboundRTPStreamStats.BytesSent,
+				CurrentBitrate: uint64(claim.track.getCurrentBitrate()),
+				Source:         source,
+				ClaimedBitrate: uint64(claim.bitrate),
+				Quality:        claim.quality,
 			}
 
 			clientStats[id].Sents = append(clientStats[id].Sents, sentStats)

@@ -135,6 +135,17 @@
             <option value="low">low</option>
             <option value="none">none</option>
         </select></span>
+
+        <span><label>Bandwidth Limit</label> <select id="selectBandwidth" onchange="setBandwidthLimit()">
+            <option selected value="0">no limit</option>
+            <option value="1000000">1Mbps</option>
+            <option value="2000000">2Mbps</option>
+            <option value="3000000">3Mbps</option>
+            <option value="4000000">4Mbps</option>
+            <option value="5000000">5Mbps</option>
+            <option value="7000000">7Mbps</option>
+            <option value="10000000">10Mbps</option>
+        </select></span>
     </footer>
     <script>
           const peerConnection = new RTCPeerConnection({
@@ -592,6 +603,11 @@
         const switchQuality= () =>{
             const quality = document.getElementById("selectQuality").value
             ws.send(JSON.stringify({type:'switch_quality',data:quality}));
+        }
+
+        const setBandwidthLimit = () =>{
+            const limit = document.getElementById("selectBandwidth").value
+            ws.send(JSON.stringify({type:'set_bandwidth_limit',data:limit}));
         }
 
         const shareScreen = async () =>{

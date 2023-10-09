@@ -10,11 +10,15 @@ type StatTracks struct {
 }
 
 type TrackSentStats struct {
-	ID          string `json:"id"`
-	Kind        string `json:"kind"`
-	PacketsLost int64  `json:"packets_lost"`
-	PacketSent  uint64 `json:"packets_sent"`
-	ByteSent    uint64 `json:"bytes_sent"`
+	ID             string       `json:"id"`
+	Kind           string       `json:"kind"`
+	PacketsLost    int64        `json:"packets_lost"`
+	PacketSent     uint64       `json:"packets_sent"`
+	ByteSent       uint64       `json:"bytes_sent"`
+	CurrentBitrate uint64       `json:"current_bitrate"`
+	ClaimedBitrate uint64       `json:"claimed_bitrate"`
+	Source         string       `json:"source"`
+	Quality        QualityLevel `json:"quality"`
 }
 
 type TrackReceiveStats struct {

@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	_ "net/http/pprof"
+	"strconv"
 	"time"
 
 	"github.com/golang/glog"
@@ -40,6 +41,7 @@ const (
 	TypeTrackAvailable       = "tracks_available"
 	TypeSwitchQuality        = "switch_quality"
 	TypeUpdateBandwidth      = "update_bandwidth"
+	TypeSetBandwidthLimit    = "set_bandwidth_limit"
 	TypeBitrateAdjusted      = "bitrate_adjusted"
 )
 
@@ -367,6 +369,9 @@ func clientHandler(conn *websocket.Conn, messageChan chan Request, r *sfu.Room) 
 			} else if req.Type == TypeUpdateBandwidth {
 				bandwidth := uint32(req.Data.(float64))
 				client.UpdatePublisherBandwidth(bandwidth)
+			} else if req.Type == TypeSetBandwidthLimit {
+				bandwidth, _ := strconv.ParseUint(req.Data.(string), 10, 32)
+				client.SetReceivingBandwidthLimit(uint32(bandwidth))
 			} else if req.Type == TypeIsAllowRenegotiation {
 				resp := Respose{
 					Status: true,
