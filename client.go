@@ -361,6 +361,9 @@ func (c *Client) ID() string {
 }
 
 func (c *Client) Name() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	return c.name
 }
 
@@ -1059,7 +1062,15 @@ func (c *Client) onStatsMessage(msg webrtc.DataChannelMessage) {
 // SetReceivingBandwidthLimit will cap the receiving bandwidth and will overide the bandwidth estimation
 // if the value is lower than the estimated bandwidth.
 // This is useful to test how the SFU will behave when the bandwidth is limited
-// @param bandwidth uint32  bandwidth in bitrate per second
 func (c *Client) SetReceivingBandwidthLimit(bandwidth uint32) {
 	c.receivingBandwidth.Store(bandwidth)
+}
+
+// SetName update the name of the client, that previously set on create client
+// The name then later can use by call client.Name() method
+func (c *Client) SetName(name string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.name = name
 }
