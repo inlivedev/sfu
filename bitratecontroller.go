@@ -1,6 +1,7 @@
 package sfu
 
 import (
+	"context"
 	"errors"
 	"sync"
 	"time"
@@ -18,29 +19,32 @@ type bitrateClaim struct {
 	track     iClientTrack
 	bitrate   uint32
 	quality   QualityLevel
-	active    bool
 	simulcast bool
 }
 
 type bitrateController struct {
 	mu     sync.RWMutex
 	client *Client
-	claims map[string]bitrateClaim
+	claims map[string]*bitrateClaim
 }
 
 func newbitrateController(client *Client) *bitrateController {
-	return &bitrateController{
+	bc := &bitrateController{
 		mu:     sync.RWMutex{},
 		client: client,
-		claims: make(map[string]bitrateClaim, 0),
+		claims: make(map[string]*bitrateClaim, 0),
 	}
+
+	bc.start()
+
+	return bc
 }
 
-func (bc *bitrateController) GetClaims() map[string]bitrateClaim {
+func (bc *bitrateController) Claims() map[string]*bitrateClaim {
 	bc.mu.RLock()
 	defer bc.mu.RUnlock()
 
-	claims := make(map[string]bitrateClaim, 0)
+	claims := make(map[string]*bitrateClaim, 0)
 	for k, v := range bc.claims {
 		claims[k] = v
 	}
@@ -64,49 +68,27 @@ func (bc *bitrateController) GetClaim(id string) *bitrateClaim {
 	defer bc.mu.Unlock()
 
 	if claim, ok := bc.claims[id]; ok {
-		return &claim
+		return claim
 	}
 
 	return nil
 }
 
 // if all is false, only active claims will be counted
-func (bc *bitrateController) TotalBitrates(all bool) uint32 {
+func (bc *bitrateController) TotalBitrates() uint32 {
 	bc.mu.Lock()
 	defer bc.mu.Unlock()
 
-	return bc.totalBitrates(all)
+	return bc.totalBitrates()
 }
 
-func (bc *bitrateController) totalBitrates(all bool) uint32 {
+func (bc *bitrateController) totalBitrates() uint32 {
 	total := uint32(0)
 	for _, claim := range bc.claims {
-		if !all && !claim.active {
-			continue
-		}
-
 		total += claim.bitrate
 	}
 
 	return total
-}
-
-func (bc *bitrateController) canIncreaseBitrate(clientTrackID string, quality QualityLevel, availableBandwidth int32) bool {
-	delta := uint32(0)
-
-	newBitrate := bc.client.sfu.QualityLevelToBitrate(quality)
-
-	bc.mu.Lock()
-	claim, ok := bc.claims[clientTrackID]
-	bc.mu.Unlock()
-
-	if !ok {
-		return false
-	}
-
-	delta = newBitrate - claim.bitrate
-
-	return int32(delta) < availableBandwidth
 }
 
 func (bc *bitrateController) setQuality(clientTrackID string, quality QualityLevel) {
@@ -117,16 +99,6 @@ func (bc *bitrateController) setQuality(clientTrackID string, quality QualityLev
 		bitrate := bc.client.sfu.QualityLevelToBitrate(quality)
 		claim.quality = quality
 		claim.bitrate = bitrate
-		bc.claims[clientTrackID] = claim
-	}
-}
-
-func (bc *bitrateController) setClaimActive(clientTrackID string, active bool) {
-	bc.mu.RLock()
-	defer bc.mu.RUnlock()
-
-	if claim, ok := bc.claims[clientTrackID]; ok {
-		claim.active = active
 		bc.claims[clientTrackID] = claim
 	}
 }
@@ -165,10 +137,6 @@ func (bc *bitrateController) checkAllTrackActive(claim *bitrateClaim) (bool, Qua
 		}
 
 		if trackCount == 1 {
-			if !claim.active {
-				bc.setClaimActive(claim.track.ID(), true)
-			}
-
 			qualityLvl := Uint32ToQualityLevel(uint32(quality))
 			if claim.quality != qualityLvl {
 				bc.setQuality(claim.track.ID(), qualityLvl)
@@ -188,124 +156,13 @@ func (bc *bitrateController) checkAllTrackActive(claim *bitrateClaim) (bool, Qua
 	return false, claim.quality
 }
 
-// this should be called to check if the quality must be reduced because there is an unactive claim need to fit in the bandwidth
-// TODO:
-// 1. Need to keep all claims distributed not more than 2 levels.
-// 2. If there is a level still in 1, then no level allowed to go up to 3
-// 3. The same with reducing level, no level allowed to go down to 1 if there is a level still in 3
-func (bc *bitrateController) getNextTrackQuality(clientTrackID string, availableBandwidth int32) QualityLevel {
-	claim := bc.GetClaim(clientTrackID)
-	if claim == nil {
-		glog.Warning("client: claim is not exists")
-		return QualityNone
-	}
-
-	// check if the simulcast tracks all available
-	// this to prevent we switch quality on RID track but the other RID track is not available
-	// because the browser doesn't support simulcast with the codec
-	if ok, quality := bc.checkAllTrackActive(claim); !ok {
-		return quality
-	}
-
-	unActiveBitrates := uint32(0)
-	highCount := 0
-	midCount := 0
-	lowCount := 0
-
-	bc.mu.Lock()
-
-	for _, claim := range bc.claims {
-		if !claim.active {
-			unActiveBitrates += claim.bitrate
-		}
-
-		if claim.simulcast && claim.active && claim.track.Kind() == webrtc.RTPCodecTypeVideo {
-			switch claim.quality {
-			case QualityHigh:
-				highCount++
-			case QualityMid:
-				midCount++
-			case QualityLow:
-				lowCount++
-			}
-		}
-	}
-
-	bc.mu.Unlock()
-
-	if claim.active {
-		// check if we need to reduce the quality of active tracks
-		if unActiveBitrates > 0 ||
-			availableBandwidth < 0 {
-			// need to reduce the quality if there is an unactive claim and quality distribution is not balanced
-			// TODO: check if need to reduce from high to low
-			nextQuality := claim.quality - 1
-
-			// prevent reduce to low if there it make unbalanced quality distribution
-			if (nextQuality == QualityLow && highCount > 0) || (nextQuality == QualityNone && midCount > 0) {
-				return claim.quality
-			}
-
-			// no reduction to none or unactivate for screen
-			if nextQuality == QualityNone && claim.track.IsScreen() {
-				return claim.quality
-			}
-
-			if nextQuality == QualityNone {
-				// unactivate the claim instead of reducing to none to make sure we still have claimed bitrate
-				bc.setClaimActive(clientTrackID, false)
-				return nextQuality
-			}
-
-			bc.setQuality(clientTrackID, nextQuality)
-
-			return nextQuality
-
-		}
-	} else {
-		// check if we need to activate our claim
-		// TODO:
-		// bitrate estimation won't increase if it fall below the minimum bitrate and sending bitrates is not enough to test the bandwidth
-		// we should try to activate the claim if the bitrate estimation is below the minimum bitrate
-		// and check if the packet loss is increased, if yes then we should deactivate the claim
-		// if no, it should increase the bitrate estimation and we can continue
-		if int32(claim.bitrate) > availableBandwidth {
-			// not enough bandwidth to activate the claim, return none because it's not active yet
-			glog.Info("bitrate: bandwidth ", ThousandSeparator(int(availableBandwidth)), " is not enough to activate the claim")
-			return QualityNone
-		}
-
-		bc.setClaimActive(clientTrackID, true)
-	}
-
-	// check if we can increase the quality
-	if claim.quality < QualityHigh && claim.active {
-		nextQuality := claim.quality + 1
-
-		if availableBandwidth > 0 && bc.canIncreaseBitrate(clientTrackID, nextQuality, availableBandwidth) {
-			// prevent increase to high if there is other claims in low
-			if nextQuality == QualityHigh && lowCount > 0 {
-				return claim.quality
-			}
-
-			glog.Info("bitrate: bandwidth ", ThousandSeparator(int(availableBandwidth)), " is enough to increase bandwidth")
-
-			bc.setQuality(clientTrackID, nextQuality)
-
-			return nextQuality
-		}
-	}
-
-	if !claim.active {
-		return QualityNone
-	}
-
-	return claim.quality
-}
-
 func (bc *bitrateController) addClaims(clientTracks []iClientTrack) error {
-	availableBandwidth := bc.availableBandwidth()
-	distributedVideoQuality := bc.getDistributedQuality(availableBandwidth)
+	distributedVideoQuality := Uint32ToQualityLevel(QualityNone)
+
+	availableBandwidth := bc.client.GetEstimatedBandwidth() - bc.TotalBitrates()
+	if availableBandwidth > 0 {
+		distributedVideoQuality = bc.getDistributedQuality(int32(availableBandwidth))
+	}
 
 	bc.mu.Lock()
 	defer bc.mu.Unlock()
@@ -340,7 +197,7 @@ func (bc *bitrateController) addClaims(clientTracks []iClientTrack) error {
 	return nil
 }
 
-func (bc *bitrateController) addClaim(clientTrack iClientTrack, quality QualityLevel, locked bool) (bitrateClaim, error) {
+func (bc *bitrateController) addClaim(clientTrack iClientTrack, quality QualityLevel, locked bool) (*bitrateClaim, error) {
 	bitrate := bc.client.sfu.QualityLevelToBitrate(quality)
 
 	if !locked {
@@ -348,12 +205,11 @@ func (bc *bitrateController) addClaim(clientTrack iClientTrack, quality QualityL
 		defer bc.mu.RUnlock()
 	}
 
-	bc.claims[clientTrack.ID()] = bitrateClaim{
+	bc.claims[clientTrack.ID()] = &bitrateClaim{
 		track:     clientTrack,
 		quality:   quality,
 		simulcast: clientTrack.IsSimulcast(),
 		bitrate:   bitrate,
-		active:    true,
 	}
 
 	clientTrack.OnTrackEnded(func() {
@@ -374,11 +230,20 @@ func (bc *bitrateController) RemoveClaim(id string) {
 	delete(bc.claims, id)
 }
 
-// getAvailableBandwidth returns the available bandwidth for the client
+// getAvailableBandwidth returns the available bandwidth for the client to claim
 // The available bandwidth is the estimated bandwidth minus the total bitrate of all active claims
 // Use this information for debugging or logging purpose
 func (bc *bitrateController) availableBandwidth() int32 {
-	return int32(bc.client.GetEstimatedBandwidth()) - int32(bc.TotalBitrates(false))
+	estimatedBandwidth := int32(bc.client.GetEstimatedBandwidth())
+	availableBandwidth := estimatedBandwidth - int32(bc.TotalBitrates())
+	minSpace := int32(bc.client.sfu.bitratesConfig.VideoLow + bc.client.sfu.bitratesConfig.Audio)
+
+	if estimatedBandwidth > minSpace {
+		// always keep extra space for another 1 low video track and 1 audio track
+		availableBandwidth -= minSpace
+	}
+
+	return availableBandwidth
 }
 
 func (bc *bitrateController) exists(id string) bool {
@@ -400,7 +265,7 @@ func (bc *bitrateController) getQuality(t *SimulcastClientTrack) QualityLevel {
 
 	// need to manually lock to prevent a goroutine add claim while we are checking the claims
 	bc.mu.Lock()
-	_, exist := bc.claims[t.ID()]
+	claim, exist := bc.claims[t.ID()]
 	bc.mu.Unlock()
 	if !exist {
 		// this must be never reached
@@ -408,7 +273,7 @@ func (bc *bitrateController) getQuality(t *SimulcastClientTrack) QualityLevel {
 	}
 
 	// check if the bitrate can be adjusted
-	quality := bc.getNextTrackQuality(t.ID(), availableBandwidth)
+	quality := claim.quality
 
 	clientQuality := Uint32ToQualityLevel(t.client.quality.Load())
 	if quality > clientQuality {
@@ -423,12 +288,12 @@ func (bc *bitrateController) getQuality(t *SimulcastClientTrack) QualityLevel {
 		}
 
 		if !track.isTrackActive(lastQuality) {
-			glog.Warning("bitrate: quality ", quality, " and fallback quality ", lastQuality, " is not active, so sending no qualty. Available bandwidth: ", ThousandSeparator(int(availableBandwidth)), "active bitrate: ", ThousandSeparator(int(t.client.bitrateController.TotalBitrates(false))))
+			glog.Warning("bitrate: quality ", quality, " and fallback quality ", lastQuality, " is not active, so sending no qualty. Available bandwidth: ", ThousandSeparator(int(availableBandwidth)), "active bitrate: ", ThousandSeparator(int(t.client.bitrateController.TotalBitrates())))
 
 			return QualityNone
 		}
 
-		glog.Warning("bitrate: quality ", quality, " is not active,  fallback to last quality ", lastQuality, ". Available bandwidth: ", ThousandSeparator(int(availableBandwidth)), "active bitrate: ", ThousandSeparator(int(t.client.bitrateController.TotalBitrates(false))))
+		glog.Warning("bitrate: quality ", quality, " is not active,  fallback to last quality ", lastQuality, ". Available bandwidth: ", ThousandSeparator(int(availableBandwidth)), "active bitrate: ", ThousandSeparator(int(t.client.bitrateController.TotalBitrates())))
 
 		return lastQuality
 	}
@@ -522,4 +387,90 @@ func (bc *bitrateController) totalSentBitrates() uint32 {
 	}
 
 	return total
+}
+
+func (bc *bitrateController) start() {
+	go func() {
+		context, cancel := context.WithCancel(bc.client.context)
+		defer cancel()
+
+		ticker := time.NewTicker(1 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-context.Done():
+				return
+			case <-ticker.C:
+				bc.checkAndAdjustBitrates()
+			}
+		}
+	}()
+}
+
+// checkAndAdjustBitrates will check if the available bandwidth is enough to send the current bitrate
+// if not then it will try to reduce one by one of simulcast track quality until it fit the bandwidth
+// if the bandwidth is enough to send the current bitrate, then it will try to increase the bitrate
+func (bc *bitrateController) checkAndAdjustBitrates() {
+	availableFreeBandwidth := bc.availableBandwidth()
+	estimatedBandwidth := bc.client.GetEstimatedBandwidth()
+
+	claims := bc.Claims()
+
+	for _, claim := range claims {
+		allActive, quality := bc.checkAllTrackActive(claim)
+		if !allActive {
+			bc.setQuality(claim.track.ID(), quality)
+		}
+	}
+
+	if availableFreeBandwidth < 0 {
+		// need reduce the bitrate
+		for _, claim := range claims {
+			if claim.track.IsSimulcast() && claim.quality > QualityNone {
+				reducedQuality := claim.quality - 1
+				glog.Info("bitrate: bandwidth ", ThousandSeparator(int(estimatedBandwidth)), " is not enough to send ", ThousandSeparator(int(bc.TotalBitrates())), " bitrate, reducing quality to ", reducedQuality)
+				additionalBitrate := bc.calculateDeltaBitrate(claim.quality, reducedQuality)
+				availableFreeBandwidth += additionalBitrate
+				bc.setQuality(claim.track.ID(), reducedQuality)
+
+				if availableFreeBandwidth > 0 {
+					// enough bandwidth, return
+					return
+				}
+			}
+		}
+	}
+
+	if availableFreeBandwidth > 0 || availableFreeBandwidth < 0 && estimatedBandwidth < 150_000 {
+		// possible to increase the bitrate
+
+		if estimatedBandwidth < 150_000 {
+			// this to test if the actual bandwidth possible to send more than estimated bandwidth
+			availableFreeBandwidth = 200_000
+		}
+
+		for _, claim := range claims {
+			if claim.track.IsSimulcast() && claim.quality < QualityHigh {
+				increasedQuality := claim.quality + 1
+				additionalBitrate := bc.calculateDeltaBitrate(claim.quality, increasedQuality)
+				availableFreeBandwidth += additionalBitrate
+				if availableFreeBandwidth < 0 {
+					// not enough bandwidth, return
+					return
+				}
+
+				glog.Info("bitrate: bandwidth ", ThousandSeparator(int(estimatedBandwidth)), " is enough to send ", ThousandSeparator(int(bc.TotalBitrates()-uint32(additionalBitrate))), " bitrate, increase quality to ", increasedQuality)
+
+				bc.setQuality(claim.track.ID(), increasedQuality)
+			}
+		}
+	}
+
+}
+
+func (bc *bitrateController) calculateDeltaBitrate(fromQuality, toQuality QualityLevel) int32 {
+	fromBitrate := bc.client.sfu.QualityLevelToBitrate(fromQuality)
+	toBitrate := bc.client.sfu.QualityLevelToBitrate(toQuality)
+
+	return int32(fromBitrate - toBitrate)
 }
