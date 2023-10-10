@@ -51,6 +51,7 @@ type ITrack interface {
 	SetAsProcessed()
 	IsScreen() bool
 	Kind() webrtc.RTPCodecType
+	MimeType() string
 	TotalTracks() int
 }
 
@@ -137,17 +138,21 @@ func (t *track) Kind() webrtc.RTPCodecType {
 	return t.base.kind
 }
 
+func (t *track) MimeType() string {
+	return t.base.codec.MimeType
+}
+
 func (t *track) TotalTracks() int {
 	return 1
 }
 
-func (t *track) subscribe() iClientTrack {
+func (t *track) subscribe(c *Client) iClientTrack {
 	isScreen := &atomic.Bool{}
 	isScreen.Store(t.IsScreen())
 	ct := &clientTrack{
 		id:                    t.base.id,
 		mu:                    sync.RWMutex{},
-		client:                t.Client(),
+		client:                c,
 		kind:                  t.base.kind,
 		mimeType:              t.remoteTrack.track.Codec().MimeType,
 		localTrack:            t.createLocalTrack(),
@@ -161,10 +166,6 @@ func (t *track) subscribe() iClientTrack {
 	})
 
 	t.base.clientTracks.Add(ct)
-
-	if _, err := t.base.client.bitrateController.AddClaim(ct, QualityHigh); err != nil {
-		glog.Error("track: error adding bitrate claim ", err)
-	}
 
 	return ct
 }
@@ -552,6 +553,10 @@ func (t *simulcastTrack) sendPLI(quality QualityLevel) {
 			}
 		}
 	}
+}
+
+func (t *simulcastTrack) MimeType() string {
+	return t.base.codec.MimeType
 }
 
 type SubscribeTrackRequest struct {

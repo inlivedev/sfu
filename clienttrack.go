@@ -201,6 +201,11 @@ func (t *SimulcastClientTrack) push(p *rtp.Packet, quality QualityLevel) {
 
 	lastQuality := t.LastQuality()
 
+	if !t.client.bitrateController.exists(t.ID()) {
+		// do nothing if the bitrate claim is not exist
+		return
+	}
+
 	isFirstKeyframePacket := t.isFirstKeyframePacket(p)
 
 	// check if it's a first packet to send
@@ -235,7 +240,7 @@ func (t *SimulcastClientTrack) push(p *rtp.Packet, quality QualityLevel) {
 		// lastCheckQualityDuration := time.Since(time.Unix(0, t.lastCheckQualityTS.Load()))
 
 		if isFirstKeyframePacket { // && lastCheckQualityDuration.Seconds() >= 1 {
-			trackQuality = t.client.bitrateController.GetQuality(t)
+			trackQuality = t.client.bitrateController.getQuality(t)
 			// update latest keyframe timestamp
 			// TODO: currently not use anywhere but useful to detect if the track is active or need to refresh full picture
 			switch quality {

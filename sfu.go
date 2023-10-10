@@ -222,16 +222,10 @@ func (s *SFU) NewClient(id, name string, opts ClientOptions) *Client {
 				client.renegotiate()
 			}
 
-			if client.pendingReceivedTracks.Length() > 0 {
-				clientTracks := client.processPendingTracks()
+			if len(client.pendingReceivedTracks) > 0 {
+				isNeedNegotiation := client.processPendingTracks()
 
-				if len(clientTracks) > 0 {
-					// claim bitrates to bitrate controller
-
-					if err := client.bitrateController.AddClaims(clientTracks); err != nil {
-						glog.Error("sfu: failed to add claims ", err)
-					}
-
+				if isNeedNegotiation {
 					client.renegotiate()
 				}
 			}
@@ -305,30 +299,34 @@ func (s *SFU) syncTrack(client *Client) bool {
 		publishedTrackIDs = append(publishedTrackIDs, track.ID())
 	}
 
-	clientTracks := make([]iClientTrack, 0)
+	subscribes := make([]SubscribeTrackRequest, 0)
 
 	for _, clientPeer := range s.clients.GetClients() {
 		for _, track := range clientPeer.tracks.GetTracks() {
 			if client.ID() != clientPeer.ID() {
 				if !slices.Contains(publishedTrackIDs, track.ID()) {
-					clientTrack := client.addTrack(track)
+					subscribes = append(subscribes, SubscribeTrackRequest{
+						ClientID: clientPeer.ID(),
+						TrackID:  track.ID(),
+					})
 
-					// request the keyframe from track publisher after added
-					s.requestKeyFrameFromClient(clientPeer.ID())
-					if clientTrack != nil {
-						clientTracks = append(clientTracks, clientTrack)
-					}
+					// send PLI to previous client so they refresh the video after added to new client
+					clientPeer.requestKeyFrame()
 				}
 			}
 		}
 	}
 
-	// claim bitrates to bitrate controller
-	if err := client.bitrateController.AddClaims(clientTracks); err != nil {
-		glog.Error("sfu: failed to add claims ", err)
+	if len(subscribes) > 0 {
+		err := client.SubscribeTracks(subscribes)
+		if err != nil {
+			glog.Error("client: failed to subscribe tracks ", err)
+		}
+
+		return true
 	}
 
-	return len(clientTracks) > 0
+	return false
 }
 
 func (s *SFU) Stop() {
@@ -349,12 +347,6 @@ func (s *SFU) Stop() {
 
 func (s *SFU) OnStopped(callback func()) {
 	s.onStop = callback
-}
-
-func (s *SFU) requestKeyFrameFromClient(clientID string) {
-	if client, err := s.clients.GetClient(clientID); err == nil {
-		client.requestKeyFrame()
-	}
 }
 
 func (s *SFU) OnClientAdded(callback func(*Client)) {
