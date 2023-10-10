@@ -196,7 +196,7 @@ func (bc *bitrateController) checkAllTrackActive(claim *bitrateClaim) (bool, Qua
 // 1. Need to keep all claims distributed not more than 2 levels.
 // 2. If there is a level still in 1, then no level allowed to go up to 3
 // 3. The same with reducing level, no level allowed to go down to 1 if there is a level still in 3
-func (bc *bitrateController) getNextTrackQuality(clientTrackID string) QualityLevel {
+func (bc *bitrateController) getNextTrackQuality(clientTrackID string, availableBandwidth int32) QualityLevel {
 	claim := bc.GetClaim(clientTrackID)
 	if claim == nil {
 		glog.Warning("client: claim is not exists")
@@ -204,11 +204,13 @@ func (bc *bitrateController) getNextTrackQuality(clientTrackID string) QualityLe
 	}
 
 	// check if the simulcast tracks all available
+	// this to prevent we switch quality on RID track but the other RID track is not available
+	// because the browser doesn't support simulcast with the codec
 	if ok, quality := bc.checkAllTrackActive(claim); !ok {
 		return quality
 	}
 
-	inActiveBitrates := uint32(0)
+	unActiveBitrates := uint32(0)
 	highCount := 0
 	midCount := 0
 	lowCount := 0
@@ -217,7 +219,7 @@ func (bc *bitrateController) getNextTrackQuality(clientTrackID string) QualityLe
 
 	for _, claim := range bc.claims {
 		if !claim.active {
-			inActiveBitrates += claim.bitrate
+			unActiveBitrates += claim.bitrate
 		}
 
 		if claim.simulcast && claim.active && claim.track.Kind() == webrtc.RTPCodecTypeVideo {
@@ -234,7 +236,8 @@ func (bc *bitrateController) getNextTrackQuality(clientTrackID string) QualityLe
 
 	bc.mu.Unlock()
 
-	if (inActiveBitrates > 0 && claim.active) ||
+	if (unActiveBitrates > 0 && claim.active) ||
+		(availableBandwidth < 0 && claim.active) ||
 		(claim.active && claim.quality == QualityHigh && lowCount > 0) {
 		// need to reduce the quality if there is an unactive claim and quality distribution is not balanced
 		// TODO: check if need to reduce from high to low
@@ -297,7 +300,7 @@ func (bc *bitrateController) getNextTrackQuality(clientTrackID string) QualityLe
 }
 
 func (bc *bitrateController) AddClaims(clientTracks []iClientTrack) error {
-	availableBandwidth := bc.GetAvailableBandwidth()
+	availableBandwidth := bc.availableBandwidth()
 	quality := bc.getDistributedQuality(availableBandwidth)
 
 	bc.mu.Lock()
@@ -380,8 +383,11 @@ func (bc *bitrateController) RemoveClaim(id string) {
 	delete(bc.claims, id)
 }
 
-func (bc *bitrateController) GetAvailableBandwidth() uint32 {
-	return bc.client.GetEstimatedBandwidth() - bc.TotalBitrates(true)
+// getAvailableBandwidth returns the available bandwidth for the client
+// The available bandwidth is the estimated bandwidth minus the total bitrate of all active claims
+// Use this information for debugging or logging purpose
+func (bc *bitrateController) availableBandwidth() int32 {
+	return int32(bc.client.GetEstimatedBandwidth()) - int32(bc.TotalBitrates(true))
 }
 
 func (bc *bitrateController) GetQuality(t *SimulcastClientTrack) QualityLevel {
@@ -390,7 +396,7 @@ func (bc *bitrateController) GetQuality(t *SimulcastClientTrack) QualityLevel {
 	var quality QualityLevel
 
 	t.lastCheckQualityTS.Store(time.Now().UnixNano())
-	availableBandwidth := bc.GetAvailableBandwidth()
+	availableBandwidth := bc.availableBandwidth()
 
 	// need to manually lock to prevent a goroutine add claim while we are checking the claims
 	bc.mu.Lock()
@@ -399,9 +405,14 @@ func (bc *bitrateController) GetQuality(t *SimulcastClientTrack) QualityLevel {
 	if !exist {
 		// new track
 
-		quality = bc.getDistributedQuality(availableBandwidth)
+		isActive := false
 
-		claim, err := bc.addClaim(t, quality, true)
+		if availableBandwidth > 0 {
+			isActive = true
+			quality = bc.getDistributedQuality(availableBandwidth)
+		}
+
+		claim, err := bc.addClaim(t, quality, isActive)
 		glog.Info("bcontroller: add new claim for track ", t.ID(), " quality ", quality, " bitrate ", ThousandSeparator(int(claim.bitrate)), " available bandwidth ", ThousandSeparator(int(availableBandwidth)))
 		// don't forget to unlock
 		bc.mu.Unlock()
@@ -422,7 +433,7 @@ func (bc *bitrateController) GetQuality(t *SimulcastClientTrack) QualityLevel {
 		bc.mu.Unlock()
 
 		// check if the bitrate can be adjusted
-		quality = bc.getNextTrackQuality(t.ID())
+		quality = bc.getNextTrackQuality(t.ID(), availableBandwidth)
 	}
 
 	clientQuality := Uint32ToQualityLevel(t.client.quality.Load())
@@ -451,7 +462,7 @@ func (bc *bitrateController) GetQuality(t *SimulcastClientTrack) QualityLevel {
 	return quality
 }
 
-func (bc *bitrateController) getDistributedQuality(availableBandwidth uint32) QualityLevel {
+func (bc *bitrateController) getDistributedQuality(availableBandwidth int32) QualityLevel {
 	audioTracksCount := 0
 	videoTracksCount := 0
 	simulcastTracksCount := 0
@@ -498,20 +509,20 @@ func (bc *bitrateController) getDistributedQuality(availableBandwidth uint32) Qu
 		}
 	}
 
-	leftBandwidth := availableBandwidth - (uint32(audioTracksCount-audioClaimsCount) * bc.client.sfu.bitratesConfig.Audio) - (uint32(videoTracksCount-videoClaimsCount) * bc.client.sfu.bitratesConfig.Video)
+	leftBandwidth := availableBandwidth - (int32(audioTracksCount-audioClaimsCount) * int32(bc.client.sfu.bitratesConfig.Audio)) - (int32(videoTracksCount-videoClaimsCount) * int32(bc.client.sfu.bitratesConfig.Video))
 
-	newTrackCount := uint32(simulcastTracksCount - simulcastClaimsCount)
+	newTrackCount := int32(simulcastTracksCount - simulcastClaimsCount)
 
 	if newTrackCount == 0 {
 		// all tracks already claimed bitrates, return none
 		return QualityNone
 	}
 
-	distributedBandwidth := leftBandwidth / newTrackCount
+	distributedBandwidth := int32(leftBandwidth) / newTrackCount
 
-	if distributedBandwidth > bc.client.sfu.bitratesConfig.VideoHigh && highCount > 0 {
+	if distributedBandwidth > int32(bc.client.sfu.bitratesConfig.VideoHigh) && highCount > 0 {
 		return QualityHigh
-	} else if distributedBandwidth < bc.client.sfu.bitratesConfig.VideoHigh && distributedBandwidth > bc.client.sfu.bitratesConfig.VideoMid && (midCount > 0 || highCount > 0) {
+	} else if distributedBandwidth < int32(bc.client.sfu.bitratesConfig.VideoHigh) && distributedBandwidth > int32(bc.client.sfu.bitratesConfig.VideoMid) && (midCount > 0 || highCount > 0) {
 		return QualityMid
 	} else {
 		return QualityLow
