@@ -264,6 +264,11 @@ func (bc *bitrateController) getNextTrackQuality(clientTrackID string, available
 		}
 	} else {
 		// check if we need to activate our claim
+		// TODO:
+		// bitrate estimation won't increase if it fall below the minimum bitrate and sending bitrates is not enough to test the bandwidth
+		// we should try to activate the claim if the bitrate estimation is below the minimum bitrate
+		// and check if the packet loss is increased, if yes then we should deactivate the claim
+		// if no, it should increase the bitrate estimation and we can continue
 		if int32(claim.bitrate) > availableBandwidth {
 			// not enough bandwidth to activate the claim, return none because it's not active yet
 			glog.Info("bitrate: bandwidth ", ThousandSeparator(int(availableBandwidth)), " is not enough to activate the claim")

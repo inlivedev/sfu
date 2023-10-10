@@ -133,6 +133,10 @@ func TestRoomDataChannelWithClientID(t *testing.T) {
 	chatChan := make(chan string)
 
 	var onDataChannel = func(d *webrtc.DataChannel) {
+		if d.Label() != "chat" {
+			return
+		}
+
 		t.Log("data channel opened ", d.Label())
 
 		d.OnMessage(func(msg webrtc.DataChannelMessage) {
@@ -154,6 +158,10 @@ func TestRoomDataChannelWithClientID(t *testing.T) {
 	pc1.OnDataChannel(onDataChannel)
 
 	pc2.OnDataChannel(func(d *webrtc.DataChannel) {
+		if d.Label() != "chat" {
+			return
+		}
+
 		t.Log("data channel opened ", d.Label())
 
 		d.OnMessage(func(msg webrtc.DataChannelMessage) {
@@ -183,10 +191,12 @@ func TestRoomDataChannelWithClientID(t *testing.T) {
 		Ordered:   true,
 		ClientIDs: []string{client1.ID(), client3.ID()},
 	})
+
 	require.NoError(t, err)
 
 	// make sure to return error on creating data channel with same label
 	err = testRoom.CreateDataChannel("chat", DefaultDataChannelOptions())
+
 	require.Error(t, err)
 
 	timeout, cancelTimeout := context.WithTimeout(ctx, 30*time.Second)
