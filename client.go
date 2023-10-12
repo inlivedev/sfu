@@ -104,13 +104,13 @@ type ClientStats struct {
 }
 
 type Client struct {
-	id                                string
-	name                              string
-	bitrateController                 *bitrateController
-	context                           context.Context
-	cancel                            context.CancelFunc
-	canAddCandidate                   *atomic.Bool
-	clientStats                       *ClientStats
+	id                string
+	name              string
+	bitrateController *bitrateController
+	context           context.Context
+	cancel            context.CancelFunc
+	canAddCandidate   *atomic.Bool
+
 	dataChannels                      *DataChannelList
 	estimatorChan                     chan cc.BandwidthEstimator
 	estimator                         cc.BandwidthEstimator
@@ -143,6 +143,7 @@ type Client struct {
 	onTracksAdded                  func([]ITrack)
 	options                        ClientOptions
 	statsGetter                    stats.Getter
+	stats                          *ClientStats
 	tracks                         *trackList
 	negotiationNeeded              *atomic.Bool
 	pendingRemoteCandidates        []webrtc.ICECandidateInit
@@ -288,7 +289,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 
 	client.ingressQualityLimitationReason.Store("none")
 
-	client.clientStats = &ClientStats{
+	client.stats = &ClientStats{
 		senderMu:   sync.RWMutex{},
 		receiverMu: sync.RWMutex{},
 		Client:     client,
@@ -873,7 +874,7 @@ func (c *Client) PeerConnection() *webrtc.PeerConnection {
 }
 
 func (c *Client) Stats() *ClientStats {
-	return c.clientStats
+	return c.stats
 }
 
 func (c *Client) updateReceiverStats(remoteTrack *remoteTrack) {
@@ -893,10 +894,10 @@ func (c *Client) updateReceiverStats(remoteTrack *remoteTrack) {
 		return
 	}
 
-	c.clientStats.receiverMu.Lock()
-	defer c.clientStats.receiverMu.Unlock()
+	c.stats.receiverMu.Lock()
+	defer c.stats.receiverMu.Unlock()
 	senderStats := *c.statsGetter.Get(uint32(track.SSRC()))
-	c.clientStats.Receiver[track.SSRC()] = ReceiverStats{
+	c.stats.Receiver[track.SSRC()] = ReceiverStats{
 		Stats: senderStats,
 		Track: track,
 	}
@@ -920,13 +921,13 @@ func (c *Client) updateSenderStats(sender *webrtc.RTPSender) {
 		return
 	}
 
-	c.clientStats.senderMu.Lock()
-	defer c.clientStats.senderMu.Unlock()
+	c.stats.senderMu.Lock()
+	defer c.stats.senderMu.Unlock()
 
 	ssrc := sender.GetParameters().Encodings[0].SSRC
 
 	senderStats := *c.statsGetter.Get(uint32(ssrc))
-	c.clientStats.Sender[ssrc] = SenderStats{
+	c.stats.Sender[ssrc] = SenderStats{
 		Stats: senderStats,
 		Track: sender.Track(),
 	}

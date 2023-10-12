@@ -393,7 +393,7 @@ func (t *simulcastTrack) subscribe(client *Client) iClientTrack {
 
 	lastTimestamp := &atomic.Uint32{}
 
-	ct := &SimulcastClientTrack{
+	ct := &simulcastClientTrack{
 		mu:                      sync.RWMutex{},
 		id:                      t.base.id,
 		kind:                    t.base.kind,

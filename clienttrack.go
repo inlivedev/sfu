@@ -109,7 +109,7 @@ func (t *clientTrack) IsSimulcast() bool {
 	return false
 }
 
-type SimulcastClientTrack struct {
+type simulcastClientTrack struct {
 	id                      string
 	mu                      sync.RWMutex
 	client                  *Client
@@ -127,13 +127,13 @@ type SimulcastClientTrack struct {
 	onTrackEndedCallbacks   []func()
 }
 
-func (t *SimulcastClientTrack) isFirstKeyframePacket(p *rtp.Packet) bool {
+func (t *simulcastClientTrack) isFirstKeyframePacket(p *rtp.Packet) bool {
 	isKeyframe := IsKeyframe(t.mimeType, p)
 
 	return isKeyframe && t.lastTimestamp.Load() != p.Timestamp
 }
 
-func (t *SimulcastClientTrack) send(p *rtp.Packet, quality QualityLevel, lastQuality QualityLevel) {
+func (t *simulcastClientTrack) send(p *rtp.Packet, quality QualityLevel, lastQuality QualityLevel) {
 	// set the last processed packet timestamp to identify if is begining of the new frame
 	t.lastTimestamp.Store(p.Timestamp)
 	// make sure the timestamp and sequence number is consistent from the previous packet even it is not the same track
@@ -167,7 +167,7 @@ func (t *SimulcastClientTrack) send(p *rtp.Packet, quality QualityLevel, lastQua
 }
 
 // Currently not used, plan to use for other codec than h264
-func (t *SimulcastClientTrack) sendBlankFrame(packetRef *rtp.Packet) {
+func (t *simulcastClientTrack) sendBlankFrame(packetRef *rtp.Packet) {
 	timestamp := t.remoteTrack.baseTS + ((packetRef.Timestamp - t.remoteTrack.remoteTrackLowBaseTS) - t.remoteTrack.remoteTrackLowBaseTS)
 	t.lastBlankSequenceNumber.Add(1)
 	sequenceNumber := t.lastBlankSequenceNumber.Load()
@@ -195,7 +195,7 @@ func (t *SimulcastClientTrack) sendBlankFrame(packetRef *rtp.Packet) {
 	t.lastBlankSequenceNumber.Store(uint32(lastSequence))
 }
 
-func (t *SimulcastClientTrack) push(p *rtp.Packet, quality QualityLevel) {
+func (t *simulcastClientTrack) push(p *rtp.Packet, quality QualityLevel) {
 
 	var trackQuality QualityLevel
 
@@ -280,7 +280,7 @@ func (t *SimulcastClientTrack) push(p *rtp.Packet, quality QualityLevel) {
 	}
 }
 
-func (t *SimulcastClientTrack) GetRemoteTrack() *remoteTrack {
+func (t *simulcastClientTrack) GetRemoteTrack() *remoteTrack {
 	lastQuality := Uint32ToQualityLevel(t.lastQuality.Load())
 	// lastQuality := t.lastQuality
 	switch lastQuality {
@@ -307,7 +307,7 @@ func (t *SimulcastClientTrack) GetRemoteTrack() *remoteTrack {
 	return nil
 }
 
-func (t *SimulcastClientTrack) getCurrentBitrate() uint32 {
+func (t *simulcastClientTrack) getCurrentBitrate() uint32 {
 	currentTrack := t.GetRemoteTrack()
 	if currentTrack == nil {
 		return 0
@@ -316,38 +316,38 @@ func (t *SimulcastClientTrack) getCurrentBitrate() uint32 {
 	return currentTrack.GetCurrentBitrate()
 }
 
-func (t *SimulcastClientTrack) ID() string {
+func (t *simulcastClientTrack) ID() string {
 	return t.id
 }
 
-func (t *SimulcastClientTrack) Kind() webrtc.RTPCodecType {
+func (t *simulcastClientTrack) Kind() webrtc.RTPCodecType {
 	return t.kind
 }
 
-func (t *SimulcastClientTrack) LocalTrack() *webrtc.TrackLocalStaticRTP {
+func (t *simulcastClientTrack) LocalTrack() *webrtc.TrackLocalStaticRTP {
 	return t.localTrack
 }
 
-func (t *SimulcastClientTrack) IsScreen() bool {
+func (t *simulcastClientTrack) IsScreen() bool {
 	return t.isScreen.Load()
 }
 
-func (t *SimulcastClientTrack) SetSourceType(sourceType TrackType) {
+func (t *simulcastClientTrack) SetSourceType(sourceType TrackType) {
 	t.isScreen.Store(sourceType == TrackTypeScreen)
 }
 
-func (t *SimulcastClientTrack) LastQuality() QualityLevel {
+func (t *simulcastClientTrack) LastQuality() QualityLevel {
 	return Uint32ToQualityLevel(t.lastQuality.Load())
 }
 
-func (t *SimulcastClientTrack) OnTrackEnded(callback func()) {
+func (t *simulcastClientTrack) OnTrackEnded(callback func()) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	t.onTrackEndedCallbacks = append(t.onTrackEndedCallbacks, callback)
 }
 
-func (t *SimulcastClientTrack) onTrackEnded() {
+func (t *simulcastClientTrack) onTrackEnded() {
 	if t.isEnded.Load() {
 		return
 	}
@@ -362,15 +362,15 @@ func (t *SimulcastClientTrack) onTrackEnded() {
 	t.isEnded.Store(true)
 }
 
-func (t *SimulcastClientTrack) setMaxQuality(quality QualityLevel) {
+func (t *simulcastClientTrack) setMaxQuality(quality QualityLevel) {
 	t.maxQuality.Store(uint32(quality))
 }
 
-func (t *SimulcastClientTrack) getMaxQuality() QualityLevel {
+func (t *simulcastClientTrack) getMaxQuality() QualityLevel {
 	return Uint32ToQualityLevel(t.maxQuality.Load())
 }
 
-func (t *SimulcastClientTrack) IsSimulcast() bool {
+func (t *simulcastClientTrack) IsSimulcast() bool {
 	return true
 }
 

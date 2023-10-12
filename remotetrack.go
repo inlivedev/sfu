@@ -17,6 +17,8 @@ import (
 
 type remoteTrack struct {
 	client                *Client
+	context               context.Context
+	cancel                context.CancelFunc
 	mu                    sync.Mutex
 	track                 *webrtc.TrackRemote
 	receiver              *webrtc.RTPReceiver
@@ -29,7 +31,10 @@ type remoteTrack struct {
 }
 
 func newRemoteTrack(client *Client, track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver, onRead func(*rtp.Packet)) *remoteTrack {
+	ctx, cancel := context.WithCancel(client.context)
 	rt := &remoteTrack{
+		context:               ctx,
+		cancel:                cancel,
 		client:                client,
 		mu:                    sync.Mutex{},
 		track:                 track,
@@ -71,13 +76,11 @@ func (t *remoteTrack) onEnded() {
 
 func (t *remoteTrack) readRTP() {
 	go func() {
-		ctxx, cancel := context.WithCancel(t.client.context)
-
-		defer cancel()
+		defer t.cancel()
 
 		for {
 			select {
-			case <-ctxx.Done():
+			case <-t.context.Done():
 
 				return
 			default:
@@ -93,7 +96,7 @@ func (t *remoteTrack) readRTP() {
 
 				readDoneChan := make(chan bool)
 				go func() {
-					timeout, cancelTimeout := context.WithTimeout(ctxx, 5*time.Second)
+					timeout, cancelTimeout := context.WithTimeout(t.context, 5*time.Second)
 					defer cancelTimeout()
 					select {
 					case <-timeout.Done():
