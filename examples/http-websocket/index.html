@@ -110,46 +110,8 @@
             object-fit: contain;
         }
     </style>
-</head>
-<body>
-    <header>
-        <h1>HTTP WebSocket Example</h1>
-        <p>Open the console to see the output.</p>
-    </header>
-    <main>
-        <div id="local">
-            <video id="localVideo" muted playsinline></video>
-        </div>
-    </main>
-    <aside>
-        <h3>Outbound Video</h3>
-        <div id="stats-local"></div>
-    </aside>
-    <footer>
-        <button onclick="start()">Start</button>
-        <button onclick="shareScreen()">Share Screen</button>
-        <button onclick="toggleStats()">Toggle Stats</button>
-        <span><label>Quality</label> <select id="selectQuality" onchange="switchQuality()">
-            <option selected value="high">high</option>
-            <option value="mid">mid</option>
-            <option value="low">low</option>
-            <option value="none">none</option>
-        </select></span>
-
-        <span><label>Bandwidth Limit</label> <select id="selectBandwidth" onchange="setBandwidthLimit()">
-            <option selected value="0">no limit</option>
-            <option value="300000">300Kbps</option>
-            <option value="500000">500Kbps</option>
-            <option value="1000000">1Mbps</option>
-            <option value="2000000">2Mbps</option>
-            <option value="3000000">3Mbps</option>
-            <option value="4000000">4Mbps</option>
-            <option value="5000000">5Mbps</option>
-            <option value="7000000">7Mbps</option>
-            <option value="10000000">10Mbps</option>
-        </select></span>
-    </footer>
-    <script>
+    <script type="module">
+        import {InliveVideoObserver} from './inlive-video-observer.js'
           const peerConnection = new RTCPeerConnection({
                     iceServers: [
                         {
@@ -160,12 +122,15 @@
 
         let ws = null;
 
-        let statsChannel = null;
+        let internalChannel = null;
+
+        let videoObserver = null
 
         peerConnection.ondatachannel = function(e) {
             console.log("ondatachannel");
-            if (e.channel.label == "stats") {
-               statsChannel = e.channel;
+            if (e.channel.label == "internal") {
+                internalChannel = e.channel;
+                videoObserver = new InliveVideoObserver(e.channel)
             }
         };
 
@@ -238,7 +203,7 @@
         async function start() {
             startWs()
             document.querySelector("button").disabled = true;
-            var localVideo = document.getElementById("localVideo");
+            const localVideo = document.getElementById("localVideo");
            
             const video = {
                 width: {
@@ -249,13 +214,13 @@
                 },
             };
 
-            var constraints = {
+            const constraints = {
                 audio: true,
                 video: video
                 // video: true
             };
             
-            stream = await navigator.mediaDevices.getUserMedia(constraints)
+            const stream = await navigator.mediaDevices.getUserMedia(constraints)
             localVideo.srcObject = stream;
             localVideo.play();
 
@@ -281,6 +246,8 @@
                     remoteVideo.id = "video-"+trackid;
                     remoteVideo.autoplay = true;
                     container.appendChild(remoteVideo);
+
+                    videoObserver.observe(remoteVideo)
                 }
 
                 let stats = document.getElementById("stats-"+trackid)
@@ -575,14 +542,17 @@
                     qualityLimitiation = "bandwidth"
                 }
 
-                if (statsChannel!=null && statsChannel.readyState == "open"){
+                if (internalChannel!=null && internalChannel.readyState == "open"){
                     const stats={
                             available_outgoing_bitrate: bwController.available,
                             quality_limitation_reason: qualityLimitiation
                         }
 
-                    statsChannel.send(JSON.stringify(
-                        stats
+                        internalChannel.send(JSON.stringify(
+                            {
+                                type:'stats',
+                                data:stats
+                            }
                     ))
                 }
 
@@ -663,6 +633,53 @@
             await peerConnection.setLocalDescription(offer)
             ws.send(JSON.stringify({type:'offer',data:offer.sdp}));
         }
+
+        document.addEventListener("DOMContentLoaded", function(event) {
+            document.getElementById("btnStart").onclick = start;
+            document.getElementById("btnShareScreen").onclick = shareScreen;
+            document.getElementById("btnStats").onclick = toggleStats;
+            document.getElementById("selectQuality").onchange = switchQuality;
+            document.getElementById("selectBandwidth").onchange = setBandwidthLimit;
+        });
         </script>
+</head>
+<body>
+    <header>
+        <h1>HTTP WebSocket Example</h1>
+        <p>Open the console to see the output.</p>
+    </header>
+    <main>
+        <div id="local">
+            <video id="localVideo" muted playsinline></video>
+        </div>
+    </main>
+    <aside>
+        <h3>Outbound Video</h3>
+        <div id="stats-local"></div>
+    </aside>
+    <footer>
+        <button id="btnStart">Start</button>
+        <button id="btnShareScreen">Share Screen</button>
+        <button id="btnStats">Toggle Stats</button>
+        <span><label>Quality</label> <select id="selectQuality">
+            <option selected value="high">high</option>
+            <option value="mid">mid</option>
+            <option value="low">low</option>
+            <option value="none">none</option>
+        </select></span>
+
+        <span><label>Bandwidth Limit</label> <select id="selectBandwidth">
+            <option selected value="0">no limit</option>
+            <option value="300000">300Kbps</option>
+            <option value="500000">500Kbps</option>
+            <option value="1000000">1Mbps</option>
+            <option value="2000000">2Mbps</option>
+            <option value="3000000">3Mbps</option>
+            <option value="4000000">4Mbps</option>
+            <option value="5000000">5Mbps</option>
+            <option value="7000000">7Mbps</option>
+            <option value="10000000">10Mbps</option>
+        </select></span>
+    </footer>
 </body>
 </html>

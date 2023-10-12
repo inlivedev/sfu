@@ -55,7 +55,7 @@ func (m *Manager) AddExtension(extension IManagerExtension) {
 }
 
 func (m *Manager) CreateRoomID() string {
-	return GenerateID([]int{len(m.rooms)})
+	return GenerateID()
 }
 
 func (m *Manager) Name() string {
@@ -76,10 +76,11 @@ func (m *Manager) NewRoom(id, name, roomType string, opts RoomOptions) (*Room, e
 	}
 
 	sfuOpts := sfuOptions{
-		Bitrates:   opts.Bitrates,
-		IceServers: m.iceServers,
-		Mux:        m.udpMux,
-		Codecs:     opts.Codecs,
+		Bitrates:    opts.Bitrates,
+		IceServers:  m.iceServers,
+		Mux:         m.udpMux,
+		Codecs:      opts.Codecs,
+		PLIInterval: opts.PLIInterval,
 	}
 
 	newSFU := New(m.context, sfuOpts)

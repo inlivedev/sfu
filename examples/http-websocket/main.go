@@ -159,7 +159,7 @@ func clientHandler(conn *websocket.Conn, messageChan chan Request, r *sfu.Room) 
 
 	// create new client id, you can pass a unique int value to this function
 	// or just use the SFU client counter
-	clientID := r.CreateClientID(r.SFU().Counter)
+	clientID := r.CreateClientID()
 
 	// add a new client to room
 	// you can also get the client by using r.GetClient(clientID)
@@ -170,8 +170,6 @@ func clientHandler(conn *websocket.Conn, messageChan chan Request, r *sfu.Room) 
 		log.Panic(err)
 		return
 	}
-
-	glog.Info("client", clientID, "added to room. Total clients", r.SFU().Counter)
 
 	defer client.Stop()
 

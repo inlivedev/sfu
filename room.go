@@ -64,6 +64,7 @@ type RoomOptions struct {
 	Bitrates      BitratesConfig
 	Codecs        []string
 	ClientTimeout time.Duration
+	PLIInterval   time.Duration
 }
 
 func DefaultRoomOptions() RoomOptions {
@@ -71,6 +72,7 @@ func DefaultRoomOptions() RoomOptions {
 		Bitrates:      DefaultBitrates(),
 		Codecs:        []string{webrtc.MimeTypeVP9, webrtc.MimeTypeOpus},
 		ClientTimeout: 5 * time.Minute,
+		PLIInterval:   3 * time.Second,
 	}
 }
 
@@ -211,12 +213,8 @@ func (r *Room) AddClient(id, name string, opts ClientOptions) (*Client, error) {
 }
 
 // Generate a unique client ID for this room
-func (r *Room) CreateClientID(id int) string {
-	if id == 0 {
-		return GenerateID([]int{r.sfu.Counter})
-	}
-
-	return GenerateID([]int{r.sfu.Counter, id})
+func (r *Room) CreateClientID() string {
+	return GenerateID()
 }
 
 // Use this to get notified when a room is closed

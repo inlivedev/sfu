@@ -28,14 +28,14 @@ type bitrateController struct {
 	claims map[string]*bitrateClaim
 }
 
-func newbitrateController(client *Client) *bitrateController {
+func newbitrateController(client *Client, intervalMonitor time.Duration) *bitrateController {
 	bc := &bitrateController{
 		mu:     sync.RWMutex{},
 		client: client,
 		claims: make(map[string]*bitrateClaim, 0),
 	}
 
-	bc.start()
+	bc.start(intervalMonitor)
 
 	return bc
 }
@@ -260,20 +260,18 @@ func (bc *bitrateController) exists(id string) bool {
 func (bc *bitrateController) getQuality(t *SimulcastClientTrack) QualityLevel {
 	track := t.remoteTrack
 
-	t.lastCheckQualityTS.Store(time.Now().UnixNano())
-	availableBandwidth := bc.availableBandwidth()
-
-	// need to manually lock to prevent a goroutine add claim while we are checking the claims
-	bc.mu.Lock()
-	claim, exist := bc.claims[t.ID()]
-	bc.mu.Unlock()
-	if !exist {
+	claim := bc.GetClaim(t.ID())
+	if claim == nil {
 		// this must be never reached
 		panic("bitrate: claim is not exists")
 	}
 
-	// check if the bitrate can be adjusted
 	quality := claim.quality
+
+	maxQuality := t.getMaxQuality()
+	if maxQuality < quality {
+		quality = maxQuality
+	}
 
 	clientQuality := Uint32ToQualityLevel(t.client.quality.Load())
 	if quality > clientQuality {
@@ -288,12 +286,12 @@ func (bc *bitrateController) getQuality(t *SimulcastClientTrack) QualityLevel {
 		}
 
 		if !track.isTrackActive(lastQuality) {
-			glog.Warning("bitrate: quality ", quality, " and fallback quality ", lastQuality, " is not active, so sending no qualty. Available bandwidth: ", ThousandSeparator(int(availableBandwidth)), "active bitrate: ", ThousandSeparator(int(t.client.bitrateController.TotalBitrates())))
+			glog.Warning("bitrate: quality ", quality, " and fallback quality ", lastQuality, " is not active, so sending no quality.")
 
 			return QualityNone
 		}
 
-		glog.Warning("bitrate: quality ", quality, " is not active,  fallback to last quality ", lastQuality, ". Available bandwidth: ", ThousandSeparator(int(availableBandwidth)), "active bitrate: ", ThousandSeparator(int(t.client.bitrateController.TotalBitrates())))
+		glog.Warning("bitrate: quality ", quality, " is not active,  fallback to last quality ", lastQuality)
 
 		return lastQuality
 	}
@@ -389,12 +387,12 @@ func (bc *bitrateController) totalSentBitrates() uint32 {
 	return total
 }
 
-func (bc *bitrateController) start() {
+func (bc *bitrateController) start(interval time.Duration) {
 	go func() {
 		context, cancel := context.WithCancel(bc.client.context)
 		defer cancel()
 
-		ticker := time.NewTicker(1 * time.Second)
+		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 		for {
 			select {
@@ -473,4 +471,38 @@ func (bc *bitrateController) calculateDeltaBitrate(fromQuality, toQuality Qualit
 	toBitrate := bc.client.sfu.QualityLevelToBitrate(toQuality)
 
 	return int32(fromBitrate - toBitrate)
+}
+
+func (bc *bitrateController) onRemoteViewedSizeChanged(videoSize videoSize) {
+	bc.mu.Lock()
+	defer bc.mu.Unlock()
+
+	claim, ok := bc.claims[videoSize.TrackID]
+	if !ok {
+		glog.Error("bitrate: track ", videoSize.TrackID, " is not exists")
+		return
+	}
+
+	if claim.track.Kind() != webrtc.RTPCodecTypeVideo {
+		glog.Error("bitrate: track ", videoSize.TrackID, " is not video track")
+		return
+	}
+
+	simulcastTrack, ok := claim.track.(*SimulcastClientTrack)
+	if !ok {
+		glog.Error("bitrate: track ", videoSize.TrackID, " is not simulcast track")
+		return
+	}
+
+	if videoSize.Width == 0 || videoSize.Height == 0 {
+		simulcastTrack.setMaxQuality(QualityNone)
+	}
+
+	if videoSize.Width <= bc.client.sfu.bitratesConfig.VideoLowPixels {
+		simulcastTrack.setMaxQuality(QualityLow)
+	} else if videoSize.Width <= bc.client.sfu.bitratesConfig.VideoMidPixels {
+		simulcastTrack.setMaxQuality(QualityMid)
+	} else {
+		simulcastTrack.setMaxQuality(QualityHigh)
+	}
 }

@@ -3,6 +3,7 @@ package sfu
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/golang/glog"
 	"github.com/pion/webrtc/v3"
@@ -14,8 +15,11 @@ type BitratesConfig struct {
 	Audio            uint32 `json:"audio,omitempty" yaml:"audio,omitempty" mapstructure:"audio,omitempty"`
 	Video            uint32 `json:"video,omitempty" yaml:"video,omitempty" mapstructure:"video,omitempty"`
 	VideoHigh        uint32 `json:"video_high,omitempty" yaml:"video_high,omitempty" mapstructure:"video_high,omitempty"`
+	VideoHighPixels  uint32 `json:"video_high_pixels,omitempty" yaml:"video_high_pixels,omitempty" mapstructure:"video_high_pixels,omitempty"`
 	VideoMid         uint32 `json:"video_mid,omitempty" yaml:"video_mid,omitempty" mapstructure:"video_mid,omitempty"`
+	VideoMidPixels   uint32 `json:"video_mid_pixels,omitempty" yaml:"video_mid_pixels,omitempty" mapstructure:"video_mid_pixels,omitempty"`
 	VideoLow         uint32 `json:"video_low,omitempty" yaml:"video_low,omitempty" mapstructure:"video_low,omitempty"`
+	VideoLowPixels   uint32 `json:"video_low_pixels,omitempty" yaml:"video_low_pixels,omitempty" mapstructure:"video_low_pixels,omitempty"`
 	InitialBandwidth uint32 `json:"initial_bandwidth,omitempty" yaml:"initial_bandwidth,omitempty" mapstructure:"initial_bandwidth,omitempty"`
 }
 
@@ -25,9 +29,12 @@ func DefaultBitrates() BitratesConfig {
 		Audio:            48_000,
 		Video:            1_500_000,
 		VideoHigh:        1_500_000,
+		VideoHighPixels:  720,
 		VideoMid:         500_000,
+		VideoMidPixels:   360,
 		VideoLow:         150_000,
-		InitialBandwidth: 1_000_000,
+		VideoLowPixels:   180,
+		InitialBandwidth: 2_500_000,
 	}
 }
 
@@ -99,7 +106,6 @@ type SFU struct {
 	cancel                   context.CancelFunc
 	callbacksOnClientRemoved []func(*Client)
 	callbacksOnClientAdded   []func(*Client)
-	Counter                  int
 	codecs                   []string
 	dataChannels             *SFUDataChannelList
 	idleChan                 chan bool
@@ -108,6 +114,7 @@ type SFU struct {
 	mux                      *UDPMux
 	onStop                   func()
 	OnTracksAvailable        func(tracks []track)
+	pliInterval              time.Duration
 }
 
 type PublishedTrack struct {
@@ -120,6 +127,9 @@ type sfuOptions struct {
 	Mux        *UDPMux
 	Bitrates   BitratesConfig
 	Codecs     []string
+	// Configures the interval between sending PLIs to clients that will generate keyframe
+	// This will used for how often the video quality can be switched when the bandwitdh is changed
+	PLIInterval time.Duration
 }
 
 // @Param muxPort: port for udp mux
@@ -128,7 +138,6 @@ func New(ctx context.Context, opts sfuOptions) *SFU {
 
 	sfu := &SFU{
 		clients:        &SFUClients{clients: make(map[string]*Client), mutex: sync.Mutex{}},
-		Counter:        0,
 		context:        localCtx,
 		cancel:         cancel,
 		codecs:         opts.Codecs,
@@ -137,6 +146,7 @@ func New(ctx context.Context, opts sfuOptions) *SFU {
 		iceServers:     opts.IceServers,
 		mux:            opts.Mux,
 		bitratesConfig: opts.Bitrates,
+		pliInterval:    opts.PLIInterval,
 	}
 
 	go func() {
@@ -177,8 +187,6 @@ func (s *SFU) createClient(id string, name string, peerConnectionConfig webrtc.C
 }
 
 func (s *SFU) NewClient(id, name string, opts ClientOptions) *Client {
-	s.Counter++
-
 	peerConnectionConfig := webrtc.Configuration{
 		ICEServers: s.iceServers,
 	}
@@ -215,7 +223,7 @@ func (s *SFU) NewClient(id, name string, opts ClientOptions) *Client {
 				// make sure the exisiting data channels is created on new clients
 				s.createExistingDataChannels(client)
 
-				if _, err := client.createInternalDataChannel("stats", client.onStatsMessage); err != nil {
+				if _, err := client.createInternalDataChannel("internal", client.onInternalMessage); err != nil {
 					glog.Error("client: error create stats data channel ", err)
 				}
 

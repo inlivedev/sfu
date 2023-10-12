@@ -6,20 +6,19 @@ import (
 	"errors"
 	"flag"
 	"log"
-	"math/rand"
 	"net"
 	"regexp"
 	"strconv"
 	"strings"
 	"syscall"
 
+	"github.com/jaevor/go-nanoid"
 	"github.com/pion/interceptor/pkg/stats"
 	"github.com/pion/rtp"
 	"github.com/pion/rtp/codecs"
 	"github.com/pion/sdp/v3"
 	"github.com/pion/turn/v2"
 	"github.com/pion/webrtc/v3"
-	"github.com/speps/go-hashids"
 	"golang.org/x/sys/unix"
 	"golang.org/x/text/language"
 	"golang.org/x/text/message"
@@ -64,16 +63,13 @@ func CountTracks(sdp string) int {
 	return counter
 }
 
-func GenerateID(data []int) string {
-	randInt := rand.Intn(100) //nolint:gosec //it's not a password
-	data = append(data, randInt)
-	hd := hashids.NewData()
-	hd.Salt = "this is my salt"
-	hd.MinLength = 9
-	h, _ := hashids.NewWithData(hd)
-	e, _ := h.Encode(data)
+func GenerateID() string {
+	canonicID, err := nanoid.Standard(21)
+	if err != nil {
+		panic(err)
+	}
 
-	return e
+	return canonicID()
 }
 
 func GetReceiverStats(pc *webrtc.PeerConnection, statsGetter stats.Getter) map[webrtc.SSRC]stats.Stats {

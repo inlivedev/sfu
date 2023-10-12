@@ -120,8 +120,8 @@ type SimulcastClientTrack struct {
 	lastBlankSequenceNumber *atomic.Uint32
 	sequenceNumber          *atomic.Uint32
 	lastQuality             *atomic.Uint32
+	maxQuality              *atomic.Uint32
 	lastTimestamp           *atomic.Uint32
-	lastCheckQualityTS      *atomic.Int64
 	isScreen                *atomic.Bool
 	isEnded                 *atomic.Bool
 	onTrackEndedCallbacks   []func()
@@ -360,6 +360,14 @@ func (t *SimulcastClientTrack) onTrackEnded() {
 	}
 
 	t.isEnded.Store(true)
+}
+
+func (t *SimulcastClientTrack) setMaxQuality(quality QualityLevel) {
+	t.maxQuality.Store(uint32(quality))
+}
+
+func (t *SimulcastClientTrack) getMaxQuality() QualityLevel {
+	return Uint32ToQualityLevel(t.maxQuality.Load())
 }
 
 func (t *SimulcastClientTrack) IsSimulcast() bool {

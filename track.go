@@ -403,13 +403,15 @@ func (t *simulcastTrack) subscribe(client *Client) iClientTrack {
 		remoteTrack:             t,
 		sequenceNumber:          sequenceNumber,
 		lastQuality:             lastQuality,
-		lastCheckQualityTS:      &atomic.Int64{},
+		maxQuality:              &atomic.Uint32{},
 		lastBlankSequenceNumber: &atomic.Uint32{},
 		lastTimestamp:           lastTimestamp,
 		isScreen:                isScreen,
 		isEnded:                 &atomic.Bool{},
 		onTrackEndedCallbacks:   make([]func(), 0),
 	}
+
+	ct.setMaxQuality(QualityHigh)
 
 	if t.remoteTrackLow != nil {
 		t.remoteTrackLow.OnEnded(func() {

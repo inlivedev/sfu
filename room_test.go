@@ -38,14 +38,14 @@ func TestRoomCreateAndClose(t *testing.T) {
 
 	// add a new client to room
 	// you can also get the client by using r.GetClient(clientID)
-	id := testRoom.CreateClientID(testRoom.SFU().Counter)
+	id := testRoom.CreateClientID()
 	client1, err := testRoom.AddClient(id, id, DefaultClientOptions())
 	require.NoErrorf(t, err, "error adding client to room: %v", err)
 
 	// stop client
 	err = testRoom.StopClient(client1.ID())
 	require.NoErrorf(t, err, "error stopping client: %v", err)
-	id = testRoom.CreateClientID(testRoom.SFU().Counter)
+	id = testRoom.CreateClientID()
 	client2, err := testRoom.AddClient(id, id, DefaultClientOptions())
 	require.NoErrorf(t, err, "error adding client to room: %v", err)
 
@@ -326,7 +326,7 @@ func TestRoomAddClientTimeout(t *testing.T) {
 
 	// add a new client to room
 	// you can also get the client by using r.GetClient(clientID)
-	id := testRoom.CreateClientID(testRoom.SFU().Counter)
+	id := testRoom.CreateClientID()
 
 	client, err := testRoom.AddClient(id, id, DefaultClientOptions())
 	require.NoErrorf(t, err, "error adding client to room: %v", err)

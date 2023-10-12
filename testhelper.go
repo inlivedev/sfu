@@ -466,7 +466,7 @@ func CreatePeerPair(ctx context.Context, room *Room, iceServers []webrtc.ICEServ
 
 	// add a new client to room
 	// you can also get the client by using r.GetClient(clientID)
-	id := room.CreateClientID(room.SFU().Counter)
+	id := room.CreateClientID()
 	client, _ = room.AddClient(id, id, DefaultClientOptions())
 
 	client.OnAllowedRemoteRenegotiation = func() {
@@ -590,7 +590,7 @@ func CreateDataPair(ctx context.Context, room *Room, iceServers []webrtc.ICEServ
 
 	// add a new client to room
 	// you can also get the client by using r.GetClient(clientID)
-	id := room.CreateClientID(room.SFU().Counter)
+	id := room.CreateClientID()
 	client, _ = room.AddClient(id, id, DefaultClientOptions())
 
 	client.OnAllowedRemoteRenegotiation = func() {
