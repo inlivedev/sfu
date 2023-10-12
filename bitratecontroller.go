@@ -426,6 +426,12 @@ func (bc *bitrateController) checkAndAdjustBitrates() {
 		for _, claim := range claims {
 			if claim.track.IsSimulcast() && claim.quality > QualityNone {
 				reducedQuality := claim.quality - 1
+
+				if claim.track.IsScreen() && reducedQuality == QualityNone {
+					// never reduce screen track to none
+					continue
+				}
+
 				glog.Info("bitrate: bandwidth ", ThousandSeparator(int(estimatedBandwidth)), " is not enough to send ", ThousandSeparator(int(bc.TotalBitrates())), " bitrate, reducing quality to ", reducedQuality)
 				additionalBitrate := bc.calculateDeltaBitrate(claim.quality, reducedQuality)
 				availableFreeBandwidth += additionalBitrate
