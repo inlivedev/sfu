@@ -61,17 +61,21 @@ type Room struct {
 }
 
 type RoomOptions struct {
-	Bitrates      BitratesConfig
-	Codecs        []string
+	Bitrates BitratesConfig
+	Codecs   []string
+	// Configures the timeout for client to join the room after register
+	// The client will automatically kicked out from the room if not joined within the time after registered
 	ClientTimeout time.Duration
-	PLIInterval   time.Duration
+	// Configures the interval between sending PLIs to clients that will generate keyframe
+	// This will used for how often the video quality can be switched when the bandwitdh is changed
+	PLIInterval time.Duration
 }
 
 func DefaultRoomOptions() RoomOptions {
 	return RoomOptions{
 		Bitrates:      DefaultBitrates(),
 		Codecs:        []string{webrtc.MimeTypeVP9, webrtc.MimeTypeOpus},
-		ClientTimeout: 5 * time.Minute,
+		ClientTimeout: 10 * time.Minute,
 		PLIInterval:   3 * time.Second,
 	}
 }

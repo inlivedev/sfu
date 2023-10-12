@@ -123,12 +123,10 @@ type PublishedTrack struct {
 }
 
 type sfuOptions struct {
-	IceServers []webrtc.ICEServer
-	Mux        *UDPMux
-	Bitrates   BitratesConfig
-	Codecs     []string
-	// Configures the interval between sending PLIs to clients that will generate keyframe
-	// This will used for how often the video quality can be switched when the bandwitdh is changed
+	IceServers  []webrtc.ICEServer
+	Mux         *UDPMux
+	Bitrates    BitratesConfig
+	Codecs      []string
 	PLIInterval time.Duration
 }
 
