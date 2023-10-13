@@ -605,10 +605,29 @@
             const tscv=peerConnection.addTransceiver(videoTrack, {
                 direction: 'sendonly',
                 streams: [stream],
-                sendEncodings: [{priority: 'medium'}]
+                sendEncodings: [
+                    {
+                        rid: 'high',
+                        maxBitrate: 1200*1000,
+                        maxFramerate: 30,
+                        scalabilityMode: 'L1T2'
+                    },
+                    {
+                        rid: 'mid',
+                        maxFramerate: 20,
+                        maxBitrate: 400*1000,
+                        scalabilityMode: 'L1T2'
+                    },
+                    {
+                        rid: 'low',
+                        maxBitrate: 150*1000,
+                        maxFramerate:15,
+                        scalabilityMode: 'L1T2'
+                    }
+                ]
             })
 
-            container = document.createElement("div");
+            const container = document.createElement("div");
             container.className = "container";
             container.id = "container-"+videoTrack.id;
             

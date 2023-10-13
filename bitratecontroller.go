@@ -42,7 +42,6 @@ type bitrateController struct {
 	client               *Client
 	claims               map[string]*bitrateClaim
 	packetMonitor        packetMonitor
-	packetCounter        uint8
 	packetLossPercentage uint8
 }
 
@@ -54,7 +53,7 @@ func newbitrateController(client *Client, intervalMonitor time.Duration) *bitrat
 		packetMonitor: packetMonitor{},
 	}
 
-	// bc.start(intervalMonitor)
+	bc.start()
 
 	return bc
 }
@@ -276,9 +275,9 @@ func (bc *bitrateController) exists(id string) bool {
 	return false
 }
 
-func (bc *bitrateController) isScreenNeedIncrease() bool {
+func (bc *bitrateController) isScreenNeedIncrease(highestQuality QualityLevel) bool {
 	for _, claim := range bc.claims {
-		if claim.track.IsScreen() && claim.quality < QualityHigh {
+		if claim.track.IsScreen() && claim.quality <= highestQuality {
 			return true
 		}
 	}
@@ -286,58 +285,14 @@ func (bc *bitrateController) isScreenNeedIncrease() bool {
 	return false
 }
 
-func (bc *bitrateController) isThereNonScreenCanDecrease() bool {
+func (bc *bitrateController) isThereNonScreenCanDecrease(lowestQuality QualityLevel) bool {
 	for _, claim := range bc.claims {
-		if !claim.track.IsScreen() && claim.quality > QualityNone {
+		if !claim.track.IsScreen() && claim.quality > lowestQuality {
 			return true
 		}
 	}
 
 	return false
-}
-
-func (bc *bitrateController) getNexQuality(claim *bitrateClaim) QualityLevel {
-	nextAdjustment := bc.getBitrateAdjustment()
-
-	if nextAdjustment == keepBitrate {
-		return claim.quality
-	}
-
-	if !claim.track.IsScreen() {
-		// check if there is a screen track needs to adjust first
-		// skip if yes
-		if nextAdjustment == increaseBitrate && bc.isScreenNeedIncrease() {
-			return claim.quality
-		}
-
-		if nextAdjustment == decreaseBitrate && claim.quality > QualityNone {
-			nextQuality := claim.quality - 1
-			bc.setQuality(claim.track.ID(), nextQuality)
-		} else if nextAdjustment == increaseBitrate && claim.quality < QualityHigh {
-			nextQuality := claim.quality + 1
-			bc.setQuality(claim.track.ID(), nextQuality)
-		}
-	} else if claim.track.IsScreen() {
-		if nextAdjustment == decreaseBitrate && bc.isThereNonScreenCanDecrease() {
-			return claim.quality
-		}
-
-		if nextAdjustment == increaseBitrate && claim.quality < QualityHigh {
-			nextQuality := claim.quality + 1
-			bc.setQuality(claim.track.ID(), nextQuality)
-		} else if nextAdjustment == decreaseBitrate && claim.quality > QualityNone {
-			nextQuality := claim.quality - 1
-			if nextQuality == QualityNone {
-				// never reduce screen track to none
-				return claim.quality
-			}
-
-			bc.setQuality(claim.track.ID(), nextQuality)
-		}
-
-	}
-
-	return claim.quality
 }
 
 func (bc *bitrateController) getQuality(t *simulcastClientTrack) QualityLevel {
@@ -349,7 +304,7 @@ func (bc *bitrateController) getQuality(t *simulcastClientTrack) QualityLevel {
 		panic("bitrate: claim is not exists")
 	}
 
-	quality := bc.getNexQuality(claim)
+	quality := claim.quality
 
 	maxQuality := t.getMaxQuality()
 	if maxQuality < quality {
@@ -470,12 +425,12 @@ func (bc *bitrateController) totalSentBitrates() uint32 {
 	return total
 }
 
-func (bc *bitrateController) start(interval time.Duration) {
+func (bc *bitrateController) start() {
 	go func() {
 		context, cancel := context.WithCancel(bc.client.context)
 		defer cancel()
 
-		ticker := time.NewTicker(interval)
+		ticker := time.NewTicker(1 * time.Second)
 		defer ticker.Stop()
 		for {
 			select {
@@ -492,74 +447,95 @@ func (bc *bitrateController) start(interval time.Duration) {
 // if not then it will try to reduce one by one of simulcast track quality until it fit the bandwidth
 // if the bandwidth is enough to send the current bitrate, then it will try to increase the bitrate
 func (bc *bitrateController) checkAndAdjustBitrates() {
-	availableFreeBandwidth := bc.availableBandwidth()
-	estimatedBandwidth := bc.client.GetEstimatedBandwidth()
-
 	claims := bc.Claims()
+	lowestQuality := QualityLevel(QualityHigh)
+	highestQuality := QualityLevel(QualityNone)
+
+	noneCount := 0
+	lowCount := 0
+	midCount := 0
+	highCount := 0
+	screenCount := 0
 
 	for _, claim := range claims {
 		allActive, quality := bc.checkAllTrackActive(claim)
 		if !allActive {
 			bc.setQuality(claim.track.ID(), quality)
 		}
+
+		if claim.quality < lowestQuality {
+			lowestQuality = claim.quality
+		}
+
+		if claim.quality > highestQuality {
+			highestQuality = claim.quality
+		}
+
+		if claim.track.IsScreen() {
+			screenCount++
+		}
+
+		switch claim.quality {
+		case QualityNone:
+			noneCount++
+		case QualityLow:
+			lowCount++
+		case QualityMid:
+			midCount++
+		case QualityHigh:
+			highCount++
+		}
+
 	}
 
-	if availableFreeBandwidth < 0 {
+	bitrateAdjustment := bc.getBitrateAdjustment()
+
+	switch bitrateAdjustment {
+	case keepBitrate:
+
+	case decreaseBitrate:
 		// need reduce the bitrate
 		for _, claim := range claims {
 			if claim.track.IsSimulcast() && claim.quality > QualityNone {
 				reducedQuality := claim.quality - 1
 
-				if claim.track.IsScreen() && reducedQuality == QualityNone {
-					// never reduce screen track to none
+				if claim.quality == QualityLow && midCount+highCount > 0 {
+					continue
+				} else if claim.quality == QualityMid && highCount > 0 {
 					continue
 				}
 
-				glog.Info("bitrate: bandwidth ", ThousandSeparator(int(estimatedBandwidth)), " is not enough to send ", ThousandSeparator(int(bc.TotalBitrates())), " bitrate, reducing quality to ", reducedQuality)
-				additionalBitrate := bc.calculateDeltaBitrate(claim.quality, reducedQuality)
-				availableFreeBandwidth += additionalBitrate
-				bc.setQuality(claim.track.ID(), reducedQuality)
-
-				if availableFreeBandwidth > 0 {
-					// enough bandwidth, return
-					return
+				if claim.track.IsScreen() && reducedQuality == QualityNone {
+					// never reduce screen track to none
+					continue
+				} else if claim.track.IsScreen() && bc.isThereNonScreenCanDecrease(lowestQuality) {
+					// skip if there is a non screen track can be reduced
+					continue
 				}
+
+				bc.setQuality(claim.track.ID(), reducedQuality)
 			}
 		}
-	}
-
-	if availableFreeBandwidth > 0 || availableFreeBandwidth < 0 && estimatedBandwidth < 150_000 {
-		// possible to increase the bitrate
-
-		if estimatedBandwidth < 150_000 {
-			// this to test if the actual bandwidth possible to send more than estimated bandwidth
-			availableFreeBandwidth = 200_000
-		}
-
+	case increaseBitrate:
 		for _, claim := range claims {
 			if claim.track.IsSimulcast() && claim.quality < QualityHigh {
 				increasedQuality := claim.quality + 1
-				additionalBitrate := bc.calculateDeltaBitrate(claim.quality, increasedQuality)
-				availableFreeBandwidth += additionalBitrate
-				if availableFreeBandwidth < 0 {
-					// not enough bandwidth, return
-					return
+
+				if claim.quality == QualityMid && noneCount+lowCount > 0 {
+					continue
+				} else if claim.quality == QualityLow && noneCount > 0 {
+					continue
 				}
 
-				glog.Info("bitrate: bandwidth ", ThousandSeparator(int(estimatedBandwidth)), " is enough to send ", ThousandSeparator(int(bc.TotalBitrates()-uint32(additionalBitrate))), " bitrate, increase quality to ", increasedQuality)
+				if !claim.track.IsScreen() && bc.isScreenNeedIncrease(highestQuality) {
+					continue
+				}
 
 				bc.setQuality(claim.track.ID(), increasedQuality)
 			}
 		}
 	}
 
-}
-
-func (bc *bitrateController) calculateDeltaBitrate(fromQuality, toQuality QualityLevel) int32 {
-	fromBitrate := bc.client.sfu.QualityLevelToBitrate(fromQuality)
-	toBitrate := bc.client.sfu.QualityLevelToBitrate(toQuality)
-
-	return int32(fromBitrate - toBitrate)
 }
 
 func (bc *bitrateController) onRemoteViewedSizeChanged(videoSize videoSize) {
@@ -627,6 +603,10 @@ func (bc *bitrateController) getBitrateAdjustment() bitrateAdjustment {
 	deltaSentPackets := uint32(packetSent) - bc.packetMonitor.previousSentPackets
 	deltaLostPackets := uint32(packetLost) - bc.packetMonitor.previousLostPackets
 
+	if bc.packetLossPercentage != 0 && float32(deltaLostPackets) < float32(bc.packetLossPercentage)/100 {
+		deltaLostPackets = uint32(math.Floor(float64(deltaSentPackets) * float64(bc.packetLossPercentage) / float64(100)))
+	}
+
 	if deltaLostPackets == 0 {
 		// avoid devide by zero
 		return increaseBitrate
@@ -658,24 +638,4 @@ func (bc *bitrateController) getBitrateAdjustment() bitrateAdjustment {
 	glog.Info("bitrate: client ", bc.client.id, " packet lost ratio ", ratio, " is between 2-10%, keeping bitrate")
 	bc.packetMonitor.state = keepBitrate
 	return keepBitrate
-}
-
-func (bc *bitrateController) shouldDrop() bool {
-	bc.mu.Lock()
-	defer bc.mu.Unlock()
-	isDrop := false
-
-	if bc.packetLossPercentage != 0 {
-		dropInterval := math.Floor(float64(100) / float64(bc.packetLossPercentage))
-
-		if uint32(bc.packetCounter) == uint32(dropInterval) {
-			bc.packetCounter = 0
-			isDrop = true
-		} else {
-			bc.packetCounter++
-		}
-
-	}
-
-	return isDrop
 }
