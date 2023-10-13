@@ -582,6 +582,11 @@
             ws.send(JSON.stringify({type:'set_bandwidth_limit',data:limit}));
         }
 
+        const setPacketLossPercentage = () =>{
+            const percentage = document.getElementById("selectPacketLossPercentage").value
+            ws.send(JSON.stringify({type:'set_packet_loss_percentage',data:percentage}));
+        }
+
         const shareScreen = async () =>{
             const stream = await navigator.mediaDevices.getDisplayMedia({
                 video: true,
@@ -640,6 +645,7 @@
             document.getElementById("btnStats").onclick = toggleStats;
             document.getElementById("selectQuality").onchange = switchQuality;
             document.getElementById("selectBandwidth").onchange = setBandwidthLimit;
+            document.getElementById("selectPacketLossPercentage").onchange = setPacketLossPercentage;
         });
         </script>
 </head>
@@ -679,6 +685,12 @@
             <option value="5000000">5Mbps</option>
             <option value="7000000">7Mbps</option>
             <option value="10000000">10Mbps</option>
+        </select></span>
+        <span><label>Simulate packet loss percentage(0-100)</label> <select id="selectPacketLossPercentage">
+            <option selected value="0">0%</option>
+            <option value="2">2%</option>
+            <option value="5">5%</option>
+            <option value="15">15%</option>
         </select></span>
     </footer>
 </body>

@@ -3,6 +3,7 @@ package sfu
 import (
 	"context"
 	"errors"
+	"math"
 	"sync"
 	"time"
 
@@ -37,10 +38,12 @@ type packetMonitor struct {
 }
 
 type bitrateController struct {
-	mu            sync.RWMutex
-	client        *Client
-	claims        map[string]*bitrateClaim
-	packetMonitor packetMonitor
+	mu                   sync.RWMutex
+	client               *Client
+	claims               map[string]*bitrateClaim
+	packetMonitor        packetMonitor
+	packetCounter        uint8
+	packetLossPercentage uint8
 }
 
 func newbitrateController(client *Client, intervalMonitor time.Duration) *bitrateController {
@@ -655,4 +658,24 @@ func (bc *bitrateController) getBitrateAdjustment() bitrateAdjustment {
 	glog.Info("bitrate: client ", bc.client.id, " packet lost ratio ", ratio, " is between 2-10%, keeping bitrate")
 	bc.packetMonitor.state = keepBitrate
 	return keepBitrate
+}
+
+func (bc *bitrateController) shouldDrop() bool {
+	bc.mu.Lock()
+	defer bc.mu.Unlock()
+	isDrop := false
+
+	if bc.packetLossPercentage != 0 {
+		dropInterval := math.Floor(float64(100) / float64(bc.packetLossPercentage))
+
+		if uint32(bc.packetCounter) == uint32(dropInterval) {
+			bc.packetCounter = 0
+			isDrop = true
+		} else {
+			bc.packetCounter++
+		}
+
+	}
+
+	return isDrop
 }

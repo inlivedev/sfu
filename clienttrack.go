@@ -54,8 +54,12 @@ func (t *clientTrack) push(rtp *rtp.Packet, quality QualityLevel) {
 		// do something here with audio level
 	}
 
-	if err := t.localTrack.WriteRTP(rtp); err != nil {
-		glog.Error("clienttrack: error on write rtp", err)
+	isDrop := t.client.bitrateController.shouldDrop()
+
+	if !isDrop {
+		if err := t.localTrack.WriteRTP(rtp); err != nil {
+			glog.Error("clienttrack: error on write rtp", err)
+		}
 	}
 }
 
@@ -127,7 +131,6 @@ type simulcastClientTrack struct {
 	isScreen                *atomic.Bool
 	isEnded                 *atomic.Bool
 	onTrackEndedCallbacks   []func()
-	switchController        *switchController
 }
 
 func (t *simulcastClientTrack) isFirstKeyframePacket(p *rtp.Packet) bool {
@@ -146,7 +149,21 @@ func (t *simulcastClientTrack) send(p *rtp.Packet, quality QualityLevel, lastQua
 		t.lastQuality.Store(uint32(quality))
 	}
 
-	t.switchController.sendPacket(p, quality)
+	t.rewritePacket(p, quality)
+
+	t.writeRTP(p)
+
+}
+
+func (t *simulcastClientTrack) writeRTP(p *rtp.Packet) {
+	isDrop := t.client.bitrateController.shouldDrop()
+
+	if !isDrop {
+		if err := t.localTrack.WriteRTP(p); err != nil {
+			glog.Error("track: error on write rtp", err)
+		}
+	}
+
 }
 
 // Currently not used, plan to use for other codec than h264
@@ -241,7 +258,6 @@ func (t *simulcastClientTrack) push(p *rtp.Packet, quality QualityLevel) {
 			}
 
 			if trackQuality != lastQuality {
-				t.switchController.switchQuality(trackQuality)
 				t.paddingQuality.Store(uint32(lastQuality))
 			}
 		}
@@ -264,16 +280,17 @@ func (t *simulcastClientTrack) push(p *rtp.Packet, quality QualityLevel) {
 				t.send(p, lastQuality, lastQuality, false)
 			}
 		}
-	} else if Uint32ToQualityLevel(t.paddingQuality.Load()) == quality {
-		paddingTS := t.paddingTS.Load()
-		if p.Timestamp > paddingTS {
-			// new frame, reset padding quality
-			t.paddingQuality.Store(QualityNone)
-		} else if p.Timestamp == paddingTS {
-			// padding packet
-			t.send(p, quality, quality, true)
-		}
 	}
+	// } else if Uint32ToQualityLevel(t.paddingQuality.Load()) == quality {
+	// 	paddingTS := t.paddingTS.Load()
+	// 	if p.Timestamp > paddingTS {
+	// 		// new frame, reset padding quality
+	// 		t.paddingQuality.Store(QualityNone)
+	// 	} else if p.Timestamp == paddingTS {
+	// 		// padding packet
+	// 		t.send(p, quality, quality, true)
+	// 	}
+	// }
 
 }
 
@@ -369,6 +386,28 @@ func (t *simulcastClientTrack) getMaxQuality() QualityLevel {
 
 func (t *simulcastClientTrack) IsSimulcast() bool {
 	return true
+}
+
+func (t *simulcastClientTrack) rewritePacket(p *rtp.Packet, quality QualityLevel) {
+	t.remoteTrack.mu.Lock()
+	defer t.remoteTrack.mu.Unlock()
+	// make sure the timestamp and sequence number is consistent from the previous packet even it is not the same track
+	sequenceDelta := uint16(0)
+	// credit to https://github.com/k0nserv for helping me with this on Pion Slack channel
+	switch quality {
+	case QualityHigh:
+		p.Timestamp = t.remoteTrack.baseTS + ((p.Timestamp - t.remoteTrack.remoteTrackHighBaseTS) - t.remoteTrack.remoteTrackHighBaseTS)
+		sequenceDelta = t.remoteTrack.highSequence - t.remoteTrack.lastHighSequence
+	case QualityMid:
+		p.Timestamp = t.remoteTrack.baseTS + ((p.Timestamp - t.remoteTrack.remoteTrackMidBaseTS) - t.remoteTrack.remoteTrackMidBaseTS)
+		sequenceDelta = t.remoteTrack.midSequence - t.remoteTrack.lastMidSequence
+	case QualityLow:
+		p.Timestamp = t.remoteTrack.baseTS + ((p.Timestamp - t.remoteTrack.remoteTrackLowBaseTS) - t.remoteTrack.remoteTrackLowBaseTS)
+		sequenceDelta = t.remoteTrack.lowSequence - t.remoteTrack.lastLowSequence
+	}
+
+	t.sequenceNumber.Add(uint32(sequenceDelta))
+	p.SequenceNumber = uint16(t.sequenceNumber.Load())
 }
 
 type clientTrackList struct {

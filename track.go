@@ -413,8 +413,6 @@ func (t *simulcastTrack) subscribe(client *Client) iClientTrack {
 		onTrackEndedCallbacks:   make([]func(), 0),
 	}
 
-	ct.switchController = newSwitchController(ct)
-
 	ct.setMaxQuality(QualityHigh)
 
 	if t.remoteTrackLow != nil {
