@@ -141,7 +141,7 @@ func TestRoomJoinLeftEvent(t *testing.T) {
 				case client1.ID():
 					_ = testRoom.StopClient(client1.ID())
 				case client2.ID():
-					err := client2.Stop()
+					err := testRoom.StopClient(client2.ID())
 					require.NoError(t, err, "error stopping client: %v", err)
 				case client3.ID():
 					client3.PeerConnection().Close()

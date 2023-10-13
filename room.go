@@ -146,6 +146,9 @@ func (r *Room) Close() error {
 // Stopping client is async, it will just stop the client and return immediately
 // You should use OnClientLeft to get notified when the client is actually stopped
 func (r *Room) StopClient(id string) error {
+	r.mutex.Lock()
+	defer r.mutex.Unlock()
+
 	var client *Client
 
 	var err error
@@ -154,7 +157,7 @@ func (r *Room) StopClient(id string) error {
 		return err
 	}
 
-	return client.Stop()
+	return client.stop()
 }
 
 func (r *Room) StopAllClients() {
@@ -201,7 +204,7 @@ func (r *Room) AddClient(id, name string, opts ClientOptions) (*Client, error) {
 		case <-timeout.Done():
 			if timeout.Err() == context.DeadlineExceeded {
 				glog.Warning("room: client is not connected after added, stopping client...")
-				_ = client.Stop()
+				_ = r.StopClient(client.ID())
 			}
 
 		case <-connectingChan:
@@ -286,7 +289,7 @@ func (r *Room) Stats() RoomStats {
 	defer r.mutex.Unlock()
 
 	for id, cstats := range r.stats {
-		if _, ok := clientStats[id]; !ok {
+		if _, ok := clientStats[id]; !ok && cstats.Client != nil {
 			clientStats[id] = &ClientTrackStats{
 				ID:                       cstats.Client.id,
 				Name:                     cstats.Client.name,

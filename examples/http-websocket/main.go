@@ -171,7 +171,7 @@ func clientHandler(conn *websocket.Conn, messageChan chan Request, r *sfu.Room) 
 		return
 	}
 
-	defer client.Stop()
+	defer r.StopClient(client.ID())
 
 	answerChan := make(chan webrtc.SessionDescription)
 

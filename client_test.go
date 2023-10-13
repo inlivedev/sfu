@@ -194,8 +194,8 @@ func TestSimulcastTrack(t *testing.T) {
 	client2, pc2 := addSimulcastPair(t, ctx, testRoom, "peer2")
 
 	defer func() {
-		_ = client1.Stop()
-		_ = client2.Stop()
+		_ = testRoom.StopClient(client1.id)
+		_ = testRoom.StopClient(client2.id)
 	}()
 
 	trackChan := make(chan *webrtc.TrackRemote)
