@@ -1145,3 +1145,10 @@ func (c *Client) SetName(name string) {
 
 	c.name = name
 }
+
+func (c *Client) SimulatePacketLossPercentage(percentage uint8) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.bitrateController.packetLossPercentage = percentage
+}

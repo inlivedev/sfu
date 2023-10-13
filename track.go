@@ -403,6 +403,8 @@ func (t *simulcastTrack) subscribe(client *Client) iClientTrack {
 		remoteTrack:             t,
 		sequenceNumber:          sequenceNumber,
 		lastQuality:             lastQuality,
+		paddingQuality:          &atomic.Uint32{},
+		paddingTS:               &atomic.Uint32{},
 		maxQuality:              &atomic.Uint32{},
 		lastBlankSequenceNumber: &atomic.Uint32{},
 		lastTimestamp:           lastTimestamp,

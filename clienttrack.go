@@ -120,6 +120,8 @@ type simulcastClientTrack struct {
 	lastBlankSequenceNumber *atomic.Uint32
 	sequenceNumber          *atomic.Uint32
 	lastQuality             *atomic.Uint32
+	paddingQuality          *atomic.Uint32
+	paddingTS               *atomic.Uint32
 	maxQuality              *atomic.Uint32
 	lastTimestamp           *atomic.Uint32
 	isScreen                *atomic.Bool
@@ -133,34 +135,23 @@ func (t *simulcastClientTrack) isFirstKeyframePacket(p *rtp.Packet) bool {
 	return isKeyframe && t.lastTimestamp.Load() != p.Timestamp
 }
 
-func (t *simulcastClientTrack) send(p *rtp.Packet, quality QualityLevel, lastQuality QualityLevel) {
-	// set the last processed packet timestamp to identify if is begining of the new frame
-	t.lastTimestamp.Store(p.Timestamp)
-	// make sure the timestamp and sequence number is consistent from the previous packet even it is not the same track
-	sequenceDelta := uint16(0)
-	// credit to https://github.com/k0nserv for helping me with this on Pion Slack channel
-	switch quality {
-	case QualityHigh:
-		p.Timestamp = t.remoteTrack.baseTS + ((p.Timestamp - t.remoteTrack.remoteTrackHighBaseTS) - t.remoteTrack.remoteTrackHighBaseTS)
-		sequenceDelta = t.remoteTrack.highSequence - t.remoteTrack.lastHighSequence
-	case QualityMid:
-		p.Timestamp = t.remoteTrack.baseTS + ((p.Timestamp - t.remoteTrack.remoteTrackMidBaseTS) - t.remoteTrack.remoteTrackMidBaseTS)
-		sequenceDelta = t.remoteTrack.midSequence - t.remoteTrack.lastMidSequence
-	case QualityLow:
-		p.Timestamp = t.remoteTrack.baseTS + ((p.Timestamp - t.remoteTrack.remoteTrackLowBaseTS) - t.remoteTrack.remoteTrackLowBaseTS)
-		sequenceDelta = t.remoteTrack.lowSequence - t.remoteTrack.lastLowSequence
+func (t *simulcastClientTrack) send(p *rtp.Packet, quality QualityLevel, lastQuality QualityLevel, isPaddingPackets bool) {
+	if !isPaddingPackets {
+		// set the last processed packet timestamp to identify if is begining of the new frame
+		t.lastTimestamp.Store(p.Timestamp)
 	}
-
-	t.sequenceNumber.Add(uint32(sequenceDelta))
-	p.SequenceNumber = uint16(t.sequenceNumber.Load())
 
 	if lastQuality != quality {
 		t.lastQuality.Store(uint32(quality))
 	}
 
-	t.mu.Lock()
-	defer t.mu.Unlock()
+	t.rewritePacket(p, quality)
 
+	t.writeRTP(p)
+
+}
+
+func (t *simulcastClientTrack) writeRTP(p *rtp.Packet) {
 	if err := t.localTrack.WriteRTP(p); err != nil {
 		glog.Error("track: error on write rtp", err)
 	}
@@ -207,7 +198,7 @@ func (t *simulcastClientTrack) push(p *rtp.Packet, quality QualityLevel) {
 	}
 
 	isFirstKeyframePacket := t.isFirstKeyframePacket(p)
-
+	info := false
 	// check if it's a first packet to send
 	if lastQuality == QualityNone && t.sequenceNumber.Load() == 0 {
 		// we try to send the low quality first	if the track is active and fallback to upper quality if not
@@ -241,6 +232,7 @@ func (t *simulcastClientTrack) push(p *rtp.Packet, quality QualityLevel) {
 
 		if isFirstKeyframePacket { // && lastCheckQualityDuration.Seconds() >= 1 {
 			trackQuality = t.client.bitrateController.getQuality(t)
+			info = true
 			// update latest keyframe timestamp
 			// TODO: currently not use anywhere but useful to detect if the track is active or need to refresh full picture
 			switch quality {
@@ -256,28 +248,45 @@ func (t *simulcastClientTrack) push(p *rtp.Packet, quality QualityLevel) {
 				// could be because not enough bandwidth to send any track
 				t.lastQuality.Store(uint32(trackQuality))
 			}
+
+			if trackQuality != lastQuality {
+				t.paddingQuality.Store(uint32(lastQuality))
+			}
 		}
 	}
 
 	if trackQuality == quality {
-		t.send(p, trackQuality, lastQuality)
+		if info {
+			glog.Info("clienttrack: quality ", trackQuality, " for track ", t.id)
+		}
+		t.send(p, trackQuality, lastQuality, false)
 	} else if trackQuality == QualityNone && quality == QualityLow {
 		if isFirstKeyframePacket {
 			glog.Warning("clienttrack: no quality level to send")
-		}
-
-		if t.localTrack.Codec().MimeType == webrtc.MimeTypeH264 && isFirstKeyframePacket {
-			// if codec is h264, send a blank frame once
-			p.Payload = getH264BlankFrame()
-			t.send(p, QualityLow, lastQuality)
-		} else if t.localTrack.Codec().MimeType != webrtc.MimeTypeH264 && t.remoteTrack.isTrackActive(QualityLow) {
-			// if codec is not h264, send a low quality packet
-			t.send(p, QualityLow, lastQuality)
-		} else {
-			// last effort, send the last quality
-			t.send(p, lastQuality, lastQuality)
+			if t.localTrack.Codec().MimeType == webrtc.MimeTypeH264 {
+				// if codec is h264, send a blank frame once
+				p.Payload = getH264BlankFrame()
+				t.send(p, QualityLow, lastQuality, false)
+			} else if t.localTrack.Codec().MimeType != webrtc.MimeTypeH264 && t.remoteTrack.isTrackActive(QualityLow) {
+				// if codec is not h264, send a low quality packet
+				t.send(p, QualityLow, lastQuality, false)
+			} else {
+				// last effort, send the last quality
+				t.send(p, lastQuality, lastQuality, false)
+			}
 		}
 	}
+	// } else if Uint32ToQualityLevel(t.paddingQuality.Load()) == quality {
+	// 	paddingTS := t.paddingTS.Load()
+	// 	if p.Timestamp > paddingTS {
+	// 		// new frame, reset padding quality
+	// 		t.paddingQuality.Store(QualityNone)
+	// 	} else if p.Timestamp == paddingTS {
+	// 		// padding packet
+	// 		t.send(p, quality, quality, true)
+	// 	}
+	// }
+
 }
 
 func (t *simulcastClientTrack) GetRemoteTrack() *remoteTrack {
@@ -372,6 +381,28 @@ func (t *simulcastClientTrack) getMaxQuality() QualityLevel {
 
 func (t *simulcastClientTrack) IsSimulcast() bool {
 	return true
+}
+
+func (t *simulcastClientTrack) rewritePacket(p *rtp.Packet, quality QualityLevel) {
+	t.remoteTrack.mu.Lock()
+	defer t.remoteTrack.mu.Unlock()
+	// make sure the timestamp and sequence number is consistent from the previous packet even it is not the same track
+	sequenceDelta := uint16(0)
+	// credit to https://github.com/k0nserv for helping me with this on Pion Slack channel
+	switch quality {
+	case QualityHigh:
+		p.Timestamp = t.remoteTrack.baseTS + ((p.Timestamp - t.remoteTrack.remoteTrackHighBaseTS) - t.remoteTrack.remoteTrackHighBaseTS)
+		sequenceDelta = t.remoteTrack.highSequence - t.remoteTrack.lastHighSequence
+	case QualityMid:
+		p.Timestamp = t.remoteTrack.baseTS + ((p.Timestamp - t.remoteTrack.remoteTrackMidBaseTS) - t.remoteTrack.remoteTrackMidBaseTS)
+		sequenceDelta = t.remoteTrack.midSequence - t.remoteTrack.lastMidSequence
+	case QualityLow:
+		p.Timestamp = t.remoteTrack.baseTS + ((p.Timestamp - t.remoteTrack.remoteTrackLowBaseTS) - t.remoteTrack.remoteTrackLowBaseTS)
+		sequenceDelta = t.remoteTrack.lowSequence - t.remoteTrack.lastLowSequence
+	}
+
+	t.sequenceNumber.Add(uint32(sequenceDelta))
+	p.SequenceNumber = uint16(t.sequenceNumber.Load())
 }
 
 type clientTrackList struct {
