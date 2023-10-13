@@ -955,7 +955,7 @@ func (c *Client) SetTracksSourceType(trackTypes map[string]TrackType) {
 
 func (c *Client) SubscribeTracks(req []SubscribeTrackRequest) error {
 	if c.peerConnection.ConnectionState() != webrtc.PeerConnectionStateConnected {
-		c.pendingReceivedTracks = req
+		c.pendingReceivedTracks = append(c.pendingReceivedTracks, req...)
 
 		return nil
 	}

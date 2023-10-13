@@ -270,7 +270,7 @@ func (s *SFU) NewClient(id, name string, opts ClientOptions) *Client {
 		}
 
 		// broadcast to client with auto subscribe tracks
-		s.broadcastTracksToAutoSubscribeClients(availableTracks)
+		s.broadcastTracksToAutoSubscribeClients(client.ID(), availableTracks)
 	}
 
 	// request keyframe from new client for existing clients
@@ -399,7 +399,7 @@ func (s *SFU) onTracksAvailable(tracks []ITrack) {
 	}
 }
 
-func (s *SFU) broadcastTracksToAutoSubscribeClients(tracks []ITrack) {
+func (s *SFU) broadcastTracksToAutoSubscribeClients(ownerID string, tracks []ITrack) {
 	trackReq := make([]SubscribeTrackRequest, 0)
 	for _, track := range tracks {
 		trackReq = append(trackReq, SubscribeTrackRequest{
@@ -409,7 +409,7 @@ func (s *SFU) broadcastTracksToAutoSubscribeClients(tracks []ITrack) {
 	}
 
 	for _, client := range s.clients.GetClients() {
-		if client.IsSubscribeAllTracks.Load() {
+		if ownerID != client.ID() && client.IsSubscribeAllTracks.Load() {
 			if err := client.SubscribeTracks(trackReq); err != nil {
 				glog.Error("client: failed to subscribe tracks ", err)
 			}
