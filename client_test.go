@@ -294,6 +294,6 @@ func TestClientDataChannel(t *testing.T) {
 	case <-timeout.Done():
 		t.Fatal("timeout waiting for data channel")
 	case dc := <-dcChan:
-		require.Equal(t, "stats", dc.Label())
+		require.Equal(t, "internal", dc.Label())
 	}
 }
