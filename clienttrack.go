@@ -198,7 +198,7 @@ func (t *simulcastClientTrack) push(p *rtp.Packet, quality QualityLevel) {
 	}
 
 	isFirstKeyframePacket := t.isFirstKeyframePacket(p)
-	info := false
+
 	// check if it's a first packet to send
 	if lastQuality == QualityNone && t.sequenceNumber.Load() == 0 {
 		// we try to send the low quality first	if the track is active and fallback to upper quality if not
@@ -232,7 +232,6 @@ func (t *simulcastClientTrack) push(p *rtp.Packet, quality QualityLevel) {
 
 		if isFirstKeyframePacket { // && lastCheckQualityDuration.Seconds() >= 1 {
 			trackQuality = t.client.bitrateController.getQuality(t)
-			info = true
 			// update latest keyframe timestamp
 			// TODO: currently not use anywhere but useful to detect if the track is active or need to refresh full picture
 			switch quality {
@@ -256,9 +255,6 @@ func (t *simulcastClientTrack) push(p *rtp.Packet, quality QualityLevel) {
 	}
 
 	if trackQuality == quality {
-		if info {
-			glog.Info("clienttrack: quality ", trackQuality, " for track ", t.id)
-		}
 		t.send(p, trackQuality, lastQuality, false)
 	} else if trackQuality == QualityNone && quality == QualityLow {
 		if isFirstKeyframePacket {
