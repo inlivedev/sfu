@@ -754,7 +754,7 @@ func (c *Client) afterClosed() {
 	c.sfu.onAfterClientStopped(c)
 }
 
-func (c *Client) Stop() error {
+func (c *Client) stop() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 

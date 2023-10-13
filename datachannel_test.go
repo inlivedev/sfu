@@ -35,8 +35,8 @@ func TestRoomDataChannel(t *testing.T) {
 	pc2, client2, _ := CreateDataPair(ctx, testRoom, roomManager.options.IceServers, "peer2")
 
 	defer func() {
-		_ = client1.Stop()
-		_ = client2.Stop()
+		_ = testRoom.StopClient(client1.id)
+		_ = testRoom.StopClient(client2.id)
 	}()
 
 	chatChan := make(chan string)
@@ -126,8 +126,8 @@ func TestRoomDataChannelWithClientID(t *testing.T) {
 	pc3, client3, _ := CreateDataPair(ctx, testRoom, roomManager.options.IceServers, "peer2")
 
 	defer func() {
-		_ = client1.Stop()
-		_ = client2.Stop()
+		_ = testRoom.StopClient(client1.id)
+		_ = testRoom.StopClient(client2.id)
 	}()
 
 	chatChan := make(chan string)

@@ -87,7 +87,7 @@ Loop:
 					// when all tracks received, make two peers leave the room
 					glog.Info("all tracks received, make two peers leave the room")
 					for i := 0; i < 2; i++ {
-						err = clients[i].Stop()
+						err = testRoom.StopClient(clients[i].ID())
 						require.NoError(t, err, "error stopping client: %v", err)
 					}
 					checkReceiverChan <- true
