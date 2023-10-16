@@ -586,14 +586,26 @@ func (bc *bitrateController) getBitrateAdjustment(claim *bitrateClaim) bitrateAd
 	claim.receivedStats.previousPacketReceived = claim.receivedStats.packetReceived
 	switch claim.quality {
 	case QualityHigh:
+		if track.remoteTrack.remoteTrackHigh == nil {
+			return keepBitrate
+		}
+
 		stats := track.remoteTrack.remoteTrackHigh.receiverStats()
 		claim.receivedStats.packetLost = stats.InboundRTPStreamStats.PacketsLost
 		claim.receivedStats.packetReceived = stats.InboundRTPStreamStats.PacketsReceived
 	case QualityMid:
+		if track.remoteTrack.remoteTrackMid == nil {
+			return keepBitrate
+		}
+
 		stats := track.remoteTrack.remoteTrackMid.receiverStats()
 		claim.receivedStats.packetLost = stats.InboundRTPStreamStats.PacketsLost
 		claim.receivedStats.packetReceived = stats.InboundRTPStreamStats.PacketsReceived
 	case QualityLow:
+		if track.remoteTrack.remoteTrackLow == nil {
+			return keepBitrate
+		}
+
 		stats := track.remoteTrack.remoteTrackLow.receiverStats()
 		claim.receivedStats.packetLost = stats.InboundRTPStreamStats.PacketsLost
 		claim.receivedStats.packetReceived = stats.InboundRTPStreamStats.PacketsReceived
