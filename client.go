@@ -103,6 +103,20 @@ type ClientStats struct {
 	Receiver   map[string]ReceiverStats
 }
 
+func (c *ClientStats) removeSenderStats(trackId string) {
+	c.senderMu.Lock()
+	defer c.senderMu.Unlock()
+
+	delete(c.Sender, trackId)
+}
+
+func (c *ClientStats) removeReceiverStats(trackId string) {
+	c.receiverMu.Lock()
+	defer c.receiverMu.Unlock()
+
+	delete(c.Receiver, trackId)
+}
+
 type Client struct {
 	id                string
 	name              string
@@ -196,8 +210,6 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 	var congestionController *cc.InterceptorFactory
 
 	var estimatorChan chan cc.BandwidthEstimator
-
-	opts.EnableCongestionController = false
 
 	if opts.EnableCongestionController {
 		glog.Info("client: enable congestion controller")

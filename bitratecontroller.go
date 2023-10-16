@@ -243,13 +243,14 @@ func (bc *bitrateController) addClaim(clientTrack iClientTrack, quality QualityL
 	}
 
 	clientTrack.OnTrackEnded(func() {
-		bc.RemoveClaim(clientTrack.ID())
+		bc.removeClaim(clientTrack.ID())
+		clientTrack.Client().stats.removeSenderStats(clientTrack.ID())
 	})
 
 	return bc.claims[clientTrack.ID()], nil
 }
 
-func (bc *bitrateController) RemoveClaim(id string) {
+func (bc *bitrateController) removeClaim(id string) {
 	bc.mu.Lock()
 	defer bc.mu.Unlock()
 

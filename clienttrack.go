@@ -23,6 +23,7 @@ type iClientTrack interface {
 	IsSimulcast() bool
 	SetSourceType(TrackType)
 	OnTrackEnded(func())
+	Client() *Client
 }
 
 type clientTrack struct {
@@ -39,6 +40,10 @@ type clientTrack struct {
 
 func (t *clientTrack) ID() string {
 	return t.id
+}
+
+func (t *clientTrack) Client() *Client {
+	return t.client
 }
 
 func (t *clientTrack) Kind() webrtc.RTPCodecType {
@@ -127,6 +132,10 @@ type simulcastClientTrack struct {
 	isScreen                *atomic.Bool
 	isEnded                 *atomic.Bool
 	onTrackEndedCallbacks   []func()
+}
+
+func (t *simulcastClientTrack) Client() *Client {
+	return t.client
 }
 
 func (t *simulcastClientTrack) isFirstKeyframePacket(p *rtp.Packet) bool {

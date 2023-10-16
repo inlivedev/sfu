@@ -90,6 +90,8 @@ func (t *remoteTrack) readRTP() {
 				if readErr == io.EOF {
 					t.onEnded()
 
+					t.client.stats.removeReceiverStats(t.track.ID())
+
 					return
 				} else if readErr != nil {
 					glog.Error("error reading rtp: ", readErr.Error())
