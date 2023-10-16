@@ -713,9 +713,7 @@ func (c *Client) enableReportAndStats(rtpSender *webrtc.RTPSender) {
 			case <-localCtx.Done():
 				return
 			case <-tick.C:
-				if c != nil && c.statsGetter != nil {
-					c.updateSenderStats(rtpSender)
-				}
+				c.updateSenderStats(rtpSender)
 			}
 		}
 	}()
@@ -885,6 +883,7 @@ func (c *Client) Stats() *ClientStats {
 func (c *Client) updateReceiverStats(remoteTrack *remoteTrack) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
 	if c.statsGetter == nil {
 		return
 	}
@@ -901,12 +900,16 @@ func (c *Client) updateReceiverStats(remoteTrack *remoteTrack) {
 
 	c.stats.receiverMu.Lock()
 	defer c.stats.receiverMu.Unlock()
-	stats := *c.statsGetter.Get(uint32(track.SSRC()))
-	remoteTrack.setReceiverStats(stats)
-	c.stats.Receiver[track.ID()] = ReceiverStats{
-		Stats: stats,
-		Track: track,
+
+	stats := c.statsGetter.Get(uint32(track.SSRC()))
+	if stats != nil {
+		remoteTrack.setReceiverStats(*stats)
+		c.stats.Receiver[track.ID()] = ReceiverStats{
+			Stats: *stats,
+			Track: track,
+		}
 	}
+
 }
 
 func (c *Client) updateSenderStats(sender *webrtc.RTPSender) {
@@ -930,14 +933,12 @@ func (c *Client) updateSenderStats(sender *webrtc.RTPSender) {
 
 	ssrc := sender.GetParameters().Encodings[0].SSRC
 
-	if c == nil {
-		return
-	}
-
-	senderStats := *c.statsGetter.Get(uint32(ssrc))
-	c.stats.Sender[sender.Track().ID()] = SenderStats{
-		Stats: senderStats,
-		Track: sender.Track(),
+	stats := c.statsGetter.Get(uint32(ssrc))
+	if stats != nil {
+		c.stats.Sender[sender.Track().ID()] = SenderStats{
+			Stats: *stats,
+			Track: sender.Track(),
+		}
 	}
 }
 
