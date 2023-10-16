@@ -187,7 +187,6 @@ func (t *simulcastClientTrack) sendBlankFrame(packetRef *rtp.Packet) {
 }
 
 func (t *simulcastClientTrack) push(p *rtp.Packet, quality QualityLevel) {
-
 	var trackQuality QualityLevel
 
 	lastQuality := t.LastQuality()
@@ -202,17 +201,17 @@ func (t *simulcastClientTrack) push(p *rtp.Packet, quality QualityLevel) {
 	// check if it's a first packet to send
 	if lastQuality == QualityNone && t.sequenceNumber.Load() == 0 {
 		// we try to send the low quality first	if the track is active and fallback to upper quality if not
-		if t.remoteTrack.remoteTrackLow != nil && quality == QualityLow {
+		if t.remoteTrack.getRemoteTrack(QualityLow) != nil && quality == QualityLow {
 			trackQuality = QualityLow
 			t.lastQuality.Store(uint32(QualityLow))
 			// send PLI to make sure the client will receive the first frame
 			t.remoteTrack.sendPLI(QualityLow)
-		} else if t.remoteTrack.remoteTrackMid != nil && quality == QualityMid {
+		} else if t.remoteTrack.getRemoteTrack(QualityMid) != nil && quality == QualityMid {
 			trackQuality = QualityMid
 			t.lastQuality.Store(uint32(QualityMid))
 			// send PLI to make sure the client will receive the first frame
 			t.remoteTrack.sendPLI(QualityMid)
-		} else if t.remoteTrack.remoteTrackHigh != nil && quality == QualityHigh {
+		} else if t.remoteTrack.getRemoteTrack(QualityHigh) != nil && quality == QualityHigh {
 			trackQuality = QualityHigh
 			t.lastQuality.Store(uint32(QualityHigh))
 			// send PLI to make sure the client will receive the first frame

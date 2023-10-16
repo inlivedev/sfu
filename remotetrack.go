@@ -28,6 +28,7 @@ type remoteTrack struct {
 	currentBytesReceived  *atomic.Uint64
 	latestUpdatedTS       *atomic.Uint64
 	onEndedCallbacks      []func()
+	stats                 stats.Stats
 }
 
 func newRemoteTrack(client *Client, track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver, onRead func(*rtp.Packet)) *remoteTrack {
@@ -45,6 +46,7 @@ func newRemoteTrack(client *Client, track *webrtc.TrackRemote, receiver *webrtc.
 		currentBytesReceived:  &atomic.Uint64{},
 		latestUpdatedTS:       &atomic.Uint64{},
 		onEndedCallbacks:      make([]func(), 0),
+		stats:                 stats.Stats{},
 	}
 
 	rt.readRTP()
@@ -118,7 +120,8 @@ func (t *remoteTrack) readRTP() {
 	}()
 }
 
-func (t *remoteTrack) updateStats(s stats.Stats) {
+func (t *remoteTrack) updateStats() {
+	s := t.stats
 	// update the stats if the last update equal or more than 1 second
 	latestUpdated := t.latestUpdatedTS.Load()
 	if time.Since(time.Unix(0, int64(latestUpdated))).Seconds() <= 1 {
@@ -157,4 +160,18 @@ func (t *remoteTrack) getAudioLevelExtensionID() uint8 {
 	}
 
 	return 0
+}
+
+func (t *remoteTrack) receiverStats() stats.Stats {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.stats
+}
+
+func (t *remoteTrack) setReceiverStats(s stats.Stats) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.stats = s
+
+	t.updateStats()
 }

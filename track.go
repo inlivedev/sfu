@@ -377,6 +377,22 @@ func (t *simulcastTrack) AddRemoteTrack(track *webrtc.TrackRemote, receiver *web
 	return remoteTrack
 }
 
+func (t *simulcastTrack) getRemoteTrack(q QualityLevel) *remoteTrack {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	switch q {
+	case QualityHigh:
+		return t.remoteTrackHigh
+	case QualityMid:
+		return t.remoteTrackMid
+	case QualityLow:
+		return t.remoteTrackLow
+	}
+
+	return nil
+}
+
 func (t *simulcastTrack) subscribe(client *Client) iClientTrack {
 	// Create a local track, all our SFU clients will be fed via this track
 	track, newTrackErr := webrtc.NewTrackLocalStaticRTP(t.base.codec.RTPCodecCapability, t.base.id, t.base.streamid)

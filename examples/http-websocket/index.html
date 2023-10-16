@@ -138,14 +138,19 @@
 
         const maxBw = 2500*1000
 
-        const startWs = ()=>{
+        const startWs =async ()=>{
             ws = new WebSocket(`ws://${window.location.host}/ws`);
-            ws.onopen = function() {
-                console.log("websocket open");
-                document.querySelector("button").disabled = true;
-            };
-            ws.onmessage = async function(e) {
+            const promise = new Promise((resolve, reject) => {
+                ws.onopen = function() {
+                    resolve()
+                };
 
+                ws.onerror = function(err) {
+                    reject(err)
+                };
+            });
+           
+            ws.onmessage = async function(e) {
                 const msg = JSON.parse(e.data);
                 try {
                     if (msg.type == 'offer') {
@@ -198,10 +203,12 @@
             ws.onclose = function() {
                 console.log("websocket close");
             };
+
+            return promise
         };
 
         async function start() {
-            startWs()
+            await startWs()
             document.querySelector("button").disabled = true;
             const localVideo = document.getElementById("localVideo");
            
@@ -246,8 +253,10 @@
                     remoteVideo.id = "video-"+trackid;
                     remoteVideo.autoplay = true;
                     container.appendChild(remoteVideo);
-
-                    videoObserver.observe(remoteVideo)
+                    if (videoObserver!=null){
+                        videoObserver.observe(remoteVideo)
+                    }
+                    
                 }
 
                 let stats = document.getElementById("stats-"+trackid)

@@ -364,6 +364,8 @@ func (s *SFU) OnClientRemoved(callback func(*Client)) {
 }
 
 func (s *SFU) onAfterClientStopped(client *Client) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
 	if err := s.removeClient(client); err != nil {
 		glog.Error("sfu: failed to remove client ", err)
 	}

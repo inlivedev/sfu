@@ -99,8 +99,8 @@ type ClientStats struct {
 	senderMu   sync.RWMutex
 	receiverMu sync.RWMutex
 	Client     *Client
-	Sender     map[webrtc.SSRC]SenderStats
-	Receiver   map[webrtc.SSRC]ReceiverStats
+	Sender     map[string]SenderStats
+	Receiver   map[string]ReceiverStats
 }
 
 type Client struct {
@@ -196,6 +196,8 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 	var congestionController *cc.InterceptorFactory
 
 	var estimatorChan chan cc.BandwidthEstimator
+
+	opts.EnableCongestionController = false
 
 	if opts.EnableCongestionController {
 		glog.Info("client: enable congestion controller")
@@ -293,8 +295,8 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		senderMu:   sync.RWMutex{},
 		receiverMu: sync.RWMutex{},
 		Client:     client,
-		Sender:     make(map[webrtc.SSRC]SenderStats),
-		Receiver:   make(map[webrtc.SSRC]ReceiverStats),
+		Sender:     make(map[string]SenderStats),
+		Receiver:   make(map[string]ReceiverStats),
 	}
 
 	client.bitrateController = newbitrateController(client, s.pliInterval)
@@ -736,6 +738,9 @@ func (c *Client) processPendingTracks() (isNeedNegotiation bool) {
 }
 
 func (c *Client) afterClosed() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	state := c.state.Load()
 	if state != ClientStateEnded {
 		c.state.Store(ClientStateEnded)
@@ -848,7 +853,7 @@ func (c *Client) IsBridge() bool {
 }
 
 func (c *Client) startIdleTimeout() {
-	c.idleTimeoutContext, c.idleTimeoutCancel = context.WithTimeout(c.context, 30*time.Second)
+	c.idleTimeoutContext, c.idleTimeoutCancel = context.WithTimeout(c.context, 5*time.Second)
 
 	go func() {
 		<-c.idleTimeoutContext.Done()
@@ -896,13 +901,12 @@ func (c *Client) updateReceiverStats(remoteTrack *remoteTrack) {
 
 	c.stats.receiverMu.Lock()
 	defer c.stats.receiverMu.Unlock()
-	senderStats := *c.statsGetter.Get(uint32(track.SSRC()))
-	c.stats.Receiver[track.SSRC()] = ReceiverStats{
-		Stats: senderStats,
+	stats := *c.statsGetter.Get(uint32(track.SSRC()))
+	remoteTrack.setReceiverStats(stats)
+	c.stats.Receiver[track.ID()] = ReceiverStats{
+		Stats: stats,
 		Track: track,
 	}
-
-	remoteTrack.updateStats(senderStats)
 }
 
 func (c *Client) updateSenderStats(sender *webrtc.RTPSender) {
@@ -926,8 +930,12 @@ func (c *Client) updateSenderStats(sender *webrtc.RTPSender) {
 
 	ssrc := sender.GetParameters().Encodings[0].SSRC
 
+	if c == nil {
+		return
+	}
+
 	senderStats := *c.statsGetter.Get(uint32(ssrc))
-	c.stats.Sender[ssrc] = SenderStats{
+	c.stats.Sender[sender.Track().ID()] = SenderStats{
 		Stats: senderStats,
 		Track: sender.Track(),
 	}
@@ -1144,11 +1152,4 @@ func (c *Client) SetName(name string) {
 	defer c.mu.Unlock()
 
 	c.name = name
-}
-
-func (c *Client) SimulatePacketLossPercentage(percentage uint8) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	c.bitrateController.packetLossPercentage = percentage
 }

@@ -383,8 +383,8 @@ func clientHandler(conn *websocket.Conn, messageChan chan Request, r *sfu.Room) 
 				conn.Write(respBytes)
 
 			} else if req.Type == TypePacketLossPercentage {
-				bandwidth, _ := strconv.ParseUint(req.Data.(string), 10, 32)
-				client.SimulatePacketLossPercentage(uint8(bandwidth))
+				// bandwidth, _ := strconv.ParseUint(req.Data.(string), 10, 32)
+				// client.SimulatePacketLossPercentage(uint8(bandwidth))
 			} else {
 				glog.Error("unknown message type", req)
 			}
