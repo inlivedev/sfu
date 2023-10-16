@@ -338,7 +338,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 			var simulcast *simulcastTrack
 			var ok bool
 
-			id := remoteTrack.Msid()
+			id := remoteTrack.ID()
 
 			client.mu.Lock()
 			track, err = client.tracks.Get(id) // not found because the track is not added yet due to race condition

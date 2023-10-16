@@ -212,14 +212,18 @@
             document.querySelector("button").disabled = true;
             const localVideo = document.getElementById("localVideo");
            
-            const video = {
-                width: {
-                    ideal: 1280
-                },
-                height: {
-                    ideal: 720
-                },
-            };
+            const video =  {
+                width: {ideal: 1280}, 
+                height: {ideal: 720}, 
+                advanced: [{
+                    frameRate: {min: 30}}, 
+                    {height: {min: 360}}, 
+                    {width: {min: 720}}, 
+                    {frameRate: {max: 30}}, 
+                    {width: {max: 1280}}, 
+                    {height: {max: 720}}, 
+                    {aspectRatio: {exact: 1.77778}}
+                ]};
 
             const constraints = {
                 audio: true,
@@ -298,21 +302,18 @@
                         rid: 'high',
                         maxBitrate: 1200*1000,
                         maxFramerate: 30,
-                        scalabilityMode: 'L1T2'
                     },
                     {
                         rid: 'mid',
                         scaleResolutionDownBy: 2.0,
-                        maxFramerate: 20,
-                        maxBitrate: 400*1000,
-                        scalabilityMode: 'L1T2'
+                        maxFramerate: 30,
+                        maxBitrate: 500*1000,
                     },
                     {
                         rid: 'low',
-                        scaleResolutionDownBy: 2.0,
+                        scaleResolutionDownBy: 4.0,
                         maxBitrate: 150*1000,
-                        maxFramerate:15,
-                        scalabilityMode: 'L1T2'
+                        maxFramerate:30,
                     }
                 ]
             })
