@@ -68,7 +68,18 @@ func TestRoomDataChannel(t *testing.T) {
 
 	connected := WaitConnected(ctx, []*webrtc.PeerConnection{pc1, pc2})
 
-	isConnected := <-connected
+	timeoutConnected, cancelTimeoutConnected := context.WithTimeout(ctx, 30*time.Second)
+	isConnected := false
+
+	select {
+	case <-timeoutConnected.Done():
+		cancelTimeoutConnected()
+		t.Fatal("timeout waiting for connected")
+	case <-connected:
+		cancelTimeoutConnected()
+		isConnected = true
+	}
+
 	require.True(t, isConnected)
 
 	err = testRoom.CreateDataChannel("chat", DefaultDataChannelOptions())
@@ -184,7 +195,18 @@ func TestRoomDataChannelWithClientID(t *testing.T) {
 
 	connected := WaitConnected(ctx, []*webrtc.PeerConnection{pc1, pc2, pc3})
 
-	isConnected := <-connected
+	timeoutConnected, cancelTimeoutConnected := context.WithTimeout(ctx, 30*time.Second)
+	isConnected := false
+
+	select {
+	case <-timeoutConnected.Done():
+		cancelTimeoutConnected()
+		t.Fatal("timeout waiting for connected")
+	case <-connected:
+		cancelTimeoutConnected()
+		isConnected = true
+	}
+
 	require.True(t, isConnected)
 
 	err = testRoom.CreateDataChannel("chat", DataChannelOptions{
