@@ -101,7 +101,7 @@ func (t *track) createLocalTrack() *webrtc.TrackLocalStaticRTP {
 }
 
 func (t *track) ID() string {
-	return t.base.msid
+	return t.base.id
 }
 
 func (t *track) StreamID() string {
@@ -264,7 +264,7 @@ func (t *simulcastTrack) OnTrackComplete(f func()) {
 
 // TODO: this is contain multiple tracks, there is a possibility remote track high is not available yet
 func (t *simulcastTrack) ID() string {
-	return t.base.msid
+	return t.base.id
 }
 
 func (t *simulcastTrack) StreamID() string {
