@@ -63,24 +63,19 @@ func (t *testManagerExtension) OnRoomClosed(manager *Manager, room *Room) {
 }
 
 func TestManagerExtension(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	options := DefaultOptions()
-	options.IceServers = DefaultTestIceServers()
-	m := NewManager(ctx, "test", options)
 	managerExt := NewTestManagerExtension()
-	m.AddExtension(managerExt)
-	roomID := m.CreateRoomID()
+	roomManager.AddExtension(managerExt)
+	roomID := roomManager.CreateRoomID()
 
 	roomOpts := DefaultRoomOptions()
 	roomOpts.Codecs = []string{webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
-	room, err := m.NewRoom(roomID, "test", "p2p", roomOpts)
+	room, err := roomManager.NewRoom(roomID, "test", "p2p", roomOpts)
 	require.NotNil(t, room, "room is nil")
 	require.NoError(t, err, "error creating room")
 
 	room.Close()
 
-	_, err = m.GetRoom("wrong-room-id")
+	_, err = roomManager.GetRoom("wrong-room-id")
 
 	require.NoError(t, err, "error getting room")
 
@@ -94,19 +89,10 @@ func TestManagerExtension(t *testing.T) {
 }
 
 func TestExtension(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	m := NewManager(ctx, "test", Options{
-		WebRTCPort:               50010,
-		ConnectRemoteRoomTimeout: 30 * time.Second,
-		IceServers:               DefaultTestIceServers(),
-	})
-
 	// create new room
 	roomOpts := DefaultRoomOptions()
 	roomOpts.Codecs = []string{webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
-	testRoom, err := m.NewRoom("test", "test", RoomTypeLocal, roomOpts)
+	testRoom, err := roomManager.NewRoom("test", "test", RoomTypeLocal, roomOpts)
 
 	ext := NewTestExtension()
 	testRoom.AddExtension(ext)
@@ -116,6 +102,8 @@ func TestExtension(t *testing.T) {
 	leftChan := make(chan bool)
 	joinChan := make(chan bool)
 	peerCount := 0
+
+	ctx := testRoom.sfu.context
 
 	tracks, _ := GetStaticTracks(ctx, "test", true)
 	mediaEngine := GetMediaEngine()

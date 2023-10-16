@@ -11,16 +11,6 @@ import (
 )
 
 func TestRoomCreateAndClose(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// create room manager first before create new room
-	roomManager := NewManager(ctx, "test", Options{
-		WebRTCPort:               40007,
-		ConnectRemoteRoomTimeout: 30 * time.Second,
-		IceServers:               DefaultTestIceServers(),
-	})
-
 	roomID := roomManager.CreateRoomID()
 	roomName := "test-room"
 
@@ -80,16 +70,6 @@ func TestRoomCreateAndClose(t *testing.T) {
 }
 
 func TestRoomJoinLeftEvent(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// create room manager first before create new room
-	roomManager := NewManager(ctx, "test-join-left", Options{
-		WebRTCPort:               40000,
-		ConnectRemoteRoomTimeout: 30 * time.Second,
-		IceServers:               DefaultTestIceServers(),
-	})
-
 	roomID := roomManager.CreateRoomID()
 	roomName := "test-room"
 
@@ -115,6 +95,8 @@ func TestRoomJoinLeftEvent(t *testing.T) {
 		glog.Info("client join", client.ID())
 		clients[client.ID()] = client
 	})
+
+	ctx := testRoom.sfu.context
 
 	_, client1, _, _ := CreatePeerPair(ctx, testRoom, DefaultTestIceServers(), "peer1", false, false)
 	_, client2, _, _ := CreatePeerPair(ctx, testRoom, DefaultTestIceServers(), "peer1", false, false)
@@ -163,20 +145,12 @@ func TestRoomJoinLeftEvent(t *testing.T) {
 }
 
 func TestRoomStats(t *testing.T) {
+	t.Parallel()
+
 	var (
 		totalClientIngressBytes uint64
 		totalClientEgressBytes  uint64
 	)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// create room manager first before create new room
-	roomManager := NewManager(ctx, "test-join-left", Options{
-		WebRTCPort:               40005,
-		ConnectRemoteRoomTimeout: 30 * time.Second,
-		IceServers:               DefaultTestIceServers(),
-	})
 
 	roomID := roomManager.CreateRoomID()
 	roomName := "test-room"
@@ -189,6 +163,8 @@ func TestRoomStats(t *testing.T) {
 	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal, roomOpts)
 	require.NoError(t, err, "error creating room: %v", err)
 	peerCount := 0
+
+	ctx := testRoom.sfu.context
 
 	testRoom.OnClientJoined(func(client *Client) {
 		clients[client.ID()] = client
@@ -303,15 +279,7 @@ Loop:
 }
 
 func TestRoomAddClientTimeout(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// create room manager first before create new room
-	roomManager := NewManager(ctx, "test", Options{
-		WebRTCPort:               40013,
-		ConnectRemoteRoomTimeout: 30 * time.Second,
-		IceServers:               DefaultTestIceServers(),
-	})
+	t.Parallel()
 
 	roomID := roomManager.CreateRoomID()
 	roomName := "test-room"
@@ -323,6 +291,8 @@ func TestRoomAddClientTimeout(t *testing.T) {
 	roomOpts.Codecs = []string{webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
 	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal, roomOpts)
 	require.NoErrorf(t, err, "error creating new room: %v", err)
+
+	ctx := testRoom.sfu.context
 
 	// add a new client to room
 	// you can also get the client by using r.GetClient(clientID)

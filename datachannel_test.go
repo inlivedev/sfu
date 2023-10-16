@@ -13,16 +13,6 @@ import (
 func TestRoomDataChannel(t *testing.T) {
 	t.Parallel()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// create room manager first before create new room
-	roomManager := NewManager(ctx, "test-room-datachannel", Options{
-		WebRTCPort:               40010,
-		ConnectRemoteRoomTimeout: 30 * time.Second,
-		IceServers:               DefaultTestIceServers(),
-	})
-
 	roomID := roomManager.CreateRoomID()
 	roomName := "test-room"
 
@@ -31,6 +21,8 @@ func TestRoomDataChannel(t *testing.T) {
 	roomOpts.Codecs = []string{webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
 	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal, roomOpts)
 	require.NoError(t, err, "error creating room: %v", err)
+	ctx := testRoom.sfu.context
+
 	pc1, client1, _ := CreateDataPair(ctx, testRoom, roomManager.options.IceServers, "peer1")
 	pc2, client2, _ := CreateDataPair(ctx, testRoom, roomManager.options.IceServers, "peer2")
 
@@ -114,16 +106,6 @@ Loop:
 func TestRoomDataChannelWithClientID(t *testing.T) {
 	t.Parallel()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// create room manager first before create new room
-	roomManager := NewManager(ctx, "test-room-datachannel", Options{
-		WebRTCPort:               40011,
-		ConnectRemoteRoomTimeout: 30 * time.Second,
-		IceServers:               DefaultTestIceServers(),
-	})
-
 	roomID := roomManager.CreateRoomID()
 	roomName := "test-room"
 
@@ -132,6 +114,8 @@ func TestRoomDataChannelWithClientID(t *testing.T) {
 	roomOpts.Codecs = []string{webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
 	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal, roomOpts)
 	require.NoError(t, err, "error creating room: %v", err)
+	ctx := testRoom.sfu.context
+
 	pc1, client1, _ := CreateDataPair(ctx, testRoom, roomManager.options.IceServers, "peer1")
 	pc2, client2, _ := CreateDataPair(ctx, testRoom, roomManager.options.IceServers, "peer2")
 	pc3, client3, _ := CreateDataPair(ctx, testRoom, roomManager.options.IceServers, "peer2")

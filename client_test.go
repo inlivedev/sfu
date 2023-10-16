@@ -14,16 +14,6 @@ import (
 func TestTracksManualSubscribe(t *testing.T) {
 	t.Parallel()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// create room manager first before create new room
-	roomManager := NewManager(ctx, "test-join-left", Options{
-		WebRTCPort:               40003,
-		ConnectRemoteRoomTimeout: 30 * time.Second,
-		IceServers:               DefaultTestIceServers(),
-	})
-
 	roomID := roomManager.CreateRoomID()
 	roomName := "test-room"
 
@@ -34,6 +24,7 @@ func TestTracksManualSubscribe(t *testing.T) {
 	roomOpts.Codecs = []string{webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
 	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal, roomOpts)
 	require.NoError(t, err, "error creating room: %v", err)
+	ctx := testRoom.sfu.context
 
 	tracksAddedChan := make(chan int)
 	tracksAvailableChan := make(chan int)
@@ -103,16 +94,6 @@ Loop:
 func TestAutoSubscribeTracks(t *testing.T) {
 	t.Parallel()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// create room manager first before create new room
-	roomManager := NewManager(ctx, "test-join-left", Options{
-		WebRTCPort:               40001,
-		ConnectRemoteRoomTimeout: 30 * time.Second,
-		IceServers:               DefaultTestIceServers(),
-	})
-
 	roomID := roomManager.CreateRoomID()
 	roomName := "test-room"
 
@@ -123,6 +104,7 @@ func TestAutoSubscribeTracks(t *testing.T) {
 	roomOpts.Codecs = []string{webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
 	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal, roomOpts)
 	require.NoError(t, err, "error creating room: %v", err)
+	ctx := testRoom.sfu.context
 
 	trackChan := make(chan bool)
 
@@ -172,16 +154,6 @@ Loop:
 func TestSimulcastTrack(t *testing.T) {
 	t.Parallel()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// create room manager first before create new room
-	roomManager := NewManager(ctx, "test-join-left", Options{
-		WebRTCPort:               40009,
-		ConnectRemoteRoomTimeout: 30 * time.Second,
-		IceServers:               DefaultTestIceServers(),
-	})
-
 	roomID := roomManager.CreateRoomID()
 	roomName := "test-room"
 
@@ -190,6 +162,8 @@ func TestSimulcastTrack(t *testing.T) {
 	roomOpts.Codecs = []string{webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
 	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal, roomOpts)
 	require.NoError(t, err, "error creating room: %v", err)
+	ctx := testRoom.sfu.context
+
 	client1, pc1 := addSimulcastPair(t, ctx, testRoom, "peer1")
 	client2, pc2 := addSimulcastPair(t, ctx, testRoom, "peer2")
 
@@ -261,16 +235,6 @@ func addSimulcastPair(t *testing.T, ctx context.Context, room *Room, peerName st
 func TestClientDataChannel(t *testing.T) {
 	t.Parallel()
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// create room manager first before create new room
-	roomManager := NewManager(ctx, "test-room-datachannel", Options{
-		WebRTCPort:               40012,
-		ConnectRemoteRoomTimeout: 30 * time.Second,
-		IceServers:               DefaultTestIceServers(),
-	})
-
 	roomID := roomManager.CreateRoomID()
 	roomName := "test-room"
 
@@ -279,6 +243,8 @@ func TestClientDataChannel(t *testing.T) {
 	roomOpts.Codecs = []string{webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
 	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal, roomOpts)
 	require.NoError(t, err, "error creating room: %v", err)
+	ctx := testRoom.sfu.context
+
 	pc1, _, _ := CreateDataPair(ctx, testRoom, roomManager.options.IceServers, "peer1")
 
 	dcChan := make(chan *webrtc.DataChannel)

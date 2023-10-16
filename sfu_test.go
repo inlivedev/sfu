@@ -17,15 +17,8 @@ func TestLeaveRoom(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	// create room manager first before create new room
-	roomManager := NewManager(ctx, "test-join-left", Options{
-		WebRTCPort:               40004,
-		ConnectRemoteRoomTimeout: 30 * time.Second,
-		IceServers:               DefaultTestIceServers(),
-	})
-
 	roomID := roomManager.CreateRoomID()
-	roomName := "test-room"
+	roomName := "test-leave-room-room"
 
 	peerCount := 5
 
@@ -127,13 +120,6 @@ func TestRenegotiation(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-
-	// create room manager first before create new room
-	roomManager := NewManager(ctx, "test-join-left", Options{
-		WebRTCPort:               40006,
-		ConnectRemoteRoomTimeout: 30 * time.Second,
-		IceServers:               DefaultTestIceServers(),
-	})
 
 	roomID := roomManager.CreateRoomID()
 	roomName := "test-room"
