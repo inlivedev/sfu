@@ -209,6 +209,8 @@ func (bc *bitrateController) addClaims(clientTracks []iClientTrack) error {
 			} else {
 				trackQuality = QualityAudio
 			}
+		} else if clientTrack.Kind() == webrtc.RTPCodecTypeVideo && !clientTrack.IsSimulcast() {
+			trackQuality = QualityHigh
 		}
 
 		_, err := bc.addClaim(clientTrack, trackQuality, true)
