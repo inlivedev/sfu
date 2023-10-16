@@ -232,51 +232,52 @@
             localVideo.play();
 
             peerConnection.ontrack = function(e) {
-                if(e.track.kind != "video") {
-                    return
-                }
+                e.streams.forEach((stream) => {
+                    console.log("ontrack");
+                    
+                    let container = document.getElementById("container-"+stream.id);
+                    if (!container) {
+                        container = document.createElement("div");
+                        container.className = "container";
+                        container.id = "container-"+stream.id;
+                        document.querySelector('main').appendChild(container);
+                    }
 
-                const trackid = e.track.id;
-                console.log("ontrack");
-                
-                let container = document.getElementById("container-"+trackid);
-                if (!container) {
-                    container = document.createElement("div");
-                    container.className = "container";
-                    container.id = "container-"+trackid;
-                    document.querySelector('main').appendChild(container);
-                }
+                    let remoteVideo = document.getElementById("video-"+stream.id);
+                    if (!remoteVideo) {
+                        remoteVideo = document.createElement("video");
+                        remoteVideo.id = "video-"+stream.id;
+                        remoteVideo.autoplay = true;
+                        container.appendChild(remoteVideo);
+                        if (videoObserver!=null){
+                            videoObserver.observe(remoteVideo)
+                        }
+                        
+                    }
 
-                let remoteVideo = document.getElementById("video-"+trackid);
-                if (!remoteVideo) {
-                    remoteVideo = document.createElement("video");
-                    remoteVideo.id = "video-"+trackid;
-                    remoteVideo.autoplay = true;
-                    container.appendChild(remoteVideo);
-                    if (videoObserver!=null){
-                        videoObserver.observe(remoteVideo)
+                    if (e.track.kind == 'video'){
+                        let stats = document.getElementById("stats-"+e.track.id)
+                        if (!stats){
+                            stats = document.createElement("div");
+                            stats.className = "stats";
+                            stats.id = "stats-"+e.track.id;
+                            container.append(stats);
+                        }
                     }
                     
-                }
 
-                let stats = document.getElementById("stats-"+trackid)
-                if (!stats){
-                    stats = document.createElement("div");
-                    stats.className = "stats";
-                    stats.id = "stats-"+trackid
-                    container.append(stats)
-                }
+                    
 
+                    remoteVideo.srcObject =stream;
+
+                   stream.onremovetrack = function() {
+                        console.log("onremovetrack");
+                        remoteVideo.srcObject = null;
+                        remoteVideo.remove();
+                        container.remove();
+                    };
+                });
                 
-
-                remoteVideo.srcObject = e.streams[0];
-
-                e.streams[0].onremovetrack = function() {
-                    console.log("onremovetrack");
-                    remoteVideo.srcObject = null;
-                    remoteVideo.remove();
-                    container.remove();
-                };
             };
 
             // peerConnection.addTrack(stream.getAudioTracks()[0], stream);
