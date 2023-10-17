@@ -499,7 +499,7 @@ func (bc *bitrateController) checkAndAdjustBitrates() {
 	for _, claim := range claims {
 		if claim.track.IsSimulcast() {
 			bitrateAdjustment := bc.getBitrateAdjustment(claim)
-			glog.Info("bitrate: track ", claim.track.ID(), " quality ", claim.quality, " adjustment ", bitrateAdjustmentToString(bitrateAdjustment))
+
 			switch bitrateAdjustment {
 			case keepBitrate:
 				continue
