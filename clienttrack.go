@@ -24,6 +24,7 @@ type iClientTrack interface {
 	SetSourceType(TrackType)
 	OnTrackEnded(func())
 	Client() *Client
+	RequestPLI()
 }
 
 type clientTrack struct {
@@ -112,6 +113,12 @@ func (t *clientTrack) onTrackEnded() {
 
 func (t *clientTrack) IsSimulcast() bool {
 	return false
+}
+
+func (t *clientTrack) RequestPLI() {
+	if err := t.remoteTrack.sendPLI(); err != nil {
+		glog.Error("clienttrack: error on send pli", err)
+	}
 }
 
 type simulcastClientTrack struct {
@@ -407,6 +414,10 @@ func (t *simulcastClientTrack) rewritePacket(p *rtp.Packet, quality QualityLevel
 
 	t.sequenceNumber.Add(uint32(sequenceDelta))
 	p.SequenceNumber = uint16(t.sequenceNumber.Load())
+}
+
+func (t *simulcastClientTrack) RequestPLI() {
+	t.remoteTrack.sendPLI(t.LastQuality())
 }
 
 type clientTrackList struct {

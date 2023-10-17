@@ -213,6 +213,11 @@ func (bc *bitrateController) addClaims(clientTracks []iClientTrack) error {
 			trackQuality = QualityHigh
 		}
 
+		// set last quality that use for requesting PLI after claim added
+		if clientTrack.IsSimulcast() {
+			clientTrack.(*simulcastClientTrack).lastQuality.Store(uint32(trackQuality))
+		}
+
 		_, err := bc.addClaim(clientTrack, trackQuality, true)
 		if err != nil {
 			errors = append(errors, err)
@@ -259,22 +264,6 @@ func (bc *bitrateController) removeClaim(id string) {
 	}
 
 	delete(bc.claims, id)
-}
-
-// getAvailableBandwidth returns the available bandwidth for the client to claim
-// The available bandwidth is the estimated bandwidth minus the total bitrate of all active claims
-// Use this information for debugging or logging purpose
-func (bc *bitrateController) availableBandwidth() int32 {
-	estimatedBandwidth := int32(bc.client.GetEstimatedBandwidth())
-	availableBandwidth := estimatedBandwidth - int32(bc.TotalBitrates())
-	minSpace := int32(bc.client.sfu.bitratesConfig.VideoLow + bc.client.sfu.bitratesConfig.Audio)
-
-	if estimatedBandwidth > minSpace {
-		// always keep extra space for another 1 low video track and 1 audio track
-		availableBandwidth -= minSpace
-	}
-
-	return availableBandwidth
 }
 
 func (bc *bitrateController) exists(id string) bool {
@@ -498,12 +487,18 @@ func (bc *bitrateController) checkAndAdjustBitrates() {
 
 	for _, claim := range claims {
 		if claim.track.IsSimulcast() {
+			simulcastTrack := claim.track.(*simulcastClientTrack)
 			bitrateAdjustment := bc.getBitrateAdjustment(claim)
 
-			switch bitrateAdjustment {
-			case keepBitrate:
-				continue
-			case decreaseBitrate:
+			if bitrateAdjustment == keepBitrate {
+				if simulcastTrack.remoteTrack.isTrackActive(claim.quality) {
+					continue
+				}
+
+				bitrateAdjustment = decreaseBitrate
+			}
+
+			if bitrateAdjustment == decreaseBitrate {
 				if claim.track.IsSimulcast() && claim.quality > QualityLow {
 					reducedQuality := claim.quality - 1
 
@@ -521,10 +516,13 @@ func (bc *bitrateController) checkAndAdjustBitrates() {
 						continue
 					}
 
+					claim.track.(*simulcastClientTrack).remoteTrack.sendPLI(reducedQuality)
+					glog.Info("clienttrack: send pli for track ", claim.track.ID(), " quality ", reducedQuality, " changed from ", claim.quality)
 					bc.setQuality(claim.track.ID(), reducedQuality)
+
 				}
 
-			case increaseBitrate:
+			} else if bitrateAdjustment == increaseBitrate {
 				if claim.track.IsSimulcast() && claim.quality < QualityHigh {
 					increasedQuality := claim.quality + 1
 
@@ -538,6 +536,8 @@ func (bc *bitrateController) checkAndAdjustBitrates() {
 						continue
 					}
 
+					claim.track.(*simulcastClientTrack).remoteTrack.sendPLI(increasedQuality)
+					glog.Info("clienttrack: send pli for track ", claim.track.ID(), " quality ", increasedQuality, " changed from ", claim.quality)
 					bc.setQuality(claim.track.ID(), increasedQuality)
 				}
 

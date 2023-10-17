@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/golang/glog"
-	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v3"
 )
@@ -179,12 +178,6 @@ func (t *track) SetAsProcessed() {
 	defer t.mu.Unlock()
 
 	t.base.isProcessed = true
-}
-
-func (t *track) SendPLI() error {
-	return t.base.client.peerConnection.WriteRTCP([]rtcp.Packet{
-		&rtcp.PictureLossIndication{MediaSSRC: uint32(t.remoteTrack.track.SSRC())},
-	})
 }
 
 type simulcastTrack struct {
@@ -468,16 +461,6 @@ func (t *simulcastTrack) IsScreen() bool {
 	return t.base.isScreen.Load()
 }
 
-func (t *simulcastTrack) SendPLI(currentTrack *webrtc.TrackRemote) error {
-	if currentTrack == nil {
-		return nil
-	}
-
-	return t.base.client.peerConnection.WriteRTCP([]rtcp.Packet{
-		&rtcp.PictureLossIndication{MediaSSRC: uint32(currentTrack.SSRC())},
-	})
-}
-
 func (t *simulcastTrack) TotalTracks() int {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -556,19 +539,19 @@ func (t *simulcastTrack) sendPLI(quality QualityLevel) {
 	switch quality {
 	case QualityHigh:
 		if t.remoteTrackHigh != nil {
-			if err := t.SendPLI(t.remoteTrackHigh.track); err != nil {
+			if err := t.remoteTrackHigh.sendPLI(); err != nil {
 				glog.Error("client: error sending PLI ", err)
 			}
 		}
 	case QualityMid:
 		if t.remoteTrackMid != nil {
-			if err := t.SendPLI(t.remoteTrackMid.track); err != nil {
+			if err := t.remoteTrackMid.sendPLI(); err != nil {
 				glog.Error("client: error sending PLI ", err)
 			}
 		}
 	case QualityLow:
 		if t.remoteTrackLow != nil {
-			if err := t.SendPLI(t.remoteTrackLow.track); err != nil {
+			if err := t.remoteTrackLow.sendPLI(); err != nil {
 				glog.Error("client: error sending PLI ", err)
 			}
 		}

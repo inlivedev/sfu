@@ -273,9 +273,6 @@ func (s *SFU) NewClient(id, name string, opts ClientOptions) *Client {
 		s.broadcastTracksToAutoSubscribeClients(client.ID(), availableTracks)
 	}
 
-	// request keyframe from new client for existing clients
-	client.requestKeyFrame()
-
 	client.peerConnection.OnSignalingStateChange(func(state webrtc.SignalingState) {
 		if state == webrtc.SignalingStateStable && client.pendingRemoteRenegotiation.Load() {
 			client.pendingRemoteRenegotiation.Store(false)
@@ -315,9 +312,6 @@ func (s *SFU) syncTrack(client *Client) bool {
 						ClientID: clientPeer.ID(),
 						TrackID:  track.ID(),
 					})
-
-					// send PLI to previous client so they refresh the video after added to new client
-					clientPeer.requestKeyFrame()
 				}
 			}
 		}

@@ -10,6 +10,7 @@ import (
 
 	"github.com/golang/glog"
 	"github.com/pion/interceptor/pkg/stats"
+	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
 	"github.com/pion/sdp/v3"
 	"github.com/pion/webrtc/v3"
@@ -27,6 +28,7 @@ type remoteTrack struct {
 	previousBytesReceived *atomic.Uint64
 	currentBytesReceived  *atomic.Uint64
 	latestUpdatedTS       *atomic.Uint64
+	lastPLIRequestTime    time.Time
 	onEndedCallbacks      []func()
 	stats                 stats.Stats
 }
@@ -48,6 +50,8 @@ func newRemoteTrack(client *Client, track *webrtc.TrackRemote, receiver *webrtc.
 		onEndedCallbacks:      make([]func(), 0),
 		stats:                 stats.Stats{},
 	}
+
+	rt.enableIntervalPLI()
 
 	rt.readRTP()
 
@@ -176,4 +180,43 @@ func (t *remoteTrack) setReceiverStats(s stats.Stats) {
 	t.stats = s
 
 	t.updateStats()
+}
+
+func (t *remoteTrack) sendPLI() error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	maxGapSeconds := float64(1)
+
+	if time.Since(t.lastPLIRequestTime).Seconds() < maxGapSeconds {
+		return nil
+	}
+
+	t.lastPLIRequestTime = time.Now()
+
+	glog.Info("sending PLI for track: ", t.track.ID())
+
+	return t.client.peerConnection.WriteRTCP([]rtcp.Packet{
+		&rtcp.PictureLossIndication{MediaSSRC: uint32(t.track.SSRC())},
+	})
+}
+
+func (t *remoteTrack) enableIntervalPLI() {
+	go func() {
+		ctx, cancel := context.WithCancel(t.context)
+		defer cancel()
+		ticker := time.NewTicker(10 * time.Second)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := t.sendPLI(); err != nil {
+					glog.Error("remotetrack: error sending PLI: ", err.Error())
+				}
+			}
+		}
+	}()
 }
