@@ -164,6 +164,7 @@ type Client struct {
 	egressBandwidth                *atomic.Uint32
 	ingressBandwidth               *atomic.Uint32
 	ingressQualityLimitationReason *atomic.Value
+	isDebug                        bool
 }
 
 func DefaultClientOptions() ClientOptions {
@@ -201,6 +202,10 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 	})
 
 	i.Add(statsInterceptorFactory)
+
+	if err = webrtc.ConfigureTWCCHeaderExtensionSender(m, i); err != nil {
+		panic(err)
+	}
 
 	var estimatorChan chan cc.BandwidthEstimator
 
@@ -1138,4 +1143,82 @@ func (c *Client) SetName(name string) {
 	defer c.mu.Unlock()
 
 	c.name = name
+}
+
+func (c *Client) TrackStats() *ClientTrackStats {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	clientStats := &ClientTrackStats{
+		ID:                       c.id,
+		Name:                     c.name,
+		ConsumerBandwidth:        c.egressBandwidth.Load(),
+		PublisherBandwidth:       c.ingressBandwidth.Load(),
+		Sents:                    make([]TrackSentStats, 0),
+		Receives:                 make([]TrackReceivedStats, 0),
+		CurrentPublishLimitation: c.ingressQualityLimitationReason.Load().(string),
+		CurrentConsumerBitrate:   c.bitrateController.totalSentBitrates(),
+	}
+
+	c.stats.receiverMu.Lock()
+	for _, stat := range c.stats.Receiver {
+		receivedStats := TrackReceivedStats{
+			ID:             stat.Track.ID(),
+			Kind:           stat.Track.Kind().String(),
+			Codec:          stat.Track.Codec().MimeType,
+			PacketsLost:    stat.Stats.InboundRTPStreamStats.PacketsLost,
+			PacketReceived: stat.Stats.InboundRTPStreamStats.PacketsReceived,
+		}
+
+		clientStats.Receives = append(clientStats.Receives, receivedStats)
+	}
+
+	c.stats.receiverMu.Unlock()
+
+	c.stats.senderMu.Lock()
+	for _, stat := range c.stats.Sender {
+		claim := c.bitrateController.GetClaim(stat.Track.ID())
+		source := "media"
+
+		if claim.track == nil {
+			continue
+		}
+
+		if claim.track.IsScreen() {
+			source = "screen"
+		}
+
+		sentStats := TrackSentStats{
+			ID:             stat.Track.ID(),
+			Kind:           stat.Track.Kind().String(),
+			PacketsLost:    stat.Stats.RemoteInboundRTPStreamStats.PacketsLost,
+			PacketSent:     stat.Stats.OutboundRTPStreamStats.PacketsSent,
+			FractionLost:   stat.Stats.RemoteInboundRTPStreamStats.FractionLost,
+			ByteSent:       stat.Stats.OutboundRTPStreamStats.BytesSent,
+			CurrentBitrate: uint64(claim.track.getCurrentBitrate()),
+			Source:         source,
+			ClaimedBitrate: uint64(claim.bitrate),
+			Quality:        claim.quality,
+		}
+
+		clientStats.Sents = append(clientStats.Sents, sentStats)
+	}
+
+	c.stats.senderMu.Unlock()
+
+	return clientStats
+}
+
+func (c *Client) EnableDebug() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.isDebug = true
+}
+
+func (c *Client) IsDebugEnabled() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	return c.isDebug
 }

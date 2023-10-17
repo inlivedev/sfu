@@ -139,7 +139,12 @@
         const maxBw = 2500*1000
 
         const startWs =async ()=>{
-            ws = new WebSocket(`ws://${window.location.host}/ws`);
+            let debug = false
+            const urlParams = new URLSearchParams(window.location.search);
+            if (urlParams.has('debug')){
+                debug = true
+            }
+            ws = new WebSocket(`ws://${window.location.host}/ws?${debug?'debug=1':''}`);
             const promise = new Promise((resolve, reject) => {
                 ws.onopen = function() {
                     resolve()
@@ -195,6 +200,8 @@
                         if (isAllowRenegotiation){
                             negotiate()
                         }
+                    } else if(msg.type =='track_stats'){
+                        updateTrackStats(msg.data)
                     }
                 } catch (error) {
                     console.log(error);
@@ -262,10 +269,15 @@
                     if (e.track.kind == 'video'){
                         let stats = document.getElementById("stats-"+e.track.id)
                         if (!stats){
+                            const videoStats = document.createElement("div");
+                            videoStats.className = "video-stats";
+                            
                             stats = document.createElement("div");
+                            stats.appendChild(videoStats);
                             stats.className = "stats";
                             stats.id = "stats-"+e.track.id;
                             container.append(stats);
+                            
                         }
                     }
                     
@@ -369,6 +381,32 @@
             }
         }
 
+
+       const updateTrackStats = (trackStats) =>{
+            const sentStats = trackStats.sent_track_stats
+            sentStats.forEach(stat => {
+                const statsEl = document.getElementById("stats-"+stat.id)
+                if (!statsEl){
+                    return
+                }
+
+                let trackStatsEl = statsEl.querySelector(".track-stats")
+                if (!trackStatsEl){
+                    trackStatsEl = document.createElement("div");
+                    trackStatsEl.className = "track-stats";
+                    statsEl.appendChild(trackStatsEl);
+                }
+
+                const statsText = `
+                    <p>Packet Loss Ratio: ${Math.round(stat.fraction_lost * 100) / 100}</p>
+
+                `
+                trackStatsEl.innerHTML = statsText
+                
+            })
+            const receivedStats = trackStats.received_track_stats
+       }
+
        const monitorStats =  async() => {
             while (peerConnection.connectionState =="connected") {
                 const stats = await peerConnection.getStats()
@@ -380,7 +418,7 @@
 
                 stats.forEach(report => {
                     if (report.type === 'inbound-rtp' && report.kind === 'video') {
-                        const statsEl = document.getElementById("stats-"+report.trackIdentifier)
+                        const statsEl = document.querySelector(`#stats-${report.trackIdentifier} .video-stats`)
                         if (!statsEl){
                             return
                         }

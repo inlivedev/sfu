@@ -23,28 +23,12 @@ const (
 
 type bitrateAdjustment int
 
-type receivedStats struct {
-	packetLost             int64
-	packetReceived         uint64
-	previousPacketLost     int64
-	previousPacketReceived uint64
-}
-
 type bitrateClaim struct {
-	mu            sync.Mutex
-	receivedStats receivedStats
-	sentStats     sentStats
-	track         iClientTrack
-	bitrate       uint32
-	quality       QualityLevel
-	simulcast     bool
-}
-
-type sentStats struct {
-	packetLost         int64
-	packetSent         uint64
-	previousPacketLost int64
-	previousPacketSent uint64
+	mu        sync.Mutex
+	track     iClientTrack
+	bitrate   uint32
+	quality   QualityLevel
+	simulcast bool
 }
 
 type bitrateController struct {
@@ -443,6 +427,7 @@ func (bc *bitrateController) start() {
 // checkAndAdjustBitrates will check if the available bandwidth is enough to send the current bitrate
 // if not then it will try to reduce one by one of simulcast track quality until it fit the bandwidth
 // if the bandwidth is enough to send the current bitrate, then it will try to increase the bitrate
+// each time adjustment needed, it will only increase or decrese single track.
 func (bc *bitrateController) checkAndAdjustBitrates() {
 	claims := bc.Claims()
 	lowestQuality := QualityLevel(QualityHigh)
@@ -520,6 +505,7 @@ func (bc *bitrateController) checkAndAdjustBitrates() {
 					glog.Info("clienttrack: send pli for track ", claim.track.ID(), " quality ", reducedQuality, " changed from ", claim.quality)
 					bc.setQuality(claim.track.ID(), reducedQuality)
 
+					return
 				}
 
 			} else if bitrateAdjustment == increaseBitrate {
@@ -537,8 +523,14 @@ func (bc *bitrateController) checkAndAdjustBitrates() {
 					}
 
 					claim.track.(*simulcastClientTrack).remoteTrack.sendPLI(increasedQuality)
-					glog.Info("clienttrack: send pli for track ", claim.track.ID(), " quality ", increasedQuality, " changed from ", claim.quality)
+
+					if bc.client.IsDebugEnabled() {
+						glog.Info("clienttrack: send pli for track ", claim.track.ID(), " quality ", increasedQuality, " changed from ", claim.quality)
+					}
+
 					bc.setQuality(claim.track.ID(), increasedQuality)
+
+					return
 				}
 
 			}
@@ -591,33 +583,20 @@ func (bc *bitrateController) onRemoteViewedSizeChanged(videoSize videoSize) {
 // https://source.chromium.org/chromium/chromium/src/+/main:third_party/webrtc/modules/congestion_controller/goog_cc/send_side_bandwidth_estimation.cc;l=52
 func (bc *bitrateController) getBitrateAdjustment(claim *bitrateClaim) bitrateAdjustment {
 	track := claim.track.(*simulcastClientTrack)
-	claim.receivedStats.previousPacketLost = claim.receivedStats.packetLost
-	claim.receivedStats.previousPacketReceived = claim.receivedStats.packetReceived
+
 	switch claim.quality {
 	case QualityHigh:
 		if track.remoteTrack.remoteTrackHigh == nil {
 			return decreaseBitrate
 		}
-
-		stats := track.remoteTrack.remoteTrackHigh.receiverStats()
-		claim.receivedStats.packetLost = stats.InboundRTPStreamStats.PacketsLost
-		claim.receivedStats.packetReceived = stats.InboundRTPStreamStats.PacketsReceived
 	case QualityMid:
 		if track.remoteTrack.remoteTrackMid == nil {
 			return decreaseBitrate
 		}
-
-		stats := track.remoteTrack.remoteTrackMid.receiverStats()
-		claim.receivedStats.packetLost = stats.InboundRTPStreamStats.PacketsLost
-		claim.receivedStats.packetReceived = stats.InboundRTPStreamStats.PacketsReceived
 	case QualityLow:
 		if track.remoteTrack.remoteTrackLow == nil {
 			return increaseBitrate
 		}
-
-		stats := track.remoteTrack.remoteTrackLow.receiverStats()
-		claim.receivedStats.packetLost = stats.InboundRTPStreamStats.PacketsLost
-		claim.receivedStats.packetReceived = stats.InboundRTPStreamStats.PacketsReceived
 	}
 
 	bc.client.stats.senderMu.Lock()
@@ -628,18 +607,20 @@ func (bc *bitrateController) getBitrateAdjustment(claim *bitrateClaim) bitrateAd
 		return keepBitrate
 	}
 
-	claim.sentStats.previousPacketLost = claim.sentStats.packetLost
-	claim.sentStats.previousPacketSent = claim.sentStats.packetSent
-	claim.sentStats.packetLost = sender.Stats.RemoteInboundRTPStreamStats.PacketsLost
-	claim.sentStats.packetSent = sender.Stats.OutboundRTPStreamStats.PacketsSent
 	bc.client.stats.senderMu.Unlock()
 
-	deltaSentLost := claim.sentStats.packetLost - claim.sentStats.previousPacketLost
+	lostSentRatio := sender.Stats.RemoteInboundRTPStreamStats.FractionLost
 
-	lostRatio := float64(deltaSentLost) / float64(claim.sentStats.packetSent)
-	if lostRatio < 0.02 {
+	if lostSentRatio < 0.02 && claim.quality != QualityHigh {
+		if bc.client.IsDebugEnabled() {
+			glog.Info("bitrate: track ", claim.track.ID(), " lost ratio ", lostSentRatio, " can increase bitrate")
+		}
+
 		return increaseBitrate
-	} else if lostRatio > 0.1 {
+	} else if lostSentRatio > 0.1 && claim.quality != QualityNone {
+		if bc.client.IsDebugEnabled() {
+			glog.Info("bitrate: track ", claim.track.ID(), " lost ratio ", lostSentRatio, " need to decrease bitrate")
+		}
 		return decreaseBitrate
 	}
 	return keepBitrate

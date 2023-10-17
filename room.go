@@ -268,7 +268,6 @@ func (r *Room) SFU() *SFU {
 	return r.sfu
 }
 
-//nolint:copylocks // Statistic won't use the mutex
 func (r *Room) Stats() RoomStats {
 	var (
 		bytesReceived      uint64
@@ -290,75 +289,18 @@ func (r *Room) Stats() RoomStats {
 
 	for id, cstats := range r.stats {
 		if cstats.Client != nil {
-			cstats.Client.mu.Lock()
-
-			if _, ok := clientStats[id]; !ok {
-				clientStats[id] = &ClientTrackStats{
-					ID:                       cstats.Client.id,
-					Name:                     cstats.Client.name,
-					ConsumerBandwidth:        cstats.Client.egressBandwidth.Load(),
-					PublisherBandwidth:       cstats.Client.ingressBandwidth.Load(),
-					Sents:                    make([]TrackSentStats, 0),
-					Receives:                 make([]TrackReceiveStats, 0),
-					CurrentPublishLimitation: cstats.Client.ingressQualityLimitationReason.Load().(string),
-					CurrentConsumerBitrate:   cstats.Client.bitrateController.totalSentBitrates(),
-				}
+			clientStats[id] = cstats.Client.TrackStats()
+			for _, stat := range clientStats[id].Receives {
+				bytesReceived += uint64(stat.ByteReceived)
+				packetReceivedLost += stat.PacketsLost
+				packetReceived += stat.PacketReceived
 			}
 
-			cstats.receiverMu.Lock()
-			for _, stat := range cstats.Receiver {
-				bytesReceived += stat.Stats.InboundRTPStreamStats.BytesReceived
-				packetReceivedLost += stat.Stats.InboundRTPStreamStats.PacketsLost
-				packetReceived += stat.Stats.InboundRTPStreamStats.PacketsReceived
-
-				receivedStats := TrackReceiveStats{
-					ID:             stat.Track.ID(),
-					Kind:           stat.Track.Kind().String(),
-					Codec:          stat.Track.Codec().MimeType,
-					PacketsLost:    stat.Stats.InboundRTPStreamStats.PacketsLost,
-					PacketReceived: stat.Stats.InboundRTPStreamStats.PacketsReceived,
-				}
-
-				clientStats[id].Receives = append(clientStats[id].Receives, receivedStats)
+			for _, stat := range clientStats[id].Sents {
+				bytesSent += stat.ByteSent
+				packetSentLost += stat.PacketsLost
+				packetSent += stat.PacketSent
 			}
-
-			cstats.receiverMu.Unlock()
-
-			cstats.senderMu.Lock()
-			for _, stat := range cstats.Sender {
-				bytesSent += stat.Stats.OutboundRTPStreamStats.BytesSent
-				packetSentLost += stat.Stats.RemoteInboundRTPStreamStats.PacketsLost
-				packetSent += stat.Stats.OutboundRTPStreamStats.PacketsSent
-
-				claim := cstats.Client.bitrateController.GetClaim(stat.Track.ID())
-				source := "media"
-
-				if claim.track == nil {
-					continue
-				}
-
-				if claim.track.IsScreen() {
-					source = "screen"
-				}
-
-				sentStats := TrackSentStats{
-					ID:             stat.Track.ID(),
-					Kind:           stat.Track.Kind().String(),
-					PacketsLost:    stat.Stats.RemoteInboundRTPStreamStats.PacketsLost,
-					PacketSent:     stat.Stats.OutboundRTPStreamStats.PacketsSent,
-					ByteSent:       stat.Stats.OutboundRTPStreamStats.BytesSent,
-					CurrentBitrate: uint64(claim.track.getCurrentBitrate()),
-					Source:         source,
-					ClaimedBitrate: uint64(claim.bitrate),
-					Quality:        claim.quality,
-				}
-
-				clientStats[id].Sents = append(clientStats[id].Sents, sentStats)
-			}
-
-			cstats.senderMu.Unlock()
-
-			cstats.Client.mu.Unlock()
 		}
 
 	}

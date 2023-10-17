@@ -44,6 +44,7 @@ const (
 	TypeSetBandwidthLimit    = "set_bandwidth_limit"
 	TypeBitrateAdjusted      = "bitrate_adjusted"
 	TypePacketLossPercentage = "set_packet_loss_percentage"
+	TypeTrackStats           = "track_stats"
 )
 
 func main() {
@@ -101,7 +102,11 @@ func main() {
 
 	http.Handle("/ws", websocket.Handler(func(conn *websocket.Conn) {
 		messageChan := make(chan Request)
-		go clientHandler(conn, messageChan, defaultRoom)
+		isDebug := false
+		if conn.Request().URL.Query().Get("debug") != "" {
+			isDebug = true
+		}
+		go clientHandler(isDebug, conn, messageChan, defaultRoom)
 		reader(conn, messageChan)
 	}))
 
@@ -154,7 +159,7 @@ MessageLoop:
 	}
 }
 
-func clientHandler(conn *websocket.Conn, messageChan chan Request, r *sfu.Room) {
+func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request, r *sfu.Room) {
 	ctx, cancel := context.WithCancel(conn.Request().Context())
 	defer cancel()
 
@@ -169,6 +174,10 @@ func clientHandler(conn *websocket.Conn, messageChan chan Request, r *sfu.Room) 
 	if err != nil {
 		log.Panic(err)
 		return
+	}
+
+	if isDebug {
+		client.EnableDebug()
 	}
 
 	defer r.StopClient(client.ID())
@@ -279,10 +288,22 @@ func clientHandler(conn *websocket.Conn, messageChan chan Request, r *sfu.Room) 
 		_, _ = conn.Write(candidateBytes)
 	}
 
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-ticker.C:
+			resp := Respose{
+				Status: true,
+				Type:   TypeTrackStats,
+				Data:   *client.TrackStats(),
+			}
+
+			respBytes, _ := json.Marshal(resp)
+			_, _ = conn.Write(respBytes)
 		case req := <-messageChan:
 			// handle as SDP if no error
 			if req.Type == TypeOffer || req.Type == TypeAnswer {

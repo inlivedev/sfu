@@ -186,15 +186,15 @@ func (t *remoteTrack) sendPLI() error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	maxGapSeconds := float64(1)
+	maxGapSeconds := 1 * time.Second
 
-	if time.Since(t.lastPLIRequestTime).Seconds() < maxGapSeconds {
+	if time.Since(t.lastPLIRequestTime) < maxGapSeconds {
 		return nil
 	}
 
-	t.lastPLIRequestTime = time.Now()
+	// glog.Info("sending PLI for track: ", t.track.ID(), " last PLI was requested ", time.Since(t.lastPLIRequestTime).Seconds(), " seconds ago")
 
-	glog.Info("sending PLI for track: ", t.track.ID())
+	t.lastPLIRequestTime = time.Now()
 
 	return t.client.peerConnection.WriteRTCP([]rtcp.Packet{
 		&rtcp.PictureLossIndication{MediaSSRC: uint32(t.track.SSRC())},

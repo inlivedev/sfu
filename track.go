@@ -499,7 +499,7 @@ func (t *simulcastTrack) isTrackActive(quality QualityLevel) bool {
 		delta := time.Since(time.Unix(0, t.lastReadHighTS.Load()))
 
 		if delta > threshold {
-			glog.Warningf("track: remote track %s high is not active, last read was %d ms ago", t.Client().ID, delta.Milliseconds())
+			glog.Warningf("track: remote track %s high is not active, last read was %d ms ago", t.Client().ID(), delta.Milliseconds())
 			return false
 		}
 

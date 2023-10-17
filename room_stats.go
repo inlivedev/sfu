@@ -14,6 +14,7 @@ type TrackSentStats struct {
 	Kind           string       `json:"kind"`
 	PacketsLost    int64        `json:"packets_lost"`
 	PacketSent     uint64       `json:"packets_sent"`
+	FractionLost   float64      `json:"fraction_lost"`
 	ByteSent       uint64       `json:"bytes_sent"`
 	CurrentBitrate uint64       `json:"current_bitrate"`
 	ClaimedBitrate uint64       `json:"claimed_bitrate"`
@@ -21,7 +22,7 @@ type TrackSentStats struct {
 	Quality        QualityLevel `json:"quality"`
 }
 
-type TrackReceiveStats struct {
+type TrackReceivedStats struct {
 	ID             string `json:"id"`
 	Kind           string `json:"kind"`
 	Codec          string `json:"codec"`
@@ -31,14 +32,14 @@ type TrackReceiveStats struct {
 }
 
 type ClientTrackStats struct {
-	ID                       string              `json:"id"`
-	Name                     string              `json:"name"`
-	PublisherBandwidth       uint32              `json:"publisher_bandwidth"`
-	ConsumerBandwidth        uint32              `json:"consumer_bandwidth"`
-	CurrentConsumerBitrate   uint32              `json:"current_bitrate"`
-	CurrentPublishLimitation string              `json:"current_publish_limitation"`
-	Sents                    []TrackSentStats    `json:"sent_track_stats"`
-	Receives                 []TrackReceiveStats `json:"receive_track_stats"`
+	ID                       string               `json:"id"`
+	Name                     string               `json:"name"`
+	PublisherBandwidth       uint32               `json:"publisher_bandwidth"`
+	ConsumerBandwidth        uint32               `json:"consumer_bandwidth"`
+	CurrentConsumerBitrate   uint32               `json:"current_bitrate"`
+	CurrentPublishLimitation string               `json:"current_publish_limitation"`
+	Sents                    []TrackSentStats     `json:"sent_track_stats"`
+	Receives                 []TrackReceivedStats `json:"received_track_stats"`
 }
 
 type RoomStats struct {
