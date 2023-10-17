@@ -474,3 +474,16 @@ func ThousandSeparator(n int) string {
 	p := message.NewPrinter(language.English)
 	return p.Sprintf("%d", n)
 }
+
+func bitrateAdjustmentToString(adjustment bitrateAdjustment) string {
+	switch adjustment {
+	case 0:
+		return "keep"
+	case 1:
+		return "increase"
+	case -1:
+		return "decrease"
+	default:
+		return "none"
+	}
+}

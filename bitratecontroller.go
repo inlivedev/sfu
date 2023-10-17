@@ -18,7 +18,7 @@ var (
 const (
 	keepBitrate     = 0
 	increaseBitrate = 1
-	decreaseBitrate = 2
+	decreaseBitrate = -1
 )
 
 type bitrateAdjustment int
@@ -330,7 +330,7 @@ func (bc *bitrateController) getQuality(t *simulcastClientTrack) QualityLevel {
 	}
 
 	if quality != QualityNone && !track.isTrackActive(quality) {
-		if track.isTrackActive(QualityLow) {
+		if quality != QualityLow && track.isTrackActive(QualityLow) {
 			return QualityLow
 		}
 
@@ -499,6 +499,7 @@ func (bc *bitrateController) checkAndAdjustBitrates() {
 	for _, claim := range claims {
 		if claim.track.IsSimulcast() {
 			bitrateAdjustment := bc.getBitrateAdjustment(claim)
+			glog.Info("bitrate: track ", claim.track.ID(), " quality ", claim.quality, " adjustment ", bitrateAdjustmentToString(bitrateAdjustment))
 			switch bitrateAdjustment {
 			case keepBitrate:
 				continue
@@ -595,7 +596,7 @@ func (bc *bitrateController) getBitrateAdjustment(claim *bitrateClaim) bitrateAd
 	switch claim.quality {
 	case QualityHigh:
 		if track.remoteTrack.remoteTrackHigh == nil {
-			return keepBitrate
+			return decreaseBitrate
 		}
 
 		stats := track.remoteTrack.remoteTrackHigh.receiverStats()
@@ -603,7 +604,7 @@ func (bc *bitrateController) getBitrateAdjustment(claim *bitrateClaim) bitrateAd
 		claim.receivedStats.packetReceived = stats.InboundRTPStreamStats.PacketsReceived
 	case QualityMid:
 		if track.remoteTrack.remoteTrackMid == nil {
-			return keepBitrate
+			return decreaseBitrate
 		}
 
 		stats := track.remoteTrack.remoteTrackMid.receiverStats()
@@ -611,7 +612,7 @@ func (bc *bitrateController) getBitrateAdjustment(claim *bitrateClaim) bitrateAd
 		claim.receivedStats.packetReceived = stats.InboundRTPStreamStats.PacketsReceived
 	case QualityLow:
 		if track.remoteTrack.remoteTrackLow == nil {
-			return keepBitrate
+			return increaseBitrate
 		}
 
 		stats := track.remoteTrack.remoteTrackLow.receiverStats()
