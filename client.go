@@ -174,7 +174,7 @@ func DefaultClientOptions() ClientOptions {
 		Direction:                  webrtc.RTPTransceiverDirectionSendrecv,
 		IdleTimeout:                30 * time.Second,
 		Type:                       ClientTypePeer,
-		EnableCongestionController: true,
+		EnableCongestionController: false,
 	}
 }
 
