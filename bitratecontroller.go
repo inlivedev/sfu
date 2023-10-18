@@ -3,6 +3,7 @@ package sfu
 import (
 	"context"
 	"errors"
+	"math"
 	"sync"
 	"time"
 
@@ -24,11 +25,40 @@ const (
 type bitrateAdjustment int
 
 type bitrateClaim struct {
-	mu        sync.Mutex
-	track     iClientTrack
-	bitrate   uint32
-	quality   QualityLevel
-	simulcast bool
+	mu               sync.Mutex
+	track            iClientTrack
+	bitrate          uint32
+	quality          QualityLevel
+	simulcast        bool
+	delayCounter     int
+	lastIncreaseTime time.Time
+	lastDecreaseTime time.Time
+}
+
+func (c *bitrateClaim) isAllowToIncrease() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.delayCounter > 0 && time.Since(c.lastIncreaseTime) < time.Duration(c.delayCounter)*10*time.Second {
+		glog.Info("clienttrack: delay increase,  delay counter ", c.delayCounter)
+
+		return false
+	}
+
+	return true
+}
+
+func (c *bitrateClaim) pushbackDelayCounter() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.delayCounter == 0 {
+		c.delayCounter = 1
+		return
+	}
+
+	c.delayCounter = int(math.Ceil(float64(c.delayCounter) * 1.5))
+	glog.Info("clienttrack: pushback delay counter to ", c.delayCounter)
 }
 
 type bitrateController struct {
@@ -106,6 +136,11 @@ func (bc *bitrateController) setQuality(clientTrackID string, quality QualityLev
 
 	if claim, ok := bc.claims[clientTrackID]; ok {
 		claim.mu.Lock()
+
+		if claim.quality < quality {
+			claim.lastIncreaseTime = time.Now()
+		}
+
 		bitrate := bc.client.sfu.QualityLevelToBitrate(quality)
 		claim.quality = quality
 		claim.bitrate = bitrate
@@ -581,8 +616,21 @@ func (bc *bitrateController) onRemoteViewedSizeChanged(videoSize videoSize) {
 // Reference
 // https://www.ietf.org/archive/id/draft-alvestrand-rtcweb-congestion-01.html#rfc.section.4
 // https://source.chromium.org/chromium/chromium/src/+/main:third_party/webrtc/modules/congestion_controller/goog_cc/send_side_bandwidth_estimation.cc;l=52
+//
+// TODO:
+// - need to check if the track is keep increase but then decrease again
+// - if it happen twice, then we need to delay when to increase the bitrate
+// - by adding keepBitrate delay counter
+// - each time the bitrate increase it will check the delay counter if not 0 then no increase but decrease the counter
+// - if the counter is 0 then increase the bitrate
+// - if the bitrate back to decrease then the delay counter will add 1.5x of the previous delay counter
 func (bc *bitrateController) getBitrateAdjustment(claim *bitrateClaim) bitrateAdjustment {
 	track := claim.track.(*simulcastClientTrack)
+
+	// don't adjust bitrates too fast
+	if time.Since(claim.lastDecreaseTime) < 2*time.Second || time.Since(claim.lastIncreaseTime) < 2*time.Second {
+		return keepBitrate
+	}
 
 	switch claim.quality {
 	case QualityHigh:
@@ -616,11 +664,31 @@ func (bc *bitrateController) getBitrateAdjustment(claim *bitrateClaim) bitrateAd
 			glog.Info("bitrate: track ", claim.track.ID(), " lost ratio ", lostSentRatio, " can increase bitrate")
 		}
 
+		if !claim.isAllowToIncrease() {
+			if bc.client.IsDebugEnabled() {
+				glog.Info("bitrate: track ", claim.track.ID(), " increase bitrate too fast, delay increase bitrate")
+			}
+			return keepBitrate
+		}
+
 		return increaseBitrate
 	} else if lostSentRatio > 0.1 && claim.quality != QualityNone {
 		if bc.client.IsDebugEnabled() {
 			glog.Info("bitrate: track ", claim.track.ID(), " lost ratio ", lostSentRatio, " need to decrease bitrate")
 		}
+
+		if bc.client.IsDebugEnabled() {
+			glog.Info("last increase time ", time.Since(claim.lastIncreaseTime).Milliseconds(), " ms")
+		}
+
+		// if we got decrease after we increase within short time, then we need to delay the next increase
+		if time.Since(claim.lastIncreaseTime) < 10*time.Second {
+			if bc.client.IsDebugEnabled() {
+				glog.Info("bitrate: track ", claim.track.ID(), " decrease bitrate too fast, delay increase bitrate")
+			}
+			claim.pushbackDelayCounter()
+		}
+
 		return decreaseBitrate
 	}
 	return keepBitrate

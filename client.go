@@ -1178,6 +1178,8 @@ func (c *Client) TrackStats() *ClientTrackStats {
 	c.stats.senderMu.Lock()
 	for _, stat := range c.stats.Sender {
 		claim := c.bitrateController.GetClaim(stat.Track.ID())
+		claim.mu.Lock()
+
 		source := "media"
 
 		if claim.track == nil {
@@ -1200,6 +1202,8 @@ func (c *Client) TrackStats() *ClientTrackStats {
 			ClaimedBitrate: uint64(claim.bitrate),
 			Quality:        claim.quality,
 		}
+
+		claim.mu.Unlock()
 
 		clientStats.Sents = append(clientStats.Sents, sentStats)
 	}
