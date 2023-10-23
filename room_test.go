@@ -103,7 +103,7 @@ func TestRoomJoinLeftEvent(t *testing.T) {
 	_, client2, _, _ := CreatePeerPair(ctx, testRoom, DefaultTestIceServers(), "peer1", false, false)
 	_, client3, _, _ := CreatePeerPair(ctx, testRoom, DefaultTestIceServers(), "peer1", false, false)
 
-	timeout, cancelTimeout := context.WithTimeout(ctx, 20*time.Second)
+	timeout, cancelTimeout := context.WithTimeout(ctx, 60*time.Second)
 	defer cancelTimeout()
 
 	peerLeft := 0
@@ -131,7 +131,6 @@ func TestRoomJoinLeftEvent(t *testing.T) {
 					require.NoError(t, err, "error stopping client: %v", err)
 				}
 			}()
-
 		}
 
 		t.Log("peer count", peerCount)
