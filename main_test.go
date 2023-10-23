@@ -2,6 +2,7 @@ package sfu
 
 import (
 	"context"
+	"flag"
 	"os"
 	"testing"
 	"time"
@@ -10,6 +11,10 @@ import (
 var roomManager *Manager
 
 func TestMain(m *testing.M) {
+	// flag.Set("logtostderr", "true")
+	// flag.Set("stderrthreshold", "INFO")
+
+	flag.Parse()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

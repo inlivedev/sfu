@@ -51,7 +51,7 @@ func newRemoteTrack(client *Client, track *webrtc.TrackRemote, receiver *webrtc.
 		stats:                 stats.Stats{},
 	}
 
-	rt.enableIntervalPLI()
+	rt.enableIntervalPLI(client.sfu.PLIInterval())
 
 	rt.readRTP()
 
@@ -201,11 +201,11 @@ func (t *remoteTrack) sendPLI() error {
 	})
 }
 
-func (t *remoteTrack) enableIntervalPLI() {
+func (t *remoteTrack) enableIntervalPLI(interval time.Duration) {
 	go func() {
 		ctx, cancel := context.WithCancel(t.context)
 		defer cancel()
-		ticker := time.NewTicker(10 * time.Second)
+		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
 		for {

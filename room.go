@@ -61,13 +61,16 @@ type Room struct {
 }
 
 type RoomOptions struct {
+	// Configures the bitrates configuration that will be used by the room
+	// Make sure to use the same bitrate config when publishing video because this is used to manage the usage bandwidth in this room
 	Bitrates BitratesConfig
-	Codecs   []string
+	// Configures the codecs that will be used by the room
+	Codecs []string
 	// Configures the timeout for client to join the room after register
 	// The client will automatically kicked out from the room if not joined within the time after registered
 	ClientTimeout time.Duration
 	// Configures the interval between sending PLIs to clients that will generate keyframe
-	// This will used for how often the video quality can be switched when the bandwitdh is changed
+	// More often means more bandwidth usage but more stability on video quality
 	PLIInterval time.Duration
 }
 
@@ -76,7 +79,7 @@ func DefaultRoomOptions() RoomOptions {
 		Bitrates:      DefaultBitrates(),
 		Codecs:        []string{webrtc.MimeTypeVP9, webrtc.MimeTypeOpus},
 		ClientTimeout: 10 * time.Minute,
-		PLIInterval:   3 * time.Second,
+		PLIInterval:   5 * time.Second,
 	}
 }
 
@@ -291,13 +294,13 @@ func (r *Room) Stats() RoomStats {
 		if cstats.Client != nil {
 			clientStats[id] = cstats.Client.TrackStats()
 			for _, stat := range clientStats[id].Receives {
-				bytesReceived += uint64(stat.ByteReceived)
+				bytesReceived += uint64(stat.BytesReceived)
 				packetReceivedLost += stat.PacketsLost
-				packetReceived += stat.PacketReceived
+				packetReceived += stat.PacketsReceived
 			}
 
 			for _, stat := range clientStats[id].Sents {
-				bytesSent += stat.ByteSent
+				bytesSent += stat.BytesSent
 				packetSentLost += stat.PacketsLost
 				packetSent += stat.PacketSent
 			}

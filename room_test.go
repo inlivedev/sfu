@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golang/glog"
 	"github.com/pion/webrtc/v3"
 	"github.com/stretchr/testify/require"
 )
@@ -53,13 +52,13 @@ func TestRoomCreateAndClose(t *testing.T) {
 		for {
 			select {
 			case <-clientLeftChan:
-				glog.Info("client left")
+				t.Log("client left")
 				if len(testRoom.sfu.clients.clients) == 0 {
 					allClientLeft <- true
 					return
 				}
 			case <-time.After(5 * time.Second):
-				glog.Info("timeout waiting for client left")
+				t.Log("timeout waiting for client left")
 			}
 		}
 	}()
@@ -86,13 +85,13 @@ func TestRoomJoinLeftEvent(t *testing.T) {
 
 	testRoom.OnClientLeft(func(client *Client) {
 		leftChan <- true
-		glog.Info("client left", client.ID())
+		t.Log("client left", client.ID())
 		delete(clients, client.ID())
 	})
 
 	testRoom.OnClientJoined(func(client *Client) {
 		joinChan <- client.ID()
-		glog.Info("client join", client.ID())
+		t.Log("client join", client.ID())
 		clients[client.ID()] = client
 	})
 
@@ -112,10 +111,10 @@ func TestRoomJoinLeftEvent(t *testing.T) {
 		case <-timeout.Done():
 			t.Fatal("timeout waiting for client left event")
 		case <-leftChan:
-			glog.Info("client left")
+			t.Log("client left")
 			peerLeft++
 		case id := <-joinChan:
-			glog.Info("client join")
+			t.Log("client join")
 			peerCount++
 			// stop client in go routine so we can receive left event
 			go func() {
@@ -133,7 +132,7 @@ func TestRoomJoinLeftEvent(t *testing.T) {
 
 		}
 
-		glog.Info("peer count", peerCount)
+		t.Log("peer count", peerCount)
 		if peerLeft == 3 {
 			break
 		}
@@ -202,10 +201,10 @@ Loop:
 			break Loop
 		case <-done1:
 			peerCount++
-			glog.Info("test: pc1 done")
+			t.Log("test: pc1 done")
 		case <-done2:
 			peerCount++
-			glog.Info("test: pc2 done")
+			t.Log("test: pc2 done")
 		default:
 			// this will trying to break out after all audio video packets are received
 
@@ -245,29 +244,29 @@ Loop:
 					break Loop
 				}
 
-				glog.Info("total client ingress bytes: ", totalClientIngressBytes)
-				glog.Info("total client egress bytes: ", totalClientEgressBytes)
-				glog.Info("total room bytes sent: ", roomStats.ByteSent)
-				glog.Info("total room bytes receive: ", roomStats.BytesReceived)
-				glog.Info("total room packet received lost: ", roomStats.PacketReceivedLost)
-				glog.Info("total room packet sent lost: ", roomStats.PacketSentLost)
+				t.Log("total client ingress bytes: ", totalClientIngressBytes)
+				t.Log("total client egress bytes: ", totalClientEgressBytes)
+				t.Log("total room bytes sent: ", roomStats.ByteSent)
+				t.Log("total room bytes receive: ", roomStats.BytesReceived)
+				t.Log("total room packet received lost: ", roomStats.PacketReceivedLost)
+				t.Log("total room packet sent lost: ", roomStats.PacketSentLost)
 			}
 		}
 	}
 
-	glog.Info("total client ingress bytes: ", totalClientIngressBytes)
-	glog.Info("total client egress bytes: ", totalClientEgressBytes)
+	t.Log("total client ingress bytes: ", totalClientIngressBytes)
+	t.Log("total client egress bytes: ", totalClientEgressBytes)
 
-	glog.Info("get room stats")
+	t.Log("get room stats")
 	roomStats := testRoom.Stats()
 
 	require.NotEqual(t, uint64(0), totalClientEgressBytes)
 	require.NotEqual(t, uint64(0), totalClientIngressBytes)
 
-	glog.Info("total room bytes sent: ", roomStats.ByteSent)
-	glog.Info("total room bytes receive: ", roomStats.BytesReceived)
-	glog.Info("total room packet sent lost: ", roomStats.PacketSentLost)
-	glog.Info("total room packet received lost: ", roomStats.PacketReceivedLost)
+	t.Log("total room bytes sent: ", roomStats.ByteSent)
+	t.Log("total room bytes receive: ", roomStats.BytesReceived)
+	t.Log("total room packet sent lost: ", roomStats.PacketSentLost)
+	t.Log("total room packet received lost: ", roomStats.PacketReceivedLost)
 
 	diffPercentClientIgressRoomBytesSent := (float64(totalClientIngressBytes) - float64(roomStats.ByteSent-uint64(roomStats.PacketSentLost*1500))) / float64(totalClientIngressBytes) * 100
 	require.LessOrEqual(t, diffPercentClientIgressRoomBytesSent, 10.0, "expecting less than 10 percent difference client igress and room byte sent")
@@ -275,7 +274,7 @@ Loop:
 	diffPercentClientEgressRoomBytesReceived := (float64(totalClientEgressBytes) - float64(roomStats.BytesReceived)) / float64(totalClientEgressBytes) * 100
 	require.LessOrEqual(t, diffPercentClientEgressRoomBytesReceived, 10.0, "expecting less than 10 percent difference client egress and room byte received")
 
-	glog.Info(totalClientIngressBytes, roomStats.ByteSent)
+	t.Log(totalClientIngressBytes, roomStats.ByteSent)
 }
 
 func TestRoomAddClientTimeout(t *testing.T) {

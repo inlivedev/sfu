@@ -1163,11 +1163,12 @@ func (c *Client) TrackStats() *ClientTrackStats {
 	c.stats.receiverMu.Lock()
 	for _, stat := range c.stats.Receiver {
 		receivedStats := TrackReceivedStats{
-			ID:             stat.Track.ID(),
-			Kind:           stat.Track.Kind().String(),
-			Codec:          stat.Track.Codec().MimeType,
-			PacketsLost:    stat.Stats.InboundRTPStreamStats.PacketsLost,
-			PacketReceived: stat.Stats.InboundRTPStreamStats.PacketsReceived,
+			ID:              stat.Track.ID(),
+			Kind:            stat.Track.Kind().String(),
+			Codec:           stat.Track.Codec().MimeType,
+			BytesReceived:   int64(stat.Stats.InboundRTPStreamStats.BytesReceived),
+			PacketsLost:     stat.Stats.InboundRTPStreamStats.PacketsLost,
+			PacketsReceived: stat.Stats.InboundRTPStreamStats.PacketsReceived,
 		}
 
 		clientStats.Receives = append(clientStats.Receives, receivedStats)
@@ -1196,7 +1197,7 @@ func (c *Client) TrackStats() *ClientTrackStats {
 			PacketsLost:    stat.Stats.RemoteInboundRTPStreamStats.PacketsLost,
 			PacketSent:     stat.Stats.OutboundRTPStreamStats.PacketsSent,
 			FractionLost:   stat.Stats.RemoteInboundRTPStreamStats.FractionLost,
-			ByteSent:       stat.Stats.OutboundRTPStreamStats.BytesSent,
+			BytesSent:      stat.Stats.OutboundRTPStreamStats.BytesSent,
 			CurrentBitrate: uint64(claim.track.getCurrentBitrate()),
 			Source:         source,
 			ClaimedBitrate: uint64(claim.bitrate),

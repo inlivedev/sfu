@@ -529,3 +529,10 @@ func (s *SFU) QualityLevelToBitrate(level QualityLevel) uint32 {
 		return 0
 	}
 }
+
+func (s *SFU) PLIInterval() time.Duration {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	return s.pliInterval
+}
