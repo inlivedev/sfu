@@ -10,10 +10,9 @@ import (
 )
 
 func TestRoomCreateAndClose(t *testing.T) {
+	t.Parallel()
 	roomID := roomManager.CreateRoomID()
 	roomName := "test-room"
-
-	clientLeftChan := make(chan bool)
 
 	// create new room
 	roomOpts := DefaultRoomOptions()
@@ -21,8 +20,9 @@ func TestRoomCreateAndClose(t *testing.T) {
 	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal, roomOpts)
 	require.NoErrorf(t, err, "error creating new room: %v", err)
 
+	clientsLeft := 0
 	testRoom.OnClientLeft(func(client *Client) {
-		clientLeftChan <- true
+		clientsLeft++
 	})
 
 	// add a new client to room
@@ -34,11 +34,12 @@ func TestRoomCreateAndClose(t *testing.T) {
 	// stop client
 	err = testRoom.StopClient(client1.ID())
 	require.NoErrorf(t, err, "error stopping client: %v", err)
+
 	id = testRoom.CreateClientID()
 	client2, err := testRoom.AddClient(id, id, DefaultClientOptions())
 	require.NoErrorf(t, err, "error adding client to room: %v", err)
 
-	// stop all clients should error on not empty room
+	// stop all clients should error on unempty room
 	err = testRoom.Close()
 	require.EqualError(t, err, ErrRoomIsNotEmpty.Error(), "expecting error room is not empty: %v", err)
 
@@ -46,24 +47,25 @@ func TestRoomCreateAndClose(t *testing.T) {
 	err = testRoom.StopClient(client2.ID())
 	require.NoErrorf(t, err, "error stopping client: %v", err)
 
-	allClientLeft := make(chan bool)
-
-	go func() {
-		for {
-			select {
-			case <-clientLeftChan:
-				t.Log("client left")
-				if len(testRoom.sfu.clients.clients) == 0 {
-					allClientLeft <- true
-					return
-				}
-			case <-time.After(5 * time.Second):
-				t.Log("timeout waiting for client left")
+Loop:
+	for {
+		timeout, cancelTimeout := context.WithTimeout(testRoom.sfu.context, 10*time.Second)
+		defer cancelTimeout()
+		select {
+		case <-timeout.Done():
+			t.Fatal("timeout waiting for client left event")
+			break Loop
+		default:
+			if clientsLeft == 2 {
+				break Loop
 			}
-		}
-	}()
 
-	<-allClientLeft
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
+
+	require.Equal(t, 2, clientsLeft)
+
 	err = testRoom.Close()
 	require.NoErrorf(t, err, "error closing room: %v", err)
 }
