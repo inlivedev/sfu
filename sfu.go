@@ -115,6 +115,7 @@ type SFU struct {
 	onStop                   func()
 	OnTracksAvailable        func(tracks []track)
 	pliInterval              time.Duration
+	qualityRef               QualityRef
 }
 
 type PublishedTrack struct {
@@ -126,6 +127,7 @@ type sfuOptions struct {
 	IceServers  []webrtc.ICEServer
 	Mux         *UDPMux
 	Bitrates    BitratesConfig
+	QualityRef  QualityRef
 	Codecs      []string
 	PLIInterval time.Duration
 }
@@ -145,6 +147,7 @@ func New(ctx context.Context, opts sfuOptions) *SFU {
 		mux:            opts.Mux,
 		bitratesConfig: opts.Bitrates,
 		pliInterval:    opts.PLIInterval,
+		qualityRef:     opts.QualityRef,
 	}
 
 	go func() {
@@ -202,7 +205,7 @@ func (s *SFU) NewClient(id, name string, opts ClientOptions) *Client {
 				client.onJoined()
 
 				// trigger available tracks from other clients
-				if client.OnTracksAvailable != nil {
+				if client.onTracksAvailable != nil {
 					availableTracks := make([]ITrack, 0)
 
 					for _, c := range s.clients.GetClients() {
@@ -214,7 +217,7 @@ func (s *SFU) NewClient(id, name string, opts ClientOptions) *Client {
 					}
 
 					if len(availableTracks) > 0 {
-						client.OnTracksAvailable(availableTracks)
+						client.onTracksAvailable(availableTracks)
 					}
 				}
 
@@ -246,9 +249,6 @@ func (s *SFU) NewClient(id, name string, opts ClientOptions) *Client {
 	})
 
 	client.onTrack = func(track ITrack) {
-		client.mu.Lock()
-		defer client.mu.Unlock()
-
 		if err := client.pendingPublishedTracks.Add(track); err == ErrTrackExists {
 			// not an error could be because a simulcast track already added
 			return
@@ -273,7 +273,7 @@ func (s *SFU) NewClient(id, name string, opts ClientOptions) *Client {
 		s.broadcastTracksToAutoSubscribeClients(client.ID(), availableTracks)
 	}
 
-	client.peerConnection.OnSignalingStateChange(func(state webrtc.SignalingState) {
+	client.peerConnection.PC().OnSignalingStateChange(func(state webrtc.SignalingState) {
 		if state == webrtc.SignalingStateStable && client.pendingRemoteRenegotiation.Load() {
 			client.pendingRemoteRenegotiation.Store(false)
 			client.allowRemoteRenegotiation()
@@ -283,15 +283,6 @@ func (s *SFU) NewClient(id, name string, opts ClientOptions) *Client {
 	s.addClient(client)
 
 	return client
-}
-
-func (s *SFU) removeTracks(trackIDs []string) {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
-
-	for _, client := range s.clients.GetClients() {
-		client.removePublishedTrack(trackIDs)
-	}
 }
 
 // Syncs track from connected client to other clients
@@ -379,7 +370,7 @@ func (s *SFU) onClientRemoved(client *Client) {
 
 func (s *SFU) onTracksAvailable(tracks []ITrack) {
 	for _, client := range s.clients.GetClients() {
-		if !client.IsSubscribeAllTracks.Load() && client.OnTracksAvailable != nil {
+		if !client.IsSubscribeAllTracks.Load() {
 			// filter out tracks from the same client
 			filteredTracks := make([]ITrack, 0)
 			for _, track := range tracks {
@@ -389,7 +380,7 @@ func (s *SFU) onTracksAvailable(tracks []ITrack) {
 			}
 
 			if len(filteredTracks) > 0 {
-				client.OnTracksAvailable(tracks)
+				client.onTracksAvailable(tracks)
 			}
 		}
 	}
@@ -505,7 +496,7 @@ func (s *SFU) createExistingDataChannels(c *Client) {
 func (s *SFU) TotalActiveSessions() int {
 	count := 0
 	for _, c := range s.clients.GetClients() {
-		if c.PeerConnection().ConnectionState() == webrtc.PeerConnectionStateConnected {
+		if c.PeerConnection().PC().ConnectionState() == webrtc.PeerConnectionStateConnected {
 			count++
 		}
 	}
@@ -535,4 +526,11 @@ func (s *SFU) PLIInterval() time.Duration {
 	defer s.mutex.Unlock()
 
 	return s.pliInterval
+}
+
+func (s *SFU) QualityRef() QualityRef {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	return s.qualityRef
 }

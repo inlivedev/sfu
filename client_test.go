@@ -32,7 +32,7 @@ func TestTracksManualSubscribe(t *testing.T) {
 
 	for i := 0; i < peerCount; i++ {
 		pc, client, _, _ := CreatePeerPair(ctx, testRoom, DefaultTestIceServers(), fmt.Sprintf("peer-%d", i), true, false)
-		client.OnTracksAvailable = func(availableTracks []ITrack) {
+		client.OnTracksAvailable(func(availableTracks []ITrack) {
 			tracksAvailableChan <- len(availableTracks)
 			tracksReq := make([]SubscribeTrackRequest, 0)
 			for _, track := range availableTracks {
@@ -43,7 +43,7 @@ func TestTracksManualSubscribe(t *testing.T) {
 			}
 			err := client.SubscribeTracks(tracksReq)
 			require.NoError(t, err)
-		}
+		})
 
 		client.OnTracksAdded(func(addedTracks []ITrack) {
 			tracksAddedChan <- len(addedTracks)
@@ -204,7 +204,7 @@ Loop:
 
 func addSimulcastPair(t *testing.T, ctx context.Context, room *Room, peerName string) (*Client, *webrtc.PeerConnection) {
 	pc, client, _, _ := CreatePeerPair(ctx, room, DefaultTestIceServers(), peerName, true, true)
-	client.OnTracksAvailable = func(availableTracks []ITrack) {
+	client.OnTracksAvailable(func(availableTracks []ITrack) {
 
 		tracksReq := make([]SubscribeTrackRequest, 0)
 		for _, track := range availableTracks {
@@ -215,7 +215,7 @@ func addSimulcastPair(t *testing.T, ctx context.Context, room *Room, peerName st
 		}
 		err := client.SubscribeTracks(tracksReq)
 		require.NoError(t, err)
-	}
+	})
 
 	client.OnTracksAdded(func(addedTracks []ITrack) {
 		setTracks := make(map[string]TrackType, 0)

@@ -69,12 +69,6 @@ func (t *remoteTrack) onEnded() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	t.client.tracks.Remove([]string{t.track.ID()})
-	trackIDs := make([]string, 0)
-	trackIDs = append(trackIDs, t.track.ID())
-
-	t.client.sfu.removeTracks(trackIDs)
-
 	for _, f := range t.onEndedCallbacks {
 		f()
 	}
@@ -171,6 +165,7 @@ func (t *remoteTrack) getAudioLevelExtensionID() uint8 {
 func (t *remoteTrack) receiverStats() stats.Stats {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+
 	return t.stats
 }
 
@@ -196,7 +191,7 @@ func (t *remoteTrack) sendPLI() error {
 
 	t.lastPLIRequestTime = time.Now()
 
-	return t.client.peerConnection.WriteRTCP([]rtcp.Packet{
+	return t.client.peerConnection.PC().WriteRTCP([]rtcp.Packet{
 		&rtcp.PictureLossIndication{MediaSSRC: uint32(t.track.SSRC())},
 	})
 }

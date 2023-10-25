@@ -127,14 +127,14 @@ func TestExtension(t *testing.T) {
 		ICEServers: DefaultTestIceServers(),
 	})
 
-	client1.OnIceCandidate = func(ctx context.Context, candidate *webrtc.ICECandidate) {
+	client1.OnIceCandidate(func(ctx context.Context, candidate *webrtc.ICECandidate) {
 		if candidate == nil {
 			return
 		}
 
 		err = peer1.AddICECandidate(candidate.ToJSON())
 		require.NoErrorf(t, err, "error adding ice candidate: %v", err)
-	}
+	})
 
 	require.NoErrorf(t, err, "error creating peer connection: %v", err)
 	SetPeerConnectionTracks(ctx, peer1, tracks)
@@ -150,7 +150,7 @@ func TestExtension(t *testing.T) {
 		if candidate == nil {
 			return
 		}
-		err = client1.PeerConnection().AddICECandidate(candidate.ToJSON())
+		err = client1.PeerConnection().PC().AddICECandidate(candidate.ToJSON())
 		require.NoErrorf(t, err, "error adding ice candidate: %v", err)
 
 	})

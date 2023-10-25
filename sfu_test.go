@@ -93,7 +93,7 @@ Loop:
 				for {
 					activeTracks = 0
 					for _, client := range clients {
-						for _, sender := range client.peerConnection.GetSenders() {
+						for _, sender := range client.peerConnection.PC().GetSenders() {
 							if sender.Track() != nil {
 								activeTracks++
 							}

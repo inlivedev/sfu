@@ -106,7 +106,7 @@ func (bc *bitrateController) GetClaim(id string) *bitrateClaim {
 	bc.mu.Lock()
 	defer bc.mu.Unlock()
 
-	if claim, ok := bc.claims[id]; ok {
+	if claim, ok := bc.claims[id]; ok && claim != nil {
 		return claim
 	}
 
@@ -228,13 +228,15 @@ func (bc *bitrateController) addClaims(clientTracks []iClientTrack) error {
 			} else {
 				trackQuality = QualityAudio
 			}
-		} else if clientTrack.Kind() == webrtc.RTPCodecTypeVideo && !clientTrack.IsSimulcast() {
+		} else if clientTrack.Kind() == webrtc.RTPCodecTypeVideo && !clientTrack.IsSimulcast() && !clientTrack.IsScaleable() {
 			trackQuality = QualityHigh
 		}
 
 		// set last quality that use for requesting PLI after claim added
 		if clientTrack.IsSimulcast() {
 			clientTrack.(*simulcastClientTrack).lastQuality.Store(uint32(trackQuality))
+		} else if clientTrack.IsScaleable() {
+			clientTrack.(*scaleabletClientTrack).lastQuality = trackQuality
 		}
 
 		_, err := bc.addClaim(clientTrack, trackQuality, true)
@@ -325,17 +327,7 @@ func (bc *bitrateController) getQuality(t *simulcastClientTrack) QualityLevel {
 		panic("bitrate: claim is not exists")
 	}
 
-	quality := claim.quality
-
-	maxQuality := t.getMaxQuality()
-	if maxQuality < quality {
-		quality = maxQuality
-	}
-
-	clientQuality := Uint32ToQualityLevel(t.client.quality.Load())
-	if quality > clientQuality {
-		quality = clientQuality
-	}
+	quality := min(claim.quality, t.MaxQuality(), Uint32ToQualityLevel(t.client.quality.Load()))
 
 	if quality != QualityNone && !track.isTrackActive(quality) {
 		if quality != QualityLow && track.isTrackActive(QualityLow) {
@@ -367,7 +359,7 @@ func (bc *bitrateController) getDistributedQuality(availableBandwidth int32) Qua
 				audioTracksCount++
 			}
 		} else {
-			if track.IsSimulcast() {
+			if track.IsSimulcast() || track.IsScaleable() {
 				simulcastTracksCount++
 			} else {
 				videoTracksCount++
@@ -506,12 +498,11 @@ func (bc *bitrateController) checkAndAdjustBitrates() {
 	}
 
 	for _, claim := range claims {
-		if claim.track.IsSimulcast() {
-			simulcastTrack := claim.track.(*simulcastClientTrack)
+		if claim.track.IsSimulcast() || claim.track.IsScaleable() {
 			bitrateAdjustment := bc.getBitrateAdjustment(claim)
 
 			if bitrateAdjustment == keepBitrate {
-				if simulcastTrack.remoteTrack.isTrackActive(claim.quality) {
+				if (claim.track.IsSimulcast() && claim.track.(*simulcastClientTrack).remoteTrack.isTrackActive(claim.quality)) || claim.track.IsScaleable() {
 					continue
 				}
 
@@ -519,7 +510,7 @@ func (bc *bitrateController) checkAndAdjustBitrates() {
 			}
 
 			if bitrateAdjustment == decreaseBitrate {
-				if claim.track.IsSimulcast() && claim.quality > QualityLow {
+				if (claim.track.IsSimulcast() || claim.track.IsScaleable()) && claim.quality > QualityLow {
 					reducedQuality := claim.quality - 1
 
 					if claim.quality == QualityLow && midCount+highCount > 0 {
@@ -535,8 +526,12 @@ func (bc *bitrateController) checkAndAdjustBitrates() {
 						// skip if there is a non screen track can be reduced
 						continue
 					}
+					if claim.track.IsSimulcast() {
+						claim.track.(*simulcastClientTrack).remoteTrack.sendPLI(reducedQuality)
+					} else {
+						claim.track.RequestPLI()
+					}
 
-					claim.track.(*simulcastClientTrack).remoteTrack.sendPLI(reducedQuality)
 					glog.Info("clienttrack: send pli for track ", claim.track.ID(), " quality ", reducedQuality, " changed from ", claim.quality)
 					bc.setQuality(claim.track.ID(), reducedQuality)
 
@@ -544,7 +539,7 @@ func (bc *bitrateController) checkAndAdjustBitrates() {
 				}
 
 			} else if bitrateAdjustment == increaseBitrate {
-				if claim.track.IsSimulcast() && claim.quality < QualityHigh {
+				if (claim.track.IsSimulcast() || claim.track.IsScaleable()) && claim.quality < QualityHigh {
 					increasedQuality := claim.quality + 1
 
 					if claim.quality == QualityMid && noneCount+lowCount > 0 {
@@ -557,7 +552,11 @@ func (bc *bitrateController) checkAndAdjustBitrates() {
 						continue
 					}
 
-					claim.track.(*simulcastClientTrack).remoteTrack.sendPLI(increasedQuality)
+					if claim.track.IsSimulcast() {
+						claim.track.(*simulcastClientTrack).remoteTrack.sendPLI(increasedQuality)
+					} else {
+						claim.track.RequestPLI()
+					}
 
 					if bc.client.IsDebugEnabled() {
 						glog.Info("clienttrack: send pli for track ", claim.track.ID(), " quality ", increasedQuality, " changed from ", claim.quality)
@@ -588,22 +587,16 @@ func (bc *bitrateController) onRemoteViewedSizeChanged(videoSize videoSize) {
 		return
 	}
 
-	simulcastTrack, ok := claim.track.(*simulcastClientTrack)
-	if !ok {
-		glog.Error("bitrate: track ", videoSize.TrackID, " is not simulcast track")
-		return
-	}
-
 	if videoSize.Width == 0 || videoSize.Height == 0 {
-		simulcastTrack.setMaxQuality(QualityNone)
+		claim.track.SetMaxQuality(QualityNone)
 	}
 
 	if videoSize.Width <= bc.client.sfu.bitratesConfig.VideoLowPixels {
-		simulcastTrack.setMaxQuality(QualityLow)
+		claim.track.SetMaxQuality(QualityLow)
 	} else if videoSize.Width <= bc.client.sfu.bitratesConfig.VideoMidPixels {
-		simulcastTrack.setMaxQuality(QualityMid)
+		claim.track.SetMaxQuality(QualityMid)
 	} else {
-		simulcastTrack.setMaxQuality(QualityHigh)
+		claim.track.SetMaxQuality(QualityHigh)
 	}
 }
 
@@ -625,39 +618,36 @@ func (bc *bitrateController) onRemoteViewedSizeChanged(videoSize videoSize) {
 // - if the counter is 0 then increase the bitrate
 // - if the bitrate back to decrease then the delay counter will add 1.5x of the previous delay counter
 func (bc *bitrateController) getBitrateAdjustment(claim *bitrateClaim) bitrateAdjustment {
-	track := claim.track.(*simulcastClientTrack)
-
 	// don't adjust bitrates too fast
 	if time.Since(claim.lastDecreaseTime) < 2*time.Second || time.Since(claim.lastIncreaseTime) < 2*time.Second {
 		return keepBitrate
 	}
 
-	switch claim.quality {
-	case QualityHigh:
-		if track.remoteTrack.remoteTrackHigh == nil {
-			return decreaseBitrate
-		}
-	case QualityMid:
-		if track.remoteTrack.remoteTrackMid == nil {
-			return decreaseBitrate
-		}
-	case QualityLow:
-		if track.remoteTrack.remoteTrackLow == nil {
-			return increaseBitrate
+	if claim.track.IsSimulcast() {
+		track := claim.track.(*simulcastClientTrack)
+		switch claim.quality {
+		case QualityHigh:
+			if track.remoteTrack.remoteTrackHigh == nil {
+				return decreaseBitrate
+			}
+		case QualityMid:
+			if track.remoteTrack.remoteTrackMid == nil {
+				return decreaseBitrate
+			}
+		case QualityLow:
+			if track.remoteTrack.remoteTrackLow == nil {
+				return increaseBitrate
+			}
 		}
 	}
 
-	bc.client.stats.senderMu.Lock()
-	sender, ok := bc.client.stats.Sender[claim.track.ID()]
-	if !ok {
+	sender, err := bc.client.stats.GetSender(claim.track.ID())
+	if err != nil {
 		glog.Error("bitrate: track ", claim.track.ID(), " is not exists")
-		bc.client.stats.senderMu.Unlock()
 		return keepBitrate
 	}
 
-	bc.client.stats.senderMu.Unlock()
-
-	lostSentRatio := sender.Stats.RemoteInboundRTPStreamStats.FractionLost
+	lostSentRatio := sender.RemoteInboundRTPStreamStats.FractionLost
 
 	if lostSentRatio < 0.02 && claim.quality != QualityHigh {
 		if bc.client.IsDebugEnabled() {

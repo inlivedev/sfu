@@ -469,20 +469,20 @@ func CreatePeerPair(ctx context.Context, room *Room, iceServers []webrtc.ICEServ
 	id := room.CreateClientID()
 	client, _ = room.AddClient(id, id, DefaultClientOptions())
 
-	client.OnAllowedRemoteRenegotiation = func() {
+	client.OnAllowedRemoteRenegotiation(func() {
 		glog.Info("allowed remote renegotiation")
 		negotiate(pc, client)
-	}
+	})
 
-	client.OnIceCandidate = func(ctx context.Context, candidate *webrtc.ICECandidate) {
+	client.OnIceCandidate(func(ctx context.Context, candidate *webrtc.ICECandidate) {
 		if candidate == nil {
 			return
 		}
 
 		_ = pc.AddICECandidate(candidate.ToJSON())
-	}
+	})
 
-	client.OnRenegotiation = func(ctx context.Context, offer webrtc.SessionDescription) (answer webrtc.SessionDescription, e error) {
+	client.OnRenegotiation(func(ctx context.Context, offer webrtc.SessionDescription) (answer webrtc.SessionDescription, e error) {
 		if client.state.Load() == ClientStateEnded {
 			glog.Info("test: renegotiation canceled because client has ended")
 			return webrtc.SessionDescription{}, errors.New("client ended")
@@ -506,7 +506,7 @@ func CreatePeerPair(ctx context.Context, room *Room, iceServers []webrtc.ICEServ
 		glog.Info("test: new transceiver ", newTcv, " total tscv ", len(pc.GetTransceivers()))
 
 		return *pc.LocalDescription(), nil
-	}
+	})
 
 	negotiate(pc, client)
 
@@ -514,7 +514,7 @@ func CreatePeerPair(ctx context.Context, room *Room, iceServers []webrtc.ICEServ
 		if candidate == nil {
 			return
 		}
-		err = client.PeerConnection().AddICECandidate(candidate.ToJSON())
+		err = client.PeerConnection().PC().AddICECandidate(candidate.ToJSON())
 	})
 
 	return pc, client, statsGetter, allDone
@@ -593,20 +593,20 @@ func CreateDataPair(ctx context.Context, room *Room, iceServers []webrtc.ICEServ
 	id := room.CreateClientID()
 	client, _ = room.AddClient(id, id, DefaultClientOptions())
 
-	client.OnAllowedRemoteRenegotiation = func() {
+	client.OnAllowedRemoteRenegotiation(func() {
 		glog.Info("allowed remote renegotiation")
 		go negotiate(pc, client)
-	}
+	})
 
-	client.OnIceCandidate = func(ctx context.Context, candidate *webrtc.ICECandidate) {
+	client.OnIceCandidate(func(ctx context.Context, candidate *webrtc.ICECandidate) {
 		if candidate == nil {
 			return
 		}
 
 		_ = pc.AddICECandidate(candidate.ToJSON())
-	}
+	})
 
-	client.OnRenegotiation = func(ctx context.Context, offer webrtc.SessionDescription) (answer webrtc.SessionDescription, e error) {
+	client.OnRenegotiation(func(ctx context.Context, offer webrtc.SessionDescription) (answer webrtc.SessionDescription, e error) {
 		if client.state.Load() == ClientStateEnded {
 			glog.Info("test: renegotiation canceled because client has ended")
 			return webrtc.SessionDescription{}, errors.New("client ended")
@@ -618,7 +618,7 @@ func CreateDataPair(ctx context.Context, room *Room, iceServers []webrtc.ICEServ
 		answer, _ = pc.CreateAnswer(nil)
 		_ = pc.SetLocalDescription(answer)
 		return *pc.LocalDescription(), nil
-	}
+	})
 
 	negotiate(pc, client)
 
@@ -626,7 +626,7 @@ func CreateDataPair(ctx context.Context, room *Room, iceServers []webrtc.ICEServ
 		if candidate == nil {
 			return
 		}
-		err = client.PeerConnection().AddICECandidate(candidate.ToJSON())
+		err = client.PeerConnection().PC().AddICECandidate(candidate.ToJSON())
 	})
 
 	return pc, client, statsGetter

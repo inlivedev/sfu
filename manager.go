@@ -81,6 +81,7 @@ func (m *Manager) NewRoom(id, name, roomType string, opts RoomOptions) (*Room, e
 		Mux:         m.udpMux,
 		Codecs:      opts.Codecs,
 		PLIInterval: opts.PLIInterval,
+		QualityRef:  opts.QualityRef,
 	}
 
 	newSFU := New(m.context, sfuOpts)

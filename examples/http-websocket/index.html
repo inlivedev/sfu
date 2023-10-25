@@ -214,9 +214,18 @@
             return promise
         };
 
-        async function start() {
+        function startH264() {
+            start('h264')
+        }
+
+        function startVP9() {
+            start('vp9')
+        }
+
+        async function start(codec) {
             await startWs()
-            document.querySelector("button").disabled = true;
+            document.getElementById("btnStart").disabled = true;
+            document.getElementById("btnStartVP9").disabled = true;
             const localVideo = document.getElementById("localVideo");
            
             const video =  {
@@ -232,6 +241,7 @@
                     {aspectRatio: {exact: 1.77778}}
                 ]};
 
+           
             const constraints = {
                 audio: true,
                 video: video
@@ -306,29 +316,59 @@
                 sendEncodings: [{priority: 'high'}],
             })
 
-            peerConnection.addTransceiver(stream.getVideoTracks()[0], {
+            if (codec ==='vp9'){
+                const tcvr = peerConnection.addTransceiver(stream.getVideoTracks()[0], {
                 direction: 'sendonly',
                 streams: [stream],
                 sendEncodings: [
-                    {
-                        rid: 'high',
-                        maxBitrate: 1200*1000,
-                        maxFramerate: 30,
-                    },
-                    {
-                        rid: 'mid',
-                        scaleResolutionDownBy: 2.0,
-                        maxFramerate: 30,
-                        maxBitrate: 500*1000,
-                    },
-                    {
-                        rid: 'low',
-                        scaleResolutionDownBy: 4.0,
-                        maxBitrate: 150*1000,
-                        maxFramerate:30,
+                        {
+                            maxBitrate: 1200*1000,
+                            scalabilityMode: 'L3T3_KEY'
+                        },
+                       
+                    ]
+                })
+
+                let codecs = RTCRtpReceiver.getCapabilities('video').codecs;
+                let vp9_codecs = [];
+                // iterate over supported codecs and pull out the codecs we want
+                for(let i = 0; i < codecs.length; i++){
+                    if(codecs[i].mimeType == "video/VP9"){
+                        vp9_codecs.push(codecs[i]);
                     }
-                ]
-            })
+                }
+
+                // currently not all browsers support setCodecPreferences
+                if(tcvr.setCodecPreferences != undefined){
+                    tcvr.setCodecPreferences(vp9_codecs);
+                }
+            } else {
+                peerConnection.addTransceiver(stream.getVideoTracks()[0], {
+                direction: 'sendonly',
+                streams: [stream],
+                sendEncodings: [
+                        {
+                            rid: 'high',
+                            maxBitrate: 1200*1000,
+                            maxFramerate: 30,
+                        },
+                        {
+                            rid: 'mid',
+                            scaleResolutionDownBy: 2.0,
+                            maxFramerate: 30,
+                            maxBitrate: 500*1000,
+                        },
+                        {
+                            rid: 'low',
+                            scaleResolutionDownBy: 4.0,
+                            maxBitrate: 150*1000,
+                            maxFramerate:30,
+                        }
+                    ]
+                })
+            }
+
+            
             
   
             const offer=await peerConnection.createOffer()
@@ -708,7 +748,8 @@
         }
 
         document.addEventListener("DOMContentLoaded", function(event) {
-            document.getElementById("btnStart").onclick = start;
+            document.getElementById("btnStart").onclick = startH264;
+            document.getElementById("btnStartVP9").onclick = startVP9;
             document.getElementById("btnShareScreen").onclick = shareScreen;
             document.getElementById("btnStats").onclick = toggleStats;
             document.getElementById("selectQuality").onchange = switchQuality;
@@ -733,6 +774,7 @@
     </aside>
     <footer>
         <button id="btnStart">Start</button>
+        <button id="btnStartVP9">Start with VP9</button>
         <button id="btnShareScreen">Share Screen</button>
         <button id="btnStats">Toggle Stats</button>
         <span><label>Quality</label> <select id="selectQuality">

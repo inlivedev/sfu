@@ -72,11 +72,15 @@ type RoomOptions struct {
 	// Configures the interval between sending PLIs to clients that will generate keyframe
 	// More often means more bandwidth usage but more stability on video quality
 	PLIInterval time.Duration
+	// Configure the mapping of spatsial and temporal layers to quality level
+	// Use this to use scalable video coding (SVC) to control the bitrate level of the video
+	QualityRef QualityRef
 }
 
 func DefaultRoomOptions() RoomOptions {
 	return RoomOptions{
 		Bitrates:      DefaultBitrates(),
+		QualityRef:    DefaultQualityRef(),
 		Codecs:        []string{webrtc.MimeTypeVP9, webrtc.MimeTypeOpus},
 		ClientTimeout: 10 * time.Minute,
 		PLIInterval:   5 * time.Second,
@@ -292,17 +296,20 @@ func (r *Room) Stats() RoomStats {
 
 	for id, cstats := range r.stats {
 		if cstats.Client != nil {
-			clientStats[id] = cstats.Client.TrackStats()
-			for _, stat := range clientStats[id].Receives {
-				bytesReceived += uint64(stat.BytesReceived)
-				packetReceivedLost += stat.PacketsLost
-				packetReceived += stat.PacketsReceived
-			}
+			stats := cstats.Client.TrackStats()
+			if stats != nil {
+				clientStats[id] = stats
+				for _, stat := range stats.Receives {
+					bytesReceived += uint64(stat.BytesReceived)
+					packetReceivedLost += stat.PacketsLost
+					packetReceived += stat.PacketsReceived
+				}
 
-			for _, stat := range clientStats[id].Sents {
-				bytesSent += stat.BytesSent
-				packetSentLost += stat.PacketsLost
-				packetSent += stat.PacketSent
+				for _, stat := range stats.Sents {
+					bytesSent += stat.BytesSent
+					packetSentLost += stat.PacketsLost
+					packetSent += stat.PacketSent
+				}
 			}
 		}
 

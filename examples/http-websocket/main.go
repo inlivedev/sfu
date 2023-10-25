@@ -63,7 +63,8 @@ func main() {
 
 	// create new room
 	roomsOpts := sfu.DefaultRoomOptions()
-	roomsOpts.Codecs = []string{webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
+	roomsOpts.PLIInterval = 3 * time.Second
+	roomsOpts.Codecs = []string{webrtc.MimeTypeVP9, webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
 	defaultRoom, _ := roomManager.NewRoom(roomID, roomName, sfu.RoomTypeLocal, roomsOpts)
 
 	fakeClientCount := 0
@@ -225,7 +226,7 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 	// 	_, _ = conn.Write(trackAddedResp)
 	// }
 
-	client.OnRenegotiation = func(ctx context.Context, offer webrtc.SessionDescription) (webrtc.SessionDescription, error) {
+	client.OnRenegotiation(func(ctx context.Context, offer webrtc.SessionDescription) (webrtc.SessionDescription, error) {
 		// SFU request a renegotiation, send the offer to client
 		glog.Info("receive renegotiation offer from SFU")
 
@@ -253,9 +254,9 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 			glog.Info("received answer from client ", client.Type(), client.ID())
 			return answer, nil
 		}
-	}
+	})
 
-	client.OnAllowedRemoteRenegotiation = func() {
+	client.OnAllowedRemoteRenegotiation(func() {
 		// SFU allow a remote renegotiation
 		glog.Info("receive allow remote renegotiation from SFU")
 
@@ -268,7 +269,7 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 		respBytes, _ := json.Marshal(resp)
 
 		_, _ = conn.Write(respBytes)
-	}
+	})
 
 	type Bitrates struct {
 		Min         uint32 `json:"min"`
@@ -276,7 +277,7 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 		TotalClient uint32 `json:"total_client"`
 	}
 
-	client.OnIceCandidate = func(ctx context.Context, candidate *webrtc.ICECandidate) {
+	client.OnIceCandidate(func(ctx context.Context, candidate *webrtc.ICECandidate) {
 		// SFU send an ICE candidate to client
 		resp := Respose{
 			Status: true,
@@ -286,7 +287,7 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 		candidateBytes, _ := json.Marshal(resp)
 
 		_, _ = conn.Write(candidateBytes)
-	}
+	})
 
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
@@ -296,14 +297,17 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			resp := Respose{
-				Status: true,
-				Type:   TypeTrackStats,
-				Data:   *client.TrackStats(),
-			}
+			stats := client.TrackStats()
+			if stats != nil {
+				resp := Respose{
+					Status: true,
+					Type:   TypeTrackStats,
+					Data:   stats,
+				}
 
-			respBytes, _ := json.Marshal(resp)
-			_, _ = conn.Write(respBytes)
+				respBytes, _ := json.Marshal(resp)
+				_, _ = conn.Write(respBytes)
+			}
 		case req := <-messageChan:
 			// handle as SDP if no error
 			if req.Type == TypeOffer || req.Type == TypeAnswer {

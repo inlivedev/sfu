@@ -21,4 +21,4 @@
 go.work
 
 *.lock
-__debug_bin*
+__debug_bin*@
