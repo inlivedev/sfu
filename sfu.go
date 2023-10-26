@@ -40,12 +40,12 @@ func DefaultBitrates() BitratesConfig {
 
 type SFUClients struct {
 	clients map[string]*Client
-	mutex   sync.Mutex
+	mu      sync.Mutex
 }
 
 func (s *SFUClients) GetClients() map[string]*Client {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	clients := make(map[string]*Client)
 	for k, v := range s.clients {
@@ -56,8 +56,8 @@ func (s *SFUClients) GetClients() map[string]*Client {
 }
 
 func (s *SFUClients) GetClient(id string) (*Client, error) {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	if client, ok := s.clients[id]; ok {
 		return client, nil
@@ -67,15 +67,15 @@ func (s *SFUClients) GetClient(id string) (*Client, error) {
 }
 
 func (s *SFUClients) Length() int {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	return len(s.clients)
 }
 
 func (s *SFUClients) Add(client *Client) error {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	if _, ok := s.clients[client.ID()]; ok {
 		return ErrClientExists
@@ -87,8 +87,8 @@ func (s *SFUClients) Add(client *Client) error {
 }
 
 func (s *SFUClients) Remove(client *Client) error {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	if _, ok := s.clients[client.ID()]; !ok {
 		return ErrClientNotFound
@@ -110,7 +110,7 @@ type SFU struct {
 	dataChannels             *SFUDataChannelList
 	idleChan                 chan bool
 	iceServers               []webrtc.ICEServer
-	mutex                    sync.Mutex
+	mu                       sync.Mutex
 	mux                      *UDPMux
 	onStop                   func()
 	OnTracksAvailable        func(tracks []track)
@@ -137,12 +137,12 @@ func New(ctx context.Context, opts sfuOptions) *SFU {
 	localCtx, cancel := context.WithCancel(ctx)
 
 	sfu := &SFU{
-		clients:        &SFUClients{clients: make(map[string]*Client), mutex: sync.Mutex{}},
+		clients:        &SFUClients{clients: make(map[string]*Client), mu: sync.Mutex{}},
 		context:        localCtx,
 		cancel:         cancel,
 		codecs:         opts.Codecs,
 		dataChannels:   NewSFUDataChannelList(),
-		mutex:          sync.Mutex{},
+		mu:             sync.Mutex{},
 		iceServers:     opts.IceServers,
 		mux:            opts.Mux,
 		bitratesConfig: opts.Bitrates,
@@ -321,8 +321,8 @@ func (s *SFU) syncTrack(client *Client) bool {
 }
 
 func (s *SFU) Stop() {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	for _, client := range s.clients.GetClients() {
 		client.PeerConnection().Close()
@@ -337,20 +337,30 @@ func (s *SFU) Stop() {
 }
 
 func (s *SFU) OnStopped(callback func()) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	s.onStop = callback
 }
 
 func (s *SFU) OnClientAdded(callback func(*Client)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	s.callbacksOnClientAdded = append(s.callbacksOnClientAdded, callback)
 }
 
 func (s *SFU) OnClientRemoved(callback func(*Client)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	s.callbacksOnClientRemoved = append(s.callbacksOnClientRemoved, callback)
 }
 
 func (s *SFU) onAfterClientStopped(client *Client) {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
+	// s.mu.Lock()
+	// defer s.mu.Unlock()
+
 	if err := s.removeClient(client); err != nil {
 		glog.Error("sfu: failed to remove client ", err)
 	}
@@ -369,6 +379,9 @@ func (s *SFU) onClientRemoved(client *Client) {
 }
 
 func (s *SFU) onTracksAvailable(tracks []ITrack) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	for _, client := range s.clients.GetClients() {
 		if !client.IsSubscribeAllTracks.Load() {
 			// filter out tracks from the same client
@@ -405,10 +418,16 @@ func (s *SFU) broadcastTracksToAutoSubscribeClients(ownerID string, tracks []ITr
 }
 
 func (s *SFU) GetClient(id string) (*Client, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	return s.clients.GetClient(id)
 }
 
 func (s *SFU) removeClient(client *Client) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if err := s.clients.Remove(client); err != nil {
 		glog.Error("sfu: failed to remove client ", err)
 		return err
@@ -420,6 +439,9 @@ func (s *SFU) removeClient(client *Client) error {
 }
 
 func (s *SFU) CreateDataChannel(label string, opts DataChannelOptions) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	dc := s.dataChannels.Get(label)
 	if dc != nil {
 		return ErrDataChannelExists
@@ -451,8 +473,8 @@ func (s *SFU) CreateDataChannel(label string, opts DataChannelOptions) error {
 func (s *SFU) setupMessageForwarder(clientID string, d *webrtc.DataChannel) {
 	d.OnMessage(func(msg webrtc.DataChannelMessage) {
 		// broadcast to all clients
-		s.mutex.Lock()
-		defer s.mutex.Unlock()
+		s.mu.Lock()
+		defer s.mu.Unlock()
 
 		for _, client := range s.clients.GetClients() {
 			// skip the sender
@@ -477,6 +499,9 @@ func (s *SFU) setupMessageForwarder(clientID string, d *webrtc.DataChannel) {
 }
 
 func (s *SFU) createExistingDataChannels(c *Client) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	for _, dc := range s.dataChannels.dataChannels {
 		initOpts := &webrtc.DataChannelInit{
 			Ordered: &dc.isOrdered,
@@ -494,6 +519,9 @@ func (s *SFU) createExistingDataChannels(c *Client) {
 }
 
 func (s *SFU) TotalActiveSessions() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	count := 0
 	for _, c := range s.clients.GetClients() {
 		if c.PeerConnection().PC().ConnectionState() == webrtc.PeerConnectionStateConnected {
@@ -522,15 +550,15 @@ func (s *SFU) QualityLevelToBitrate(level QualityLevel) uint32 {
 }
 
 func (s *SFU) PLIInterval() time.Duration {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	return s.pliInterval
 }
 
 func (s *SFU) QualityPreset() QualityPreset {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	return s.qualityRef
 }
