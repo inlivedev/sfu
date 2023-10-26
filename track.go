@@ -184,7 +184,7 @@ func (t *track) subscribe(c *Client) iClientTrack {
 			remoteTrack:           t,
 			isScreen:              false,
 			onTrackEndedCallbacks: make([]func(), 0),
-			qualityRef:            c.SFU().QualityRef(),
+			qualityPreset:         c.SFU().QualityPreset(),
 			maxQuality:            QualityHigh,
 			lastQuality:           QualityHigh,
 		}

@@ -76,12 +76,12 @@ func (m *Manager) NewRoom(id, name, roomType string, opts RoomOptions) (*Room, e
 	}
 
 	sfuOpts := sfuOptions{
-		Bitrates:    opts.Bitrates,
-		IceServers:  m.iceServers,
-		Mux:         m.udpMux,
-		Codecs:      opts.Codecs,
-		PLIInterval: opts.PLIInterval,
-		QualityRef:  opts.QualityRef,
+		Bitrates:      opts.Bitrates,
+		IceServers:    m.iceServers,
+		Mux:           m.udpMux,
+		Codecs:        opts.Codecs,
+		PLIInterval:   opts.PLIInterval,
+		QualityPreset: opts.QualityPreset,
 	}
 
 	newSFU := New(m.context, sfuOpts)

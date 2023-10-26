@@ -9,67 +9,67 @@ import (
 	"github.com/pion/webrtc/v3"
 )
 
-type IQualityRef interface {
+type IQualityPreset interface {
 	GetSID() uint8
 	GetTID() uint8
 }
 
-type QualityHighRef struct {
+type QualityHighPreset struct {
 	SID uint8
 	TID uint8
 }
 
-func (q QualityHighRef) GetSID() uint8 {
+func (q QualityHighPreset) GetSID() uint8 {
 	return q.SID
 }
 
-func (q QualityHighRef) GetTID() uint8 {
+func (q QualityHighPreset) GetTID() uint8 {
 	return q.TID
 }
 
-type QualityMidRef struct {
+type QualityMidPreset struct {
 	SID uint8
 	TID uint8
 }
 
-func (q QualityMidRef) GetSID() uint8 {
+func (q QualityMidPreset) GetSID() uint8 {
 	return q.SID
 }
 
-func (q QualityMidRef) GetTID() uint8 {
+func (q QualityMidPreset) GetTID() uint8 {
 	return q.TID
 }
 
-type QualityLowRef struct {
+type QualityLowPreset struct {
 	SID uint8
 	TID uint8
 }
 
-func (q QualityLowRef) GetSID() uint8 {
+func (q QualityLowPreset) GetSID() uint8 {
 	return q.SID
 }
 
-func (q QualityLowRef) GetTID() uint8 {
+func (q QualityLowPreset) GetTID() uint8 {
 	return q.TID
 }
 
-type QualityRef struct {
-	High QualityHighRef
-	Mid  QualityMidRef
-	Low  QualityLowRef
+type QualityPreset struct {
+	High QualityHighPreset
+	Mid  QualityMidPreset
+	Low  QualityLowPreset
 }
 
-func DefaultQualityRef() QualityRef {
-	return QualityRef{
-		High: QualityHighRef{
+func DefaultQualityPreset() QualityPreset {
+	return QualityPreset{
+		High: QualityHighPreset{
 			SID: 2,
 			TID: 2,
 		},
-		Mid: QualityMidRef{
+		Mid: QualityMidPreset{
 			SID: 1,
 			TID: 1,
 		},
-		Low: QualityLowRef{
+		Low: QualityLowPreset{
 			SID: 0,
 			TID: 0,
 		},
@@ -89,7 +89,6 @@ type scaleabletClientTrack struct {
 	maxQuality            QualityLevel
 	temporalCount         uint8
 	spatsialCount         uint8
-	pid                   uint16
 	tid                   uint8
 	sid                   uint8
 	lastTimestamp         uint32
@@ -97,7 +96,7 @@ type scaleabletClientTrack struct {
 	isEnded               bool
 	onTrackEndedCallbacks []func()
 	dropCounter           uint16
-	qualityRef            QualityRef
+	qualityPreset         QualityPreset
 }
 
 func (t *scaleabletClientTrack) Client() *Client {
@@ -105,12 +104,6 @@ func (t *scaleabletClientTrack) Client() *Client {
 	defer t.mu.Unlock()
 
 	return t.client
-}
-
-func (t *scaleabletClientTrack) isFirstKeyframePacket(p *rtp.Packet) bool {
-	isKeyframe := IsKeyframe(t.mimeType, p)
-
-	return isKeyframe && t.lastTimestamp != p.Timestamp
 }
 
 func (t *scaleabletClientTrack) writeRTP(p *rtp.Packet) {
@@ -122,20 +115,35 @@ func (t *scaleabletClientTrack) writeRTP(p *rtp.Packet) {
 	}
 }
 
+func (t *scaleabletClientTrack) isKeyframe(vp9 *codecs.VP9Packet) bool {
+	if len(vp9.Payload) < 1 {
+		return false
+	}
+	if !vp9.B {
+		return false
+	}
+
+	if (vp9.Payload[0] & 0xc0) != 0x80 {
+		return false
+	}
+
+	profile := (vp9.Payload[0] >> 4) & 0x3
+	if profile != 3 {
+		return (vp9.Payload[0]&0xC) == 0 && true
+	}
+	return (vp9.Payload[0]&0x6) == 0 && true
+}
+
 // this where the temporal and spatial layers are will be decided to be sent to the client or not
 // compare it with the claimed quality to decide if the packet should be sent or not
 func (t *scaleabletClientTrack) push(p *rtp.Packet, _ QualityLevel) {
-	var qualityRef IQualityRef
+	var qualityPreset IQualityPreset
 
 	vp9Packet := &codecs.VP9Packet{}
 	if _, err := vp9Packet.Unmarshal(p.Payload); err != nil {
 		glog.Error("scalabletrack: error on unmarshal vp9 packet", err)
-		t.dropCounter++
+		t.send(p)
 		return
-	}
-
-	if t.client.isDebug {
-		// glog.Info("scalabletrack: received packet ", p.SequenceNumber, " PID: ", vp9Packet.PictureID, " SID: ", vp9Packet.SID, " TID: ", vp9Packet.TID)
 	}
 
 	if t.spatsialCount == 0 || t.temporalCount == 0 {
@@ -143,7 +151,7 @@ func (t *scaleabletClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 		t.spatsialCount = vp9Packet.NS + 1
 	}
 
-	adjustment, quality := t.getAdjustment()
+	quality := t.getQuality()
 
 	if quality == QualityNone {
 		t.dropCounter++
@@ -152,75 +160,59 @@ func (t *scaleabletClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 
 	switch quality {
 	case QualityHigh:
-		qualityRef = t.qualityRef.High
+		qualityPreset = t.qualityPreset.High
 	case QualityMid:
-		qualityRef = t.qualityRef.Mid
+		qualityPreset = t.qualityPreset.Mid
 	case QualityLow:
-		qualityRef = t.qualityRef.Low
+		qualityPreset = t.qualityPreset.Low
 	}
 
-	switch adjustment {
-	case decreaseBitrate:
-		// down-switching can be done at the start of frame
-		if vp9Packet.B && vp9Packet.SID == qualityRef.GetSID() {
-			if t.sid > qualityRef.GetSID() {
-				t.sid = qualityRef.GetSID()
-			}
+	isKeyframe := t.isKeyframe(vp9Packet)
 
-			if t.tid > qualityRef.GetTID() {
-				t.tid = qualityRef.GetTID()
-			}
-		}
-
-		if t.tid == qualityRef.GetTID() && t.sid == qualityRef.GetSID() {
-			t.lastQuality = QualityLevel(quality)
-		}
-
-	case increaseBitrate:
-		if vp9Packet.B {
-			if !vp9Packet.P && vp9Packet.SID == qualityRef.GetSID() {
-				// up-switching to a current spatial layer's frame is possible from directly lower
-				// spatial layer frame.
-				t.sid = qualityRef.GetSID()
-			}
-
-			if vp9Packet.U && vp9Packet.TID == qualityRef.GetTID() {
-				// up-switching to a higher temporal layer's frame is possible from a directly lower
-				// temporal layer frame.
-				t.tid = qualityRef.GetTID()
-			}
-
-			if t.tid == qualityRef.GetTID() && t.sid == qualityRef.GetSID() {
-				t.lastQuality = QualityLevel(quality)
-			}
+	if vp9Packet.B && t.sid != qualityPreset.GetSID() {
+		if vp9Packet.SID == qualityPreset.GetSID() && !vp9Packet.P {
+			t.sid = qualityPreset.GetSID()
+		} else {
+			t.RequestPLI()
 		}
 	}
 
-	// if vp9Packet.Z && vp9Packet.SID < t.sid {
-	// 	// This enables a decoder which is
-	// 	// targeting a higher spatial layer to know that it can safely
-	// 	// discard this packet's frame without processing it, without having
-	// 	// to wait for the "D" bit in the higher-layer frame
-
-	// 	glog.Info("scalebaletrack: current TID: ", t.tid, " current SID: ", t.sid, " lastQuality: ", t.lastQuality)
-	// 	glog.Info("scalabletrack: dropping packet ", p.SequenceNumber, " PID: ", vp9Packet.PictureID, " SID: ", vp9Packet.SID, " TID: ", vp9Packet.TID)
-
-	// 	// drop the packet
-	// 	t.dropCounter++
-	// 	return
-	// }
-
-	if t.tid >= vp9Packet.TID && t.sid >= vp9Packet.SID {
-		p.SequenceNumber = p.SequenceNumber - t.dropCounter
-		if t.client.isDebug {
-			glog.Info("tid: ", t.tid, " sid: ", t.sid)
-			glog.Info("scalabletrack: writing packet ", p.SequenceNumber, " PID: ", vp9Packet.PictureID, " SID: ", vp9Packet.SID, " TID: ", vp9Packet.TID)
+	if vp9Packet.B && t.tid != qualityPreset.GetTID() {
+		if isKeyframe || t.tid > qualityPreset.GetTID() || vp9Packet.U {
+			t.tid = qualityPreset.GetTID()
 		}
-		t.writeRTP(p)
-	} else {
+	}
+
+	if t.tid == qualityPreset.GetTID() && t.sid == qualityPreset.GetSID() {
+		t.lastQuality = quality
+	}
+
+	if vp9Packet.E && t.sid == vp9Packet.SID {
+		p.Marker = true
+	}
+
+	if vp9Packet.TID == 0 && vp9Packet.SID == 0 {
+		t.send(p)
+		return
+	}
+
+	// Can we drop the packet
+	// vp9Packet.Z && vp9Packet.SID < t.sid
+	// This enables a decoder which is
+	// targeting a higher spatial layer to know that it can safely
+	// discard this packet's frame without processing it, without having
+	// to wait for the "D" bit in the higher-layer frame
+	if t.tid < vp9Packet.TID || t.sid < vp9Packet.SID || (t.sid > vp9Packet.SID && vp9Packet.Z) {
 		t.dropCounter++
+		return
 	}
 
+	t.send(p)
+}
+
+func (t *scaleabletClientTrack) send(p *rtp.Packet) {
+	p.SequenceNumber = p.SequenceNumber - t.dropCounter
+	t.writeRTP(p)
 }
 
 func (t *scaleabletClientTrack) RemoteTrack() *remoteTrack {
@@ -308,21 +300,21 @@ func (t *scaleabletClientTrack) RequestPLI() {
 	t.remoteTrack.remoteTrack.sendPLI()
 }
 
-func (t *scaleabletClientTrack) getAdjustment() (bitrateAdjustment, QualityLevel) {
+func (t *scaleabletClientTrack) getQuality() QualityLevel {
 	lastQuality := t.LastQuality()
 	claim := t.client.bitrateController.GetClaim(t.ID())
 
 	if claim == nil {
 		glog.Warning("scalabletrack: claim is nil")
-		return keepBitrate, QualityNone
+		return QualityNone
 	}
 
 	quality := min(t.maxQuality, claim.quality, Uint32ToQualityLevel(t.client.quality.Load()))
 	if quality < lastQuality {
-		return decreaseBitrate, quality
+		return lastQuality - 1
 	} else if quality > lastQuality {
-		return increaseBitrate, quality
+		return lastQuality + 1
 	}
 
-	return keepBitrate, quality
+	return lastQuality
 }

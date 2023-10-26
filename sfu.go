@@ -115,7 +115,7 @@ type SFU struct {
 	onStop                   func()
 	OnTracksAvailable        func(tracks []track)
 	pliInterval              time.Duration
-	qualityRef               QualityRef
+	qualityRef               QualityPreset
 }
 
 type PublishedTrack struct {
@@ -124,12 +124,12 @@ type PublishedTrack struct {
 }
 
 type sfuOptions struct {
-	IceServers  []webrtc.ICEServer
-	Mux         *UDPMux
-	Bitrates    BitratesConfig
-	QualityRef  QualityRef
-	Codecs      []string
-	PLIInterval time.Duration
+	IceServers    []webrtc.ICEServer
+	Mux           *UDPMux
+	Bitrates      BitratesConfig
+	QualityPreset QualityPreset
+	Codecs        []string
+	PLIInterval   time.Duration
 }
 
 // @Param muxPort: port for udp mux
@@ -147,7 +147,7 @@ func New(ctx context.Context, opts sfuOptions) *SFU {
 		mux:            opts.Mux,
 		bitratesConfig: opts.Bitrates,
 		pliInterval:    opts.PLIInterval,
-		qualityRef:     opts.QualityRef,
+		qualityRef:     opts.QualityPreset,
 	}
 
 	go func() {
@@ -528,7 +528,7 @@ func (s *SFU) PLIInterval() time.Duration {
 	return s.pliInterval
 }
 
-func (s *SFU) QualityRef() QualityRef {
+func (s *SFU) QualityPreset() QualityPreset {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 

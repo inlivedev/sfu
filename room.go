@@ -74,13 +74,13 @@ type RoomOptions struct {
 	PLIInterval time.Duration
 	// Configure the mapping of spatsial and temporal layers to quality level
 	// Use this to use scalable video coding (SVC) to control the bitrate level of the video
-	QualityRef QualityRef
+	QualityPreset QualityPreset
 }
 
 func DefaultRoomOptions() RoomOptions {
 	return RoomOptions{
 		Bitrates:      DefaultBitrates(),
-		QualityRef:    DefaultQualityRef(),
+		QualityPreset: DefaultQualityPreset(),
 		Codecs:        []string{webrtc.MimeTypeVP9, webrtc.MimeTypeOpus},
 		ClientTimeout: 10 * time.Minute,
 		PLIInterval:   5 * time.Second,
