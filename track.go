@@ -1,7 +1,6 @@
 package sfu
 
 import (
-	"context"
 	"errors"
 	"sync"
 	"sync/atomic"
@@ -72,20 +71,7 @@ func newTrack(client *Client, trackRemote *webrtc.TrackRemote, receiver *webrtc.
 		// do
 		tracks := ctList.GetTracks()
 		for _, track := range tracks {
-			readChan := make(chan bool)
-			go func() {
-				timeout, cancel := context.WithTimeout(client.context, time.Second*5)
-				defer cancel()
-				select {
-				case <-timeout.Done():
-					glog.Warning("remotetrack: timeout push rtp , track id: ", track.ID())
-					return
-				case <-readChan:
-					return
-				}
-			}()
 			track.push(p, QualityHigh) // quality doesn't matter on non simulcast track
-			readChan <- true
 		}
 	}
 
@@ -400,23 +386,7 @@ func (t *simulcastTrack) AddRemoteTrack(track *webrtc.TrackRemote, receiver *web
 
 		tracks := t.base.clientTracks.GetTracks()
 		for _, track := range tracks {
-			readChan := make(chan bool)
-
-			go func() {
-				timeout, cancel := context.WithTimeout(t.base.client.context, time.Second*5)
-				defer cancel()
-				select {
-				case <-timeout.Done():
-					glog.Warning("remotetrack: timeout push rtp , track id: ", t.ID())
-					return
-				case <-readChan:
-					return
-				}
-			}()
-
 			track.push(p, quality)
-
-			readChan <- true
 		}
 	}
 
