@@ -392,7 +392,7 @@ func (s *SFU) onTracksAvailable(tracks []ITrack) {
 				}
 			}
 
-			if len(filteredTracks) > 0 {
+			if len(filteredTracks) > 0 && client.onTracksAvailable != nil {
 				client.onTracksAvailable(tracks)
 			}
 		}

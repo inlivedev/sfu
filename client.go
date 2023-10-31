@@ -1197,6 +1197,8 @@ func (c *Client) SFU() *SFU {
 }
 
 func (c *Client) OnTracksAvailable(callback func([]ITrack)) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.onTracksAvailable = callback
 }
 
