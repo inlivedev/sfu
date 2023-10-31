@@ -15,6 +15,7 @@ import (
 	"github.com/golang/glog"
 	"github.com/inlivedev/sfu"
 	"github.com/inlivedev/sfu/pkg/fakeclient"
+	"github.com/inlivedev/sfu/pkg/interceptors/voiceactivedetector"
 	"github.com/pion/webrtc/v3"
 	"golang.org/x/net/websocket"
 )
@@ -28,6 +29,13 @@ type Respose struct {
 	Status bool        `json:"status"`
 	Type   string      `json:"type"`
 	Data   interface{} `json:"data"`
+}
+
+type VAD struct {
+	SSRC     uint32                                `json:"ssrc"`
+	TrackID  string                                `json:"track_id"`
+	StreamID string                                `json:"stream_id"`
+	Packets  []voiceactivedetector.VoicePacketData `json:"packets"`
 }
 
 const (
@@ -45,6 +53,7 @@ const (
 	TypeBitrateAdjusted      = "bitrate_adjusted"
 	TypePacketLossPercentage = "set_packet_loss_percentage"
 	TypeTrackStats           = "track_stats"
+	TypeVoiceDetected        = "voice_detected"
 )
 
 func main() {
@@ -171,6 +180,7 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 	// add a new client to room
 	// you can also get the client by using r.GetClient(clientID)
 	opts := sfu.DefaultClientOptions()
+	opts.EnableVoiceDetection = true
 	client, err := r.AddClient(clientID, clientID, opts)
 	if err != nil {
 		log.Panic(err)
@@ -289,6 +299,16 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 		_, _ = conn.Write(candidateBytes)
 	})
 
+	vadChan := make(chan VAD)
+	client.OnVoiceDetected(func(trackID, streamID string, ssrc uint32, voiceData []voiceactivedetector.VoicePacketData) {
+		vadChan <- VAD{
+			SSRC:     ssrc,
+			TrackID:  trackID,
+			StreamID: streamID,
+			Packets:  voiceData,
+		}
+	})
+
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
@@ -308,6 +328,15 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 				respBytes, _ := json.Marshal(resp)
 				_, _ = conn.Write(respBytes)
 			}
+		case vad := <-vadChan:
+			resp := Respose{
+				Status: true,
+				Type:   TypeVoiceDetected,
+				Data:   vad,
+			}
+
+			respBytes, _ := json.Marshal(resp)
+			_, _ = conn.Write(respBytes)
 		case req := <-messageChan:
 			// handle as SDP if no error
 			if req.Type == TypeOffer || req.Type == TypeAnswer {

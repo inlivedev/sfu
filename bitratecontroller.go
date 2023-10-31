@@ -35,6 +35,13 @@ type bitrateClaim struct {
 	lastDecreaseTime time.Time
 }
 
+func (c *bitrateClaim) Quality() QualityLevel {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	return c.quality
+}
+
 func (c *bitrateClaim) isAllowToIncrease() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()

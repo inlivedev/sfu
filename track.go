@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/golang/glog"
+	"github.com/inlivedev/sfu/pkg/interceptors/voiceactivedetector"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v3"
 )
@@ -62,9 +63,10 @@ type track struct {
 	base             baseTrack
 	remoteTrack      *remoteTrack
 	onEndedCallbacks []func()
+	vad              *voiceactivedetector.VoiceDetector
 }
 
-func newTrack(client *Client, trackRemote *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) ITrack {
+func newTrack(client *Client, trackRemote *webrtc.TrackRemote, receiver *webrtc.RTPReceiver, vad *voiceactivedetector.VoiceDetector) ITrack {
 	ctList := newClientTrackList()
 	onTrackRead := func(p *rtp.Packet) {
 		// do
@@ -102,6 +104,7 @@ func newTrack(client *Client, trackRemote *webrtc.TrackRemote, receiver *webrtc.
 		mu:          sync.Mutex{},
 		base:        baseTrack,
 		remoteTrack: newRemoteTrack(client, trackRemote, receiver, onTrackRead),
+		vad:         vad,
 	}
 
 	t.remoteTrack.OnEnded(func() {
@@ -172,6 +175,14 @@ func (t *track) TotalTracks() int {
 
 func (t *track) subscribe(c *Client) iClientTrack {
 	var ct iClientTrack
+
+	if t.Kind() == webrtc.RTPCodecTypeAudio && c.IsVADEnabled() {
+		glog.Info("track: voice activity detector enabled")
+		t.vad.OnVoiceDetected(func(trackID, streamID string, SSRC uint32, voiceData []voiceactivedetector.VoicePacketData) {
+			// send through datachannel
+			c.onVoiceDetected(trackID, streamID, SSRC, voiceData)
+		})
+	}
 
 	if t.MimeType() == webrtc.MimeTypeVP9 {
 		ct = &scaleabletClientTrack{

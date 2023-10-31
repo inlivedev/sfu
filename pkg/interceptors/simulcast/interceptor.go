@@ -1,4 +1,4 @@
-package simulcastinterceptor
+package simulcast
 
 import (
 	"sync"
@@ -13,7 +13,7 @@ type InterceptorFactory struct {
 	onNew func(i *Interceptor)
 }
 
-func New() *InterceptorFactory {
+func NewInterceptor() *InterceptorFactory {
 	return &InterceptorFactory{}
 }
 

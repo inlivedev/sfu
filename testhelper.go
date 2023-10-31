@@ -11,7 +11,7 @@ import (
 
 	"github.com/golang/glog"
 	"github.com/google/uuid"
-	"github.com/inlivedev/sfu/pkg/simulcastinterceptor"
+	"github.com/inlivedev/sfu/pkg/interceptors/simulcast"
 	"github.com/pion/interceptor"
 	"github.com/pion/interceptor/pkg/stats"
 	"github.com/pion/webrtc/v3"
@@ -341,7 +341,7 @@ func GetMediaEngine() *webrtc.MediaEngine {
 	return mediaEngine
 }
 
-func CreatePeerPair(ctx context.Context, room *Room, iceServers []webrtc.ICEServer, peerName string, loop, simulcast bool) (*webrtc.PeerConnection, *Client, stats.Getter, chan bool) {
+func CreatePeerPair(ctx context.Context, room *Room, iceServers []webrtc.ICEServer, peerName string, loop, isSimulcast bool) (*webrtc.PeerConnection, *Client, stats.Getter, chan bool) {
 	clientContext, cancelClient := context.WithCancel(ctx)
 	var (
 		client      *Client
@@ -362,14 +362,14 @@ func CreatePeerPair(ctx context.Context, room *Room, iceServers []webrtc.ICEServ
 	}
 
 	i := &interceptor.Registry{}
-	var simulcastI *simulcastinterceptor.Interceptor
+	var simulcastI *simulcast.Interceptor
 
-	if simulcast {
-		simulcastFactory := simulcastinterceptor.New()
+	if isSimulcast {
+		simulcastFactory := simulcast.NewInterceptor()
 
 		i.Add(simulcastFactory)
 
-		simulcastFactory.OnNew(func(i *simulcastinterceptor.Interceptor) {
+		simulcastFactory.OnNew(func(i *simulcast.Interceptor) {
 			simulcastI = i
 		})
 	}
@@ -392,7 +392,7 @@ func CreatePeerPair(ctx context.Context, room *Room, iceServers []webrtc.ICEServ
 		panic(err)
 	}
 
-	if simulcast {
+	if isSimulcast {
 		RegisterSimulcastHeaderExtensions(mediaEngine, webrtc.RTPCodecTypeVideo)
 	}
 
@@ -402,7 +402,7 @@ func CreatePeerPair(ctx context.Context, room *Room, iceServers []webrtc.ICEServ
 		ICEServers: iceServers,
 	})
 
-	if simulcast {
+	if isSimulcast {
 		_ = AddSimulcastVideoTracks(ctx, pc, GenerateSecureToken(), peerName)
 
 		for _, sender := range pc.GetSenders() {

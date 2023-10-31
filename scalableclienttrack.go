@@ -141,7 +141,6 @@ func (t *scaleabletClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 
 	vp9Packet := &codecs.VP9Packet{}
 	if _, err := vp9Packet.Unmarshal(p.Payload); err != nil {
-		glog.Error("scalabletrack: error on unmarshal vp9 packet", err)
 		t.send(p)
 		return
 	}
@@ -184,7 +183,7 @@ func (t *scaleabletClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 	}
 
 	if t.tid == qualityPreset.GetTID() && t.sid == qualityPreset.GetSID() {
-		t.lastQuality = quality
+		t.SetLastQuality(quality)
 	}
 
 	if vp9Packet.E && t.sid == vp9Packet.SID {
@@ -248,7 +247,16 @@ func (t *scaleabletClientTrack) SetSourceType(sourceType TrackType) {
 	t.isScreen = (sourceType == TrackTypeScreen)
 }
 
+func (t *scaleabletClientTrack) SetLastQuality(quality QualityLevel) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	t.lastQuality = quality
+}
+
 func (t *scaleabletClientTrack) LastQuality() QualityLevel {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	return QualityLevel(t.lastQuality)
 }
 
@@ -309,7 +317,7 @@ func (t *scaleabletClientTrack) getQuality() QualityLevel {
 		return QualityNone
 	}
 
-	quality := min(t.maxQuality, claim.quality, Uint32ToQualityLevel(t.client.quality.Load()))
+	quality := min(t.MaxQuality(), claim.Quality(), Uint32ToQualityLevel(t.client.quality.Load()))
 	if quality < lastQuality {
 		return lastQuality - 1
 	} else if quality > lastQuality {

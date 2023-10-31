@@ -12,7 +12,6 @@ import (
 	"github.com/pion/interceptor/pkg/stats"
 	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
-	"github.com/pion/sdp/v3"
 	"github.com/pion/webrtc/v3"
 )
 
@@ -150,16 +149,6 @@ func (t *remoteTrack) Track() *webrtc.TrackRemote {
 
 func (t *remoteTrack) GetCurrentBitrate() uint32 {
 	return t.bitrate.Load()
-}
-
-func (t *remoteTrack) getAudioLevelExtensionID() uint8 {
-	for _, extension := range t.receiver.GetParameters().HeaderExtensions {
-		if extension.URI == sdp.AudioLevelURI {
-			return uint8(extension.ID)
-		}
-	}
-
-	return 0
 }
 
 func (t *remoteTrack) receiverStats() stats.Stats {

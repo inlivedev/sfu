@@ -64,20 +64,6 @@ func (t *clientTrack) push(rtp *rtp.Packet, quality QualityLevel) {
 	}
 }
 
-func (t *clientTrack) getAudioLevel(p *rtp.Packet) rtp.AudioLevelExtension {
-	audioLevel := rtp.AudioLevelExtension{}
-	headerID := t.remoteTrack.getAudioLevelExtensionID()
-	if headerID != 0 {
-		ext := p.Header.GetExtension(headerID)
-		if err := audioLevel.Unmarshal(ext); err != nil {
-			glog.Error("clienttrack: error on unmarshal audio level", err)
-		}
-	}
-
-	return audioLevel
-
-}
-
 func (t *clientTrack) getCurrentBitrate() uint32 {
 	return t.remoteTrack.GetCurrentBitrate()
 }

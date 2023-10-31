@@ -104,10 +104,11 @@
         video {
             background-color: black;
             min-width: 320px;
-            width: auto;
-            height: 100%;
+            width: 100%;
+            height: auto;
             min-height: 240px;
             object-fit: contain;
+            box-sizing: border-box;
         }
     </style>
     <script type="module">
@@ -202,6 +203,8 @@
                         }
                     } else if(msg.type =='track_stats'){
                         updateTrackStats(msg.data)
+                    } else if (msg.type=='voice_detected'){
+                        updateVoiceDetected(msg.data)
                     }
                 } catch (error) {
                     console.log(error);
@@ -213,6 +216,23 @@
 
             return promise
         };
+
+        function updateVoiceDetected(vad){
+            const videoEl = document.getElementById("video-"+vad.stream_id)
+            if (!videoEl){
+                return
+            }
+
+
+            if (!vad.packets){
+                // voice ended
+                videoEl.style.border = "none"
+            } else {
+                // voice detected
+                videoEl.style.border = "5px solid green"
+            }
+
+        }
 
         function startH264() {
             start('h264')
@@ -226,7 +246,6 @@
             await startWs()
             document.getElementById("btnStart").disabled = true;
             document.getElementById("btnStartVP9").disabled = true;
-            const localVideo = document.getElementById("localVideo");
            
             const video =  {
                 width: {ideal: 1280}, 
@@ -249,8 +268,25 @@
             };
             
             const stream = await navigator.mediaDevices.getUserMedia(constraints)
-            localVideo.srcObject = stream;
-            localVideo.play();
+            let container = document.getElementById("container-"+stream.id);
+            if (!container) {
+                container = document.createElement("div");
+                container.className = "container";
+                container.id = "container-"+stream.id;
+                document.querySelector('main').appendChild(container);
+            }
+
+            let localVideo = document.getElementById("video-"+stream.id);
+            if (!localVideo) {
+                localVideo = document.createElement("video");
+                localVideo.id = "video-"+stream.id;
+                localVideo.autoplay = true;
+                localVideo.muted = true;
+                container.appendChild(localVideo);
+            }
+
+            localVideo.srcObject =stream;
+
 
             peerConnection.ontrack = function(e) {
                 e.streams.forEach((stream) => {
@@ -323,7 +359,7 @@
                 sendEncodings: [
                         {
                             maxBitrate: 1200*1000,
-                            scalabilityMode: 'L3T3'
+                            scalabilityMode: 'L3T2'
                         },
                        
                     ]
@@ -764,9 +800,6 @@
         <p>Open the console to see the output.</p>
     </header>
     <main>
-        <div id="local">
-            <video id="localVideo" muted playsinline></video>
-        </div>
     </main>
     <aside>
         <h3>Outbound Video</h3>
