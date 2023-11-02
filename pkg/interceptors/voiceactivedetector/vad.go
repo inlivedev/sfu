@@ -10,9 +10,9 @@ import (
 )
 
 type VoicePacketData struct {
-	SequenceNo uint16
-	Timestamp  uint32
-	AudioLevel uint8
+	SequenceNo uint16 `json:"sequence_no"`
+	Timestamp  uint32 `json:"timestamp"`
+	AudioLevel uint8  `json:"audio_level"`
 }
 
 type VoiceActivity struct {
