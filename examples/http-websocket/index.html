@@ -132,6 +132,13 @@
             if (e.channel.label == "internal") {
                 internalChannel = e.channel;
                 videoObserver = new InliveVideoObserver(e.channel)
+
+                internalChannel.addEventListener('message',(e)=>{
+                    const msg = JSON.parse(e.data)
+                    if (msg.type == 'vad_started' || msg.type == 'vad_ended'){
+                        updateVoiceDetected(msg)
+                    }
+                })
             }
         };
 
@@ -203,9 +210,7 @@
                         }
                     } else if(msg.type =='track_stats'){
                         updateTrackStats(msg.data)
-                    } else if (msg.type=='voice_detected'){
-                        updateVoiceDetected(msg.data)
-                    }
+                    } 
                 } catch (error) {
                     console.log(error);
                 }
@@ -218,13 +223,13 @@
         };
 
         function updateVoiceDetected(vad){
-            const videoEl = document.getElementById("video-"+vad.stream_id)
+            const videoEl = document.getElementById("video-"+vad.data.stream_id)
             if (!videoEl){
                 return
             }
 
 
-            if (!vad.packets){
+            if (vad.type === 'vad_ended'){
                 // voice ended
                 videoEl.style.border = "none"
             } else {

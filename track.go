@@ -164,9 +164,9 @@ func (t *track) subscribe(c *Client) iClientTrack {
 
 	if t.Kind() == webrtc.RTPCodecTypeAudio && c.IsVADEnabled() {
 		glog.Info("track: voice activity detector enabled")
-		t.vad.OnVoiceDetected(func(trackID, streamID string, SSRC uint32, voiceData []voiceactivedetector.VoicePacketData) {
+		t.vad.OnVoiceDetected(func(activity voiceactivedetector.VoiceActivity) {
 			// send through datachannel
-			c.onVoiceDetected(trackID, streamID, SSRC, voiceData)
+			c.onVoiceDetected(activity)
 		})
 	}
 

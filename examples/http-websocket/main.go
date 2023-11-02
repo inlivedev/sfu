@@ -299,16 +299,6 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 		_, _ = conn.Write(candidateBytes)
 	})
 
-	vadChan := make(chan VAD)
-	client.OnVoiceDetected(func(trackID, streamID string, ssrc uint32, voiceData []voiceactivedetector.VoicePacketData) {
-		vadChan <- VAD{
-			SSRC:     ssrc,
-			TrackID:  trackID,
-			StreamID: streamID,
-			Packets:  voiceData,
-		}
-	})
-
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
@@ -328,15 +318,6 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 				respBytes, _ := json.Marshal(resp)
 				_, _ = conn.Write(respBytes)
 			}
-		case vad := <-vadChan:
-			resp := Respose{
-				Status: true,
-				Type:   TypeVoiceDetected,
-				Data:   vad,
-			}
-
-			respBytes, _ := json.Marshal(resp)
-			_, _ = conn.Write(respBytes)
 		case req := <-messageChan:
 			// handle as SDP if no error
 			if req.Type == TypeOffer || req.Type == TypeAnswer {

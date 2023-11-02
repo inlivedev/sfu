@@ -38,8 +38,10 @@ const (
 	QualityLow      = 1
 	QualityNone     = 0
 
-	messageTypeVideoSize = "video_size"
-	messageTypeStats     = "stats"
+	messageTypeVideoSize  = "video_size"
+	messageTypeStats      = "stats"
+	messageTypeVADStarted = "vad_started"
+	messageTypeVADEnded   = "vad_ended"
 )
 
 type QualityLevel uint32
@@ -59,6 +61,11 @@ type ClientOptions struct {
 type internalDataMessage struct {
 	Type string      `json:"type"`
 	Data interface{} `json:"data"`
+}
+
+type internalDataVAD struct {
+	Type string                            `json:"type"`
+	Data voiceactivedetector.VoiceActivity `json:"data"`
 }
 
 type internalDataStats struct {
@@ -85,13 +92,13 @@ type remoteClientStats struct {
 }
 
 type Client struct {
-	id                string
-	name              string
-	bitrateController *bitrateController
-	context           context.Context
-	cancel            context.CancelFunc
-	canAddCandidate   *atomic.Bool
-
+	id                    string
+	name                  string
+	bitrateController     *bitrateController
+	context               context.Context
+	cancel                context.CancelFunc
+	canAddCandidate       *atomic.Bool
+	internalDataChannel   *webrtc.DataChannel
 	dataChannels          *DataChannelList
 	estimatorChan         chan cc.BandwidthEstimator
 	estimator             cc.BandwidthEstimator
@@ -117,7 +124,7 @@ type Client struct {
 	onConnectionStateChangedCallbacks []func(webrtc.PeerConnectionState)
 	onJoinedCallbacks                 []func()
 	onLeftCallbacks                   []func()
-	onVoiceDetectedCallbacks          []func(trackID, streamID string, SSRC uint32, voiceData []voiceactivedetector.VoicePacketData)
+	onVoiceDetectedCallbacks          []func(voiceactivedetector.VoiceActivity)
 	onTrackRemovedCallbacks           []func(sourceType string, track *webrtc.TrackLocalStaticRTP)
 	onIceCandidate                    func(context.Context, *webrtc.ICECandidate)
 	onBeforeRenegotiation             func(context.Context) bool
@@ -257,6 +264,12 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		egressBandwidth:                &atomic.Uint32{},
 		ingressBandwidth:               &atomic.Uint32{},
 		ingressQualityLimitationReason: &atomic.Value{},
+	}
+
+	// setup internal data channel
+	if opts.EnableVoiceDetection {
+		client.enableSendVADToInternalDataChannel()
+		client.enableVADStatUpdate()
 	}
 
 	client.quality.Store(QualityHigh)
@@ -1130,6 +1143,7 @@ func (c *Client) TrackStats() *ClientTrackStats {
 		Receives:                 make([]TrackReceivedStats, 0),
 		CurrentPublishLimitation: c.ingressQualityLimitationReason.Load().(string),
 		CurrentConsumerBitrate:   c.bitrateController.totalSentBitrates(),
+		VoiceActivityDuration:    uint32(c.stats.VoiceActivity().Milliseconds()),
 	}
 
 	for id, stat := range c.stats.Receivers() {
@@ -1202,22 +1216,71 @@ func (c *Client) OnTracksAvailable(callback func([]ITrack)) {
 	c.onTracksAvailable = callback
 }
 
-func (c *Client) OnVoiceDetected(callback func(trackID, streamID string, ssrc uint32, voiceData []voiceactivedetector.VoicePacketData)) {
+func (c *Client) OnVoiceDetected(callback func(activity voiceactivedetector.VoiceActivity)) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	c.onVoiceDetectedCallbacks = append(c.onVoiceDetectedCallbacks, callback)
 }
 
-func (c *Client) onVoiceDetected(trackID, streamID string, ssrc uint32, voiceData []voiceactivedetector.VoicePacketData) {
+func (c *Client) onVoiceDetected(activity voiceactivedetector.VoiceActivity) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	for _, callback := range c.onVoiceDetectedCallbacks {
-		callback(trackID, streamID, ssrc, voiceData)
+		callback(activity)
 	}
 }
 
 func (c *Client) IsVADEnabled() bool {
 	return c.options.EnableVoiceDetection
+}
+
+func (c *Client) enableSendVADToInternalDataChannel() {
+	c.OnVoiceDetected(func(activity voiceactivedetector.VoiceActivity) {
+		if c.internalDataChannel == nil {
+			return
+		}
+
+		if c.internalDataChannel.ReadyState() != webrtc.DataChannelStateOpen {
+			return
+		}
+
+		var dataType string
+		if len(activity.AudioLevels) > 0 {
+			dataType = messageTypeVADStarted
+		} else {
+			dataType = messageTypeVADEnded
+		}
+
+		dataMessage := internalDataVAD{
+			Type: dataType,
+			Data: activity,
+		}
+
+		data, err := json.Marshal(dataMessage)
+		if err != nil {
+			glog.Error("client: error marshal vad data ", err)
+			return
+		}
+
+		if err := c.internalDataChannel.SendText(string(data)); err != nil {
+			glog.Error("client: error send vad data ", err)
+			return
+		}
+	})
+}
+
+func (c *Client) enableVADStatUpdate() {
+	c.OnVoiceDetected(func(activity voiceactivedetector.VoiceActivity) {
+		if len(activity.AudioLevels) == 0 {
+			c.stats.UpdateVoiceActivity(0)
+			return
+		}
+
+		for _, data := range activity.AudioLevels {
+			duration := data.Timestamp * 1000 / activity.ClockRate
+			c.stats.UpdateVoiceActivity(duration)
+		}
+	})
 }

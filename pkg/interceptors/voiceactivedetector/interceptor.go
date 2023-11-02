@@ -48,9 +48,9 @@ type Config struct {
 
 func DefaultConfig() Config {
 	return Config{
-		HeadMargin: 300 * time.Millisecond,
-		TailMargin: 400 * time.Millisecond,
-		Threshold:  35,
+		HeadMargin: 200 * time.Millisecond,
+		TailMargin: 300 * time.Millisecond,
+		Threshold:  40,
 	}
 }
 
@@ -169,7 +169,7 @@ func (v *Interceptor) processPacket(ssrc uint32, header *rtp.Header) rtp.AudioLe
 		return rtp.AudioLevelExtension{}
 	}
 
-	vad.AddPacket(header, audioData.Level)
+	vad.addPacket(header, audioData.Level)
 
 	return audioData
 }

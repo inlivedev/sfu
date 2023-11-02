@@ -3,6 +3,7 @@ package sfu
 import (
 	"errors"
 	"sync"
+	"time"
 
 	"github.com/pion/interceptor/pkg/stats"
 )
@@ -11,12 +12,21 @@ var (
 	ErrCLientStatsNotFound = errors.New("client stats not found")
 )
 
+type voiceActivityStats struct {
+	mu       sync.Mutex
+	active   bool
+	start    uint32
+	duration uint32
+}
+
 type ClientStats struct {
-	senderMu   sync.RWMutex
-	receiverMu sync.RWMutex
-	Client     *Client
-	senders    map[string]stats.Stats
-	receivers  map[string]stats.Stats
+	mu            sync.Mutex
+	senderMu      sync.RWMutex
+	receiverMu    sync.RWMutex
+	Client        *Client
+	senders       map[string]stats.Stats
+	receivers     map[string]stats.Stats
+	voiceActivity voiceActivityStats
 }
 
 func newClientStats(c *Client) *ClientStats {
@@ -26,6 +36,10 @@ func newClientStats(c *Client) *ClientStats {
 		Client:     c,
 		senders:    make(map[string]stats.Stats),
 		receivers:  make(map[string]stats.Stats),
+		voiceActivity: voiceActivityStats{
+			mu:     sync.Mutex{},
+			active: false,
+		},
 	}
 }
 
@@ -103,4 +117,26 @@ func (c *ClientStats) SetReceiver(id string, stats stats.Stats) {
 	defer c.receiverMu.Unlock()
 
 	c.receivers[id] = stats
+}
+
+// UpdateVoiceActivity updates voice activity duration
+// 0 timestamp means ended
+func (c *ClientStats) UpdateVoiceActivity(ts uint32) {
+	if !c.voiceActivity.active && ts != 0 {
+		c.voiceActivity.active = true
+		c.voiceActivity.start = ts
+		return
+	} else if c.voiceActivity.active && ts != 0 {
+		c.voiceActivity.duration = ts - c.voiceActivity.start
+	} else if c.voiceActivity.active && ts == 0 {
+		c.voiceActivity.active = false
+		c.voiceActivity.duration = ts - c.voiceActivity.start
+	}
+}
+
+func (c *ClientStats) VoiceActivity() time.Duration {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	return time.Duration(c.voiceActivity.duration) * time.Millisecond
 }

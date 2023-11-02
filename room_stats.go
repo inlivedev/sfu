@@ -40,6 +40,8 @@ type ClientTrackStats struct {
 	CurrentPublishLimitation string               `json:"current_publish_limitation"`
 	Sents                    []TrackSentStats     `json:"sent_track_stats"`
 	Receives                 []TrackReceivedStats `json:"received_track_stats"`
+	// in milliseconds
+	VoiceActivityDuration uint32 `json:"voice_activity_duration"`
 }
 
 type RoomStats struct {

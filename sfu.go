@@ -223,10 +223,14 @@ func (s *SFU) NewClient(id, name string, opts ClientOptions) *Client {
 
 				// make sure the exisiting data channels is created on new clients
 				s.createExistingDataChannels(client)
+				var internalDataChannel *webrtc.DataChannel
+				var err error
 
-				if _, err := client.createInternalDataChannel("internal", client.onInternalMessage); err != nil {
-					glog.Error("client: error create stats data channel ", err)
+				if internalDataChannel, err = client.createInternalDataChannel("internal", client.onInternalMessage); err != nil {
+					glog.Error("client: error create internal data channel ", err)
 				}
+
+				client.internalDataChannel = internalDataChannel
 
 				client.renegotiate()
 			}
