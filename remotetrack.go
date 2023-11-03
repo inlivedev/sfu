@@ -65,9 +65,6 @@ func (t *remoteTrack) OnEnded(f func()) {
 }
 
 func (t *remoteTrack) onEnded() {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
 	for _, f := range t.onEndedCallbacks {
 		f()
 	}
@@ -95,22 +92,7 @@ func (t *remoteTrack) readRTP() {
 					return
 				}
 
-				readDoneChan := make(chan bool)
-				go func() {
-					timeout, cancelTimeout := context.WithTimeout(t.context, 5*time.Second)
-					defer cancelTimeout()
-					select {
-					case <-timeout.Done():
-						glog.Warning("remotetrack: timeout reading rtp , track id: ", t.track.ID())
-						return
-					case <-readDoneChan:
-						return
-					}
-				}()
-
 				t.onRead(rtp)
-
-				readDoneChan <- true
 
 				go t.client.updateReceiverStats(t)
 

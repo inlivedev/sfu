@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	_ "net/http/pprof"
+	"os"
 	"strconv"
 	"time"
 
@@ -63,8 +64,21 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	sfuOpts := sfu.DefaultOptions()
+
+	_, turnEnabled := os.LookupEnv("TURN_ENABLED")
+	if turnEnabled {
+		sfu.StartTurnServer(ctx, "127.0.0.1")
+		sfuOpts.IceServers = append(sfuOpts.IceServers, webrtc.ICEServer{
+			URLs:           []string{"turn:127.0.0.1:3478"},
+			Username:       "user",
+			Credential:     "pass",
+			CredentialType: webrtc.ICECredentialTypePassword,
+		})
+	}
+
 	// create room manager first before create new room
-	roomManager := sfu.NewManager(ctx, "server-name-here", sfu.DefaultOptions())
+	roomManager := sfu.NewManager(ctx, "server-name-here", sfuOpts)
 
 	// generate a new room id. You can extend this example into a multiple room by use this in it's own API endpoint
 	roomID := roomManager.CreateRoomID()

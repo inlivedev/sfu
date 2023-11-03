@@ -188,9 +188,15 @@ func (t *scaleabletClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 
 	if vp9Packet.E && t.sid == vp9Packet.SID {
 		p.Marker = true
+		// if t.client.isDebug {
+		// 	glog.Info("scalabletrack: end of frame mark as final frame, sid: ", vp9Packet.SID)
+		// }
 	}
 
 	if vp9Packet.TID == 0 && vp9Packet.SID == 0 {
+		// if p.Marker && t.client.isDebug {
+		// 	glog.Info("scalabletrack: marker is set, sid: ", vp9Packet.SID)
+		// }
 		t.send(p)
 		return
 	}
@@ -205,6 +211,10 @@ func (t *scaleabletClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 		t.dropCounter++
 		return
 	}
+
+	// if p.Marker && t.client.isDebug {
+	// 	glog.Info("scalabletrack: marker is set, sid: ", vp9Packet.SID)
+	// }
 
 	t.send(p)
 }
@@ -272,9 +282,6 @@ func (t *scaleabletClientTrack) onTrackEnded() {
 		return
 	}
 
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
 	for _, callback := range t.onTrackEndedCallbacks {
 		callback()
 	}
@@ -314,7 +321,7 @@ func (t *scaleabletClientTrack) getQuality() QualityLevel {
 
 	if claim == nil {
 		glog.Warning("scalabletrack: claim is nil")
-		return QualityNone
+		return QualityLow
 	}
 
 	quality := min(t.MaxQuality(), claim.Quality(), Uint32ToQualityLevel(t.client.quality.Load()))

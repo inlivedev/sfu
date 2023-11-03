@@ -251,8 +251,8 @@ func (r *Room) onClientLeft(client *Client) {
 	}
 
 	// update the latest stats from client before they left
-	r.mutex.Lock()
-	defer r.mutex.Unlock()
+	// r.mutex.Lock()
+	// defer r.mutex.Unlock()
 
 	r.stats[client.ID()] = client.Stats()
 }

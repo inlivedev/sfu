@@ -281,6 +281,9 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 	client.bitrateController = newbitrateController(client, s.pliInterval)
 
 	peerConnection.OnConnectionStateChange(func(connectionState webrtc.PeerConnectionState) {
+		if client.isDebug {
+			glog.Info("client: connection state changed ", connectionState.String())
+		}
 		client.onConnectionStateChanged(connectionState)
 	})
 
@@ -721,9 +724,6 @@ func (c *Client) processPendingTracks() (isNeedNegotiation bool) {
 }
 
 func (c *Client) afterClosed() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	state := c.state.Load()
 	if state != ClientStateEnded {
 		c.state.Store(ClientStateEnded)
@@ -793,12 +793,7 @@ func (c *Client) OnConnectionStateChanged(callback func(webrtc.PeerConnectionSta
 }
 
 func (c *Client) onConnectionStateChanged(state webrtc.PeerConnectionState) {
-	c.mu.Lock()
-	callbacks := make([]func(webrtc.PeerConnectionState), len(c.onConnectionStateChangedCallbacks))
-	copy(callbacks, c.onConnectionStateChangedCallbacks)
-	c.mu.Unlock()
-
-	for _, callback := range callbacks {
+	for _, callback := range c.onConnectionStateChangedCallbacks {
 		callback(webrtc.PeerConnectionState(state))
 	}
 }
@@ -1097,8 +1092,6 @@ func (c *Client) onInternalMessage(msg webrtc.DataChannelMessage) {
 			return
 		}
 
-		glog.Info("client: video size changed ", internalData.Data.Width)
-
 		c.bitrateController.onRemoteViewedSizeChanged(internalData.Data)
 	}
 }
@@ -1200,9 +1193,6 @@ func (c *Client) EnableDebug() {
 }
 
 func (c *Client) IsDebugEnabled() bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	return c.isDebug
 }
 
@@ -1224,9 +1214,6 @@ func (c *Client) OnVoiceDetected(callback func(activity voiceactivedetector.Voic
 }
 
 func (c *Client) onVoiceDetected(activity voiceactivedetector.VoiceActivity) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	for _, callback := range c.onVoiceDetectedCallbacks {
 		callback(activity)
 	}

@@ -210,7 +210,7 @@ func (bc *bitrateController) checkAllTrackActive(claim *bitrateClaim) (bool, Qua
 }
 
 func (bc *bitrateController) addClaims(clientTracks []iClientTrack) error {
-	distributedVideoQuality := Uint32ToQualityLevel(QualityNone)
+	distributedVideoQuality := Uint32ToQualityLevel(QualityLow)
 
 	availableBandwidth := bc.client.GetEstimatedBandwidth() - bc.TotalBitrates()
 	if availableBandwidth > 0 {

@@ -362,9 +362,6 @@ func (s *SFU) OnClientRemoved(callback func(*Client)) {
 }
 
 func (s *SFU) onAfterClientStopped(client *Client) {
-	// s.mu.Lock()
-	// defer s.mu.Unlock()
-
 	if err := s.removeClient(client); err != nil {
 		glog.Error("sfu: failed to remove client ", err)
 	}
@@ -429,9 +426,6 @@ func (s *SFU) GetClient(id string) (*Client, error) {
 }
 
 func (s *SFU) removeClient(client *Client) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	if err := s.clients.Remove(client); err != nil {
 		glog.Error("sfu: failed to remove client ", err)
 		return err

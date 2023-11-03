@@ -294,6 +294,7 @@
 
 
             peerConnection.ontrack = function(e) {
+                e.receiver.playoutDelayHint = 0.1;
                 e.streams.forEach((stream) => {
                     console.log("ontrack");
                     

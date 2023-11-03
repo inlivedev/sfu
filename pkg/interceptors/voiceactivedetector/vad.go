@@ -4,7 +4,6 @@ import (
 	"context"
 	"sync"
 
-	"github.com/golang/glog"
 	"github.com/pion/interceptor"
 	"github.com/pion/rtp"
 )
@@ -159,7 +158,6 @@ func (v *VoiceDetector) isDetected(vp VoicePacketData) bool {
 
 	// check if voice detected
 	if !v.detected && v.startDetected == 0 && isThresholdPassed {
-		glog.Info("vad: voice started ", vp.Timestamp*1000/clockRate)
 		v.startDetected = vp.Timestamp
 
 		return v.detected
@@ -171,14 +169,12 @@ func (v *VoiceDetector) isDetected(vp VoicePacketData) bool {
 
 	// rest start detected timestamp if audio level above threshold after previously start detected
 	if !v.detected && v.startDetected != 0 && isTailMarginPassedAfterStarted && !isThresholdPassed {
-		glog.Info("vad: voice stopped before detected ", (vp.Timestamp-v.startDetected)*1000/clockRate)
 		v.startDetected = 0
 		return v.detected
 	}
 
 	// detected true after the audio level stay below threshold until pass the head margin
 	if !v.detected && v.startDetected != 0 && isHeadMarginPassed {
-		glog.Info("vad: voice detected ", (vp.Timestamp-v.startDetected)*1000/clockRate)
 		// start send packet to callback
 		v.detected = true
 		v.lastDetectedTS = vp.Timestamp
@@ -189,7 +185,6 @@ func (v *VoiceDetector) isDetected(vp VoicePacketData) bool {
 	isTailMarginPassed := vp.Timestamp*1000/clockRate > (v.lastDetectedTS*1000/clockRate)+uint32(v.interceptor.getConfig().TailMargin.Milliseconds())
 
 	if v.detected && !isThresholdPassed && isTailMarginPassed {
-		glog.Info("vad: voice ended")
 		// stop send packet to callback
 		v.detected = false
 		v.startDetected = 0

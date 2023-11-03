@@ -107,9 +107,11 @@ func (v *Interceptor) BindRemoteStream(info *interceptor.StreamInfo, reader inte
 
 	return interceptor.RTPReaderFunc(func(bytes []byte, attributes interceptor.Attributes) (int, interceptor.Attributes, error) {
 		n, a, err := reader.Read(bytes, attributes)
-		p := rtp.Packet{}
-		if errUnmarshal := p.Unmarshal(bytes); errUnmarshal == nil {
-			_ = v.processPacket(info.SSRC, &p.Header)
+		if err != nil {
+			p := rtp.Packet{}
+			if errUnmarshal := p.Unmarshal(bytes); errUnmarshal == nil {
+				_ = v.processPacket(info.SSRC, &p.Header)
+			}
 		}
 
 		return n, a, err
@@ -121,9 +123,6 @@ func (v *Interceptor) UnbindRemoteStream(info *interceptor.StreamInfo) {
 	if vad != nil {
 		vad.Stop()
 	}
-
-	v.mu.Lock()
-	defer v.mu.Unlock()
 
 	delete(v.vads, info.SSRC)
 }
