@@ -17,7 +17,7 @@ type VoicePacketData struct {
 type VoiceActivity struct {
 	TrackID     string            `json:"trackID"`
 	StreamID    string            `json:"streamID"`
-	SSRC        uint32            `json:"SSRC"`
+	SSRC        uint32            `json:"ssrc"`
 	ClockRate   uint32            `json:"clockRate"`
 	AudioLevels []VoicePacketData `json:"audioLevels"`
 }
