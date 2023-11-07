@@ -9,17 +9,17 @@ import (
 )
 
 type VoicePacketData struct {
-	SequenceNo uint16 `json:"sequence_no"`
+	SequenceNo uint16 `json:"sequenceNo"`
 	Timestamp  uint32 `json:"timestamp"`
-	AudioLevel uint8  `json:"audio_level"`
+	AudioLevel uint8  `json:"audioLevel"`
 }
 
 type VoiceActivity struct {
-	TrackID     string            `json:"track_id"`
-	StreamID    string            `json:"stream_id"`
-	SSRC        uint32            `json:"ssrc"`
-	ClockRate   uint32            `json:"clock_rate"`
-	AudioLevels []VoicePacketData `json:"audio_levels"`
+	TrackID     string            `json:"trackID"`
+	StreamID    string            `json:"streamID"`
+	SSRC        uint32            `json:"SSRC"`
+	ClockRate   uint32            `json:"clockRate"`
+	AudioLevels []VoicePacketData `json:"audioLevels"`
 }
 
 type VoiceDetector struct {
