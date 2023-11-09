@@ -525,6 +525,8 @@ func (c *Client) renegotiateQueuOp() {
 		return
 	}
 
+	c.negotiationNeeded.Store(true)
+
 	// no need to run another negotiation if it's already in progress, it will rerun because we mark the negotiationneeded to true
 	if c.isInRenegotiation.Load() {
 		glog.Info("sfu: renegotiation can't run, renegotiation still in progress ", c.ID)
@@ -541,43 +543,45 @@ func (c *Client) renegotiateQueuOp() {
 
 		<-timout.Done()
 
-		// mark negotiation is not needed after this done, so it will out of the loop
-		c.negotiationNeeded.Store(false)
+		for c.negotiationNeeded.Load() {
+			// mark negotiation is not needed after this done, so it will out of the loop
+			c.negotiationNeeded.Store(false)
 
-		// only renegotiate when client is connected
-		if c.state.Load() != ClientStateEnded &&
-			c.peerConnection.PC().SignalingState() == webrtc.SignalingStateStable &&
-			c.peerConnection.PC().ConnectionState() == webrtc.PeerConnectionStateConnected {
+			// only renegotiate when client is connected
+			if c.state.Load() != ClientStateEnded &&
+				c.peerConnection.PC().SignalingState() == webrtc.SignalingStateStable &&
+				c.peerConnection.PC().ConnectionState() == webrtc.PeerConnectionStateConnected {
 
-			offer, err := c.peerConnection.PC().CreateOffer(nil)
-			if err != nil {
-				glog.Error("sfu: error create offer on renegotiation ", err)
-				return
-			}
+				offer, err := c.peerConnection.PC().CreateOffer(nil)
+				if err != nil {
+					glog.Error("sfu: error create offer on renegotiation ", err)
+					return
+				}
 
-			// Sets the LocalDescription, and starts our UDP listeners
-			err = c.peerConnection.PC().SetLocalDescription(offer)
-			if err != nil {
-				glog.Error("sfu: error set local description on renegotiation ", err)
-				return
-			}
+				// Sets the LocalDescription, and starts our UDP listeners
+				err = c.peerConnection.PC().SetLocalDescription(offer)
+				if err != nil {
+					glog.Error("sfu: error set local description on renegotiation ", err)
+					return
+				}
 
-			// this will be blocking until the renegotiation is done
-			answer, err := c.onRenegotiation(c.context, *c.peerConnection.PC().LocalDescription())
-			if err != nil {
-				//TODO: when this happen, we need to close the client and ask the remote client to reconnect
-				glog.Error("sfu: error on renegotiation ", err)
-				return
-			}
+				// this will be blocking until the renegotiation is done
+				answer, err := c.onRenegotiation(c.context, *c.peerConnection.PC().LocalDescription())
+				if err != nil {
+					//TODO: when this happen, we need to close the client and ask the remote client to reconnect
+					glog.Error("sfu: error on renegotiation ", err)
+					return
+				}
 
-			if answer.Type != webrtc.SDPTypeAnswer {
-				glog.Error("sfu: error on renegotiation, the answer is not an answer type")
-				return
-			}
+				if answer.Type != webrtc.SDPTypeAnswer {
+					glog.Error("sfu: error on renegotiation, the answer is not an answer type")
+					return
+				}
 
-			err = c.peerConnection.PC().SetRemoteDescription(answer)
-			if err != nil {
-				return
+				err = c.peerConnection.PC().SetRemoteDescription(answer)
+				if err != nil {
+					return
+				}
 			}
 		}
 
@@ -632,6 +636,17 @@ func (c *Client) setClientTrack(t ITrack) iClientTrack {
 	}
 
 	t.Client().OnLeft(func() {
+		if c != nil {
+			return
+		}
+
+		c.mu.Lock()
+		defer c.mu.Unlock()
+
+		if c.peerConnection != nil && c.peerConnection.PC() != nil {
+			return
+		}
+
 		if err := c.peerConnection.PC().RemoveTrack(transc.Sender()); err != nil {
 			glog.Error("client: error remove track ", err)
 			return
@@ -641,6 +656,17 @@ func (c *Client) setClientTrack(t ITrack) iClientTrack {
 	})
 
 	t.OnEnded(func() {
+		if c != nil {
+			return
+		}
+
+		c.mu.Lock()
+		defer c.mu.Unlock()
+
+		if c.peerConnection != nil && c.peerConnection.PC() != nil {
+			return
+		}
+
 		if err := c.peerConnection.PC().RemoveTrack(transc.Sender()); err != nil {
 			glog.Error("client: error remove track ", err)
 			return
