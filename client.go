@@ -636,14 +636,14 @@ func (c *Client) setClientTrack(t ITrack) iClientTrack {
 	}
 
 	t.Client().OnLeft(func() {
-		if c != nil {
+		if c == nil {
 			return
 		}
 
 		c.mu.Lock()
 		defer c.mu.Unlock()
 
-		if c.peerConnection != nil && c.peerConnection.PC() != nil {
+		if c.peerConnection == nil && c.peerConnection.PC() == nil {
 			return
 		}
 
@@ -656,14 +656,14 @@ func (c *Client) setClientTrack(t ITrack) iClientTrack {
 	})
 
 	t.OnEnded(func() {
-		if c != nil {
+		if c == nil {
 			return
 		}
 
 		c.mu.Lock()
 		defer c.mu.Unlock()
 
-		if c.peerConnection != nil && c.peerConnection.PC() != nil {
+		if c.peerConnection == nil && c.peerConnection.PC() == nil {
 			return
 		}
 
