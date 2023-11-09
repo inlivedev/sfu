@@ -511,15 +511,13 @@ func (c *Client) OnRenegotiation(callback func(context.Context, webrtc.SessionDe
 	c.onRenegotiation = callback
 }
 
-// The renegotiation can be in race condition when a client is renegotiating and new track is added to the client because another client is publishing to the room.
-// We can block the renegotiation until the current renegotiation is finish, but it will block the negotiation process for a while.
+// TODO:
+// delay negotiation using timeout and make sure only one negotiation is running when a client left and joined again
 func (c *Client) renegotiateQueuOp() {
 	if c.onRenegotiation == nil {
 		glog.Error("client: onRenegotiation is not set, can't do renegotiation")
 		return
 	}
-
-	c.negotiationNeeded.Store(true)
 
 	if c.isInRemoteNegotiation.Load() {
 		glog.Info("sfu: renegotiation is delayed because the remote client is doing negotiation ", c.ID)
@@ -536,7 +534,13 @@ func (c *Client) renegotiateQueuOp() {
 	// mark negotiation is in progress to make sure no concurrent negotiation
 	c.isInRenegotiation.Store(true)
 
-	for c.negotiationNeeded.Load() {
+	go func() {
+		defer c.isInRenegotiation.Store(false)
+		timout, cancel := context.WithTimeout(c.context, 100*time.Millisecond)
+		defer cancel()
+
+		<-timout.Done()
+
 		// mark negotiation is not needed after this done, so it will out of the loop
 		c.negotiationNeeded.Store(false)
 
@@ -576,9 +580,9 @@ func (c *Client) renegotiateQueuOp() {
 				return
 			}
 		}
-	}
 
-	c.isInRenegotiation.Store(false)
+	}()
+
 }
 
 func (c *Client) allowRemoteRenegotiation() {
@@ -626,6 +630,15 @@ func (c *Client) setClientTrack(t ITrack) iClientTrack {
 		glog.Error("client: error on adding track ", err)
 		return nil
 	}
+
+	t.Client().OnLeft(func() {
+		if err := c.peerConnection.PC().RemoveTrack(transc.Sender()); err != nil {
+			glog.Error("client: error remove track ", err)
+			return
+		}
+
+		c.renegotiate()
+	})
 
 	t.OnEnded(func() {
 		if err := c.peerConnection.PC().RemoveTrack(transc.Sender()); err != nil {
@@ -731,6 +744,8 @@ func (c *Client) afterClosed() {
 
 	c.cancel()
 
+	c.onLeft()
+
 	c.sfu.onAfterClientStopped(c)
 }
 
@@ -748,9 +763,7 @@ func (c *Client) stop() error {
 
 func (c *Client) AddICECandidate(candidate webrtc.ICECandidateInit) error {
 	if c.peerConnection.PC().RemoteDescription() == nil {
-		// c.mu.Lock()
 		c.pendingRemoteCandidates = append(c.pendingRemoteCandidates, candidate)
-		// c.mu.Unlock()
 	} else {
 		if err := c.peerConnection.PC().AddICECandidate(candidate); err != nil {
 			glog.Error("client: error add ice candidate ", err)
@@ -810,6 +823,12 @@ func (c *Client) OnJoined(callback func()) {
 
 func (c *Client) OnLeft(callback func()) {
 	c.onLeftCallbacks = append(c.onLeftCallbacks, callback)
+}
+
+func (c *Client) onLeft() {
+	for _, callback := range c.onLeftCallbacks {
+		callback()
+	}
 }
 
 func (c *Client) OnTrackRemoved(callback func(sourceType string, track *webrtc.TrackLocalStaticRTP)) {

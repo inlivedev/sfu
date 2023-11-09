@@ -171,8 +171,6 @@ func (t *scaleabletClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 	if vp9Packet.B && t.sid != qualityPreset.GetSID() {
 		if vp9Packet.SID == qualityPreset.GetSID() && !vp9Packet.P {
 			t.sid = qualityPreset.GetSID()
-		} else {
-			t.RequestPLI()
 		}
 	}
 
@@ -188,15 +186,9 @@ func (t *scaleabletClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 
 	if vp9Packet.E && t.sid == vp9Packet.SID {
 		p.Marker = true
-		// if t.client.isDebug {
-		// 	glog.Info("scalabletrack: end of frame mark as final frame, sid: ", vp9Packet.SID)
-		// }
 	}
 
 	if vp9Packet.TID == 0 && vp9Packet.SID == 0 {
-		// if p.Marker && t.client.isDebug {
-		// 	glog.Info("scalabletrack: marker is set, sid: ", vp9Packet.SID)
-		// }
 		t.send(p)
 		return
 	}

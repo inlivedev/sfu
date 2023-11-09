@@ -364,7 +364,7 @@
                 streams: [stream],
                 sendEncodings: [
                         {
-                            maxBitrate: 1200*1000,
+                            maxBitrate: 1000*1000,
                             scalabilityMode: 'L3T2'
                         },
                        
@@ -376,6 +376,13 @@
                 // iterate over supported codecs and pull out the codecs we want
                 for(let i = 0; i < codecs.length; i++){
                     if(codecs[i].mimeType == "video/VP9"){
+                        vp9_codecs.push(codecs[i]);
+                    }
+                }
+
+                // push the rest of the codecs
+                for(let i = 0; i < codecs.length; i++){
+                    if(codecs[i].mimeType != "video/VP9"){
                         vp9_codecs.push(codecs[i]);
                     }
                 }

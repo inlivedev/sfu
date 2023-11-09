@@ -7,20 +7,17 @@ require (
 	github.com/pion/interceptor v0.1.18
 	github.com/pion/rtcp v1.2.10
 	github.com/pion/webrtc/v3 v3.2.19
-	github.com/speps/go-hashids v2.0.0+incompatible
 	github.com/stretchr/testify v1.8.4
 )
 
 require (
 	github.com/golang/glog v1.1.2
+	github.com/jaevor/go-nanoid v1.3.0
 	golang.org/x/exp v0.0.0-20230905200255-921286631fa9
 	golang.org/x/text v0.12.0
 )
 
-require (
-	github.com/jaevor/go-nanoid v1.3.0 // indirect
-	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
-)
+require gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect

@@ -152,13 +152,12 @@ func (t *remoteTrack) sendPLI() error {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	maxGapSeconds := 1 * time.Second
+	maxGapSeconds := 250 * time.Millisecond
+	requestGap := time.Since(t.lastPLIRequestTime)
 
-	if time.Since(t.lastPLIRequestTime) < maxGapSeconds {
+	if requestGap < maxGapSeconds {
 		return nil
 	}
-
-	// glog.Info("sending PLI for track: ", t.track.ID(), " last PLI was requested ", time.Since(t.lastPLIRequestTime).Seconds(), " seconds ago")
 
 	t.lastPLIRequestTime = time.Now()
 
