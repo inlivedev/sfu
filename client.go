@@ -643,11 +643,16 @@ func (c *Client) setClientTrack(t ITrack) iClientTrack {
 		c.mu.Lock()
 		defer c.mu.Unlock()
 
-		if c.peerConnection == nil && c.peerConnection.PC() == nil {
+		sender := transc.Sender()
+		if sender == nil {
 			return
 		}
 
-		if err := c.peerConnection.PC().RemoveTrack(transc.Sender()); err != nil {
+		if c.peerConnection == nil || c.peerConnection.PC() == nil || sender == nil {
+			return
+		}
+
+		if err := c.peerConnection.PC().RemoveTrack(sender); err != nil {
 			glog.Error("client: error remove track ", err)
 			return
 		}
@@ -663,11 +668,16 @@ func (c *Client) setClientTrack(t ITrack) iClientTrack {
 		c.mu.Lock()
 		defer c.mu.Unlock()
 
-		if c.peerConnection == nil && c.peerConnection.PC() == nil {
+		sender := transc.Sender()
+		if sender == nil {
 			return
 		}
 
-		if err := c.peerConnection.PC().RemoveTrack(transc.Sender()); err != nil {
+		if c.peerConnection == nil || c.peerConnection.PC() == nil || sender == nil {
+			return
+		}
+
+		if err := c.peerConnection.PC().RemoveTrack(sender); err != nil {
 			glog.Error("client: error remove track ", err)
 			return
 		}
@@ -768,9 +778,9 @@ func (c *Client) afterClosed() {
 		c.state.Store(ClientStateEnded)
 	}
 
-	c.cancel()
-
 	c.onLeft()
+
+	c.cancel()
 
 	c.sfu.onAfterClientStopped(c)
 }
