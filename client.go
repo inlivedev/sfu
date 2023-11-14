@@ -219,6 +219,10 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 
 	if s.mux != nil {
 		settingEngine.SetICEUDPMux(s.mux.mux)
+	} else {
+		if err := settingEngine.SetEphemeralUDPPortRange(s.portStart, s.portEnd); err != nil {
+			glog.Error("client: error set ephemeral udp port range ", err)
+		}
 	}
 
 	// Create a new RTCPeerConnection
@@ -673,7 +677,7 @@ func (c *Client) setClientTrack(t ITrack) iClientTrack {
 			return
 		}
 
-		if c.peerConnection == nil || c.peerConnection.PC() == nil || sender == nil {
+		if c.peerConnection == nil || c.peerConnection.PC() == nil || sender == nil || c.peerConnection.PC().ConnectionState() == webrtc.PeerConnectionStateClosed {
 			return
 		}
 

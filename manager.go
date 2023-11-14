@@ -31,9 +31,12 @@ type Manager struct {
 }
 
 func NewManager(ctx context.Context, name string, options Options) *Manager {
+	var udpMux *UDPMux
 	localCtx, cancel := context.WithCancel(ctx)
 
-	udpMux := NewUDPMux(ctx, options.WebRTCPort)
+	if options.EnableMux {
+		udpMux = NewUDPMux(ctx, options.WebRTCPort)
+	}
 
 	m := &Manager{
 		rooms:      make(map[string]*Room),
@@ -79,6 +82,8 @@ func (m *Manager) NewRoom(id, name, roomType string, opts RoomOptions) (*Room, e
 		Bitrates:      opts.Bitrates,
 		IceServers:    m.iceServers,
 		Mux:           m.udpMux,
+		PortStart:     m.options.PortStart,
+		PortEnd:       m.options.PortEnd,
 		Codecs:        opts.Codecs,
 		PLIInterval:   opts.PLIInterval,
 		QualityPreset: opts.QualityPreset,

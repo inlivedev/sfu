@@ -16,7 +16,12 @@ type UDPMux struct {
 func NewUDPMux(ctx context.Context, port int) *UDPMux {
 	localCtx, cancel := context.WithCancel(ctx)
 
-	mux, err := ice.NewMultiUDPMuxFromPort(port)
+	opts := []ice.UDPMuxFromPortOption{
+		ice.UDPMuxFromPortWithReadBufferSize(500000),
+		ice.UDPMuxFromPortWithWriteBufferSize(500000),
+	}
+
+	mux, err := ice.NewMultiUDPMuxFromPort(port, opts...)
 	if err != nil {
 		panic(err)
 	}

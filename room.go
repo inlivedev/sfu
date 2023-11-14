@@ -17,6 +17,9 @@ const (
 )
 
 type Options struct {
+	EnableMux                bool
+	PortStart                uint16
+	PortEnd                  uint16
 	WebRTCPort               int
 	ConnectRemoteRoomTimeout time.Duration
 	EnableBridging           bool
@@ -25,6 +28,9 @@ type Options struct {
 
 func DefaultOptions() Options {
 	return Options{
+		PortStart:                49152,
+		PortEnd:                  65535,
+		EnableMux:                false,
 		WebRTCPort:               50005,
 		ConnectRemoteRoomTimeout: 30 * time.Second,
 		IceServers: []webrtc.ICEServer{

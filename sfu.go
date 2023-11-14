@@ -116,6 +116,8 @@ type SFU struct {
 	OnTracksAvailable        func(tracks []track)
 	pliInterval              time.Duration
 	qualityRef               QualityPreset
+	portStart                uint16
+	portEnd                  uint16
 }
 
 type PublishedTrack struct {
@@ -126,6 +128,8 @@ type PublishedTrack struct {
 type sfuOptions struct {
 	IceServers    []webrtc.ICEServer
 	Mux           *UDPMux
+	PortStart     uint16
+	PortEnd       uint16
 	Bitrates      BitratesConfig
 	QualityPreset QualityPreset
 	Codecs        []string
@@ -148,6 +152,8 @@ func New(ctx context.Context, opts sfuOptions) *SFU {
 		bitratesConfig: opts.Bitrates,
 		pliInterval:    opts.PLIInterval,
 		qualityRef:     opts.QualityPreset,
+		portStart:      opts.PortStart,
+		portEnd:        opts.PortEnd,
 	}
 
 	go func() {
