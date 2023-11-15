@@ -65,6 +65,7 @@ func main() {
 	defer cancel()
 
 	sfuOpts := sfu.DefaultOptions()
+	sfuOpts.EnableMux = true
 
 	_, turnEnabled := os.LookupEnv("TURN_ENABLED")
 	if turnEnabled {

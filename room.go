@@ -87,7 +87,7 @@ func DefaultRoomOptions() RoomOptions {
 	return RoomOptions{
 		Bitrates:      DefaultBitrates(),
 		QualityPreset: DefaultQualityPreset(),
-		Codecs:        []string{webrtc.MimeTypeVP9, webrtc.MimeTypeOpus},
+		Codecs:        []string{webrtc.MimeTypeVP9, webrtc.MimeTypeH264, webrtc.MimeTypeOpus},
 		ClientTimeout: 10 * time.Minute,
 		PLIInterval:   5 * time.Second,
 	}
