@@ -20,13 +20,15 @@ type voiceActivityStats struct {
 }
 
 type ClientStats struct {
-	mu            sync.Mutex
-	senderMu      sync.RWMutex
-	receiverMu    sync.RWMutex
-	Client        *Client
-	senders       map[string]stats.Stats
-	receivers     map[string]stats.Stats
-	voiceActivity voiceActivityStats
+	mu                sync.Mutex
+	senderMu          sync.RWMutex
+	receiverMu        sync.RWMutex
+	Client            *Client
+	senders           map[string]stats.Stats
+	senderBitrates    map[string]uint32
+	receivers         map[string]stats.Stats
+	receiversBitrates map[string]uint32
+	voiceActivity     voiceActivityStats
 }
 
 func newClientStats(c *Client) *ClientStats {

@@ -10,7 +10,6 @@ import (
 )
 
 type iClientTrack interface {
-	getCurrentBitrate() uint32
 	push(rtp *rtp.Packet, quality QualityLevel)
 	ID() string
 	Kind() webrtc.RTPCodecType
@@ -24,6 +23,7 @@ type iClientTrack interface {
 	Client() *Client
 	RequestPLI()
 	SetMaxQuality(quality QualityLevel)
+	MaxQuality() QualityLevel
 }
 
 type clientTrack struct {
@@ -62,10 +62,6 @@ func (t *clientTrack) push(rtp *rtp.Packet, quality QualityLevel) {
 	if err := t.localTrack.WriteRTP(rtp); err != nil {
 		glog.Error("clienttrack: error on write rtp", err)
 	}
-}
-
-func (t *clientTrack) getCurrentBitrate() uint32 {
-	return t.remoteTrack.GetCurrentBitrate()
 }
 
 func (t *clientTrack) LocalTrack() *webrtc.TrackLocalStaticRTP {
@@ -112,4 +108,8 @@ func (t *clientTrack) RequestPLI() {
 
 func (t *clientTrack) SetMaxQuality(_ QualityLevel) {
 	// do nothing
+}
+
+func (t *clientTrack) MaxQuality() QualityLevel {
+	return QualityHigh
 }

@@ -23,6 +23,7 @@ type Options struct {
 	WebRTCPort               int
 	ConnectRemoteRoomTimeout time.Duration
 	EnableBridging           bool
+	EnableBandwidthEstimator bool
 	IceServers               []webrtc.ICEServer
 }
 

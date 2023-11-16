@@ -34,7 +34,7 @@ func DefaultBitrates() BitratesConfig {
 		VideoMidPixels:   360,
 		VideoLow:         150_000,
 		VideoLowPixels:   180,
-		InitialBandwidth: 2_500_000,
+		InitialBandwidth: 1_500_000,
 	}
 }
 
@@ -112,6 +112,7 @@ type SFU struct {
 	mux                       *UDPMux
 	onStop                    func()
 	pliInterval               time.Duration
+	enableBandwidthEstimator  bool
 	qualityRef                QualityPreset
 	portStart                 uint16
 	portEnd                   uint16
@@ -126,14 +127,15 @@ type PublishedTrack struct {
 }
 
 type sfuOptions struct {
-	IceServers    []webrtc.ICEServer
-	Mux           *UDPMux
-	PortStart     uint16
-	PortEnd       uint16
-	Bitrates      BitratesConfig
-	QualityPreset QualityPreset
-	Codecs        []string
-	PLIInterval   time.Duration
+	IceServers               []webrtc.ICEServer
+	Mux                      *UDPMux
+	PortStart                uint16
+	PortEnd                  uint16
+	Bitrates                 BitratesConfig
+	QualityPreset            QualityPreset
+	Codecs                   []string
+	PLIInterval              time.Duration
+	EnableBandwidthEstimator bool
 }
 
 // @Param muxPort: port for udp mux
@@ -150,6 +152,7 @@ func New(ctx context.Context, opts sfuOptions) *SFU {
 		iceServers:                opts.IceServers,
 		mux:                       opts.Mux,
 		bitratesConfig:            opts.Bitrates,
+		enableBandwidthEstimator:  opts.EnableBandwidthEstimator,
 		pliInterval:               opts.PLIInterval,
 		qualityRef:                opts.QualityPreset,
 		portStart:                 opts.PortStart,
@@ -208,8 +211,6 @@ func (s *SFU) NewClient(id, name string, opts ClientOptions) *Client {
 		switch connectionState {
 		case webrtc.PeerConnectionStateConnected:
 			if client.state.Load() == ClientStateNew {
-				client.mu.Lock()
-				defer client.mu.Unlock()
 				client.state.Store(ClientStateActive)
 				client.onJoined()
 

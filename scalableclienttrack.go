@@ -308,20 +308,12 @@ func (t *scaleabletClientTrack) RequestPLI() {
 }
 
 func (t *scaleabletClientTrack) getQuality() QualityLevel {
-	lastQuality := t.LastQuality()
 	claim := t.client.bitrateController.GetClaim(t.ID())
 
 	if claim == nil {
 		glog.Warning("scalabletrack: claim is nil")
-		return QualityLow
+		return QualityNone
 	}
 
-	quality := min(t.MaxQuality(), claim.Quality(), Uint32ToQualityLevel(t.client.quality.Load()))
-	if quality < lastQuality {
-		return lastQuality - 1
-	} else if quality > lastQuality {
-		return lastQuality + 1
-	}
-
-	return lastQuality
+	return min(t.MaxQuality(), claim.Quality(), Uint32ToQualityLevel(t.client.quality.Load()))
 }

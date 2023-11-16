@@ -13,6 +13,7 @@ import (
 	"github.com/inlivedev/sfu/pkg/interceptors/voiceactivedetector"
 	"github.com/pion/interceptor"
 	"github.com/pion/interceptor/pkg/cc"
+	"github.com/pion/interceptor/pkg/gcc"
 	"github.com/pion/interceptor/pkg/stats"
 	"github.com/pion/rtcp"
 	"github.com/pion/webrtc/v3"
@@ -100,7 +101,6 @@ type Client struct {
 	canAddCandidate       *atomic.Bool
 	internalDataChannel   *webrtc.DataChannel
 	dataChannels          *DataChannelList
-	estimatorChan         chan cc.BandwidthEstimator
 	estimator             cc.BandwidthEstimator
 	initialTracksCount    atomic.Uint32
 	isInRenegotiation     *atomic.Bool
@@ -204,11 +204,33 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		i.Add(vadInterceptorFactory)
 	}
 
-	if err = webrtc.ConfigureTWCCHeaderExtensionSender(m, i); err != nil {
-		panic(err)
-	}
+	estimatorChan := make(chan cc.BandwidthEstimator, 1)
 
-	var estimatorChan chan cc.BandwidthEstimator
+	if s.enableBandwidthEstimator {
+		// Create a Congestion Controller. This analyzes inbound and outbound data and provides
+		// suggestions on how much we should be sending.
+		//
+		// Passing `nil` means we use the default Estimation Algorithm which is Google Congestion Control.
+		// You can use the other ones that Pion provides, or write your own!
+		congestionController, err := cc.NewInterceptor(func() (cc.BandwidthEstimator, error) {
+			// if bw below 100_000, somehow the estimator will struggle to probe the bandwidth and will stuck there. So we set the min to 100_000
+			// TODO: we need to use packet loss based bandwidth adjuster when the bandwidth is below 100_000
+			return gcc.NewSendSideBWE(gcc.SendSideBWEInitialBitrate(int(s.bitratesConfig.InitialBandwidth)), gcc.SendSideBWEMinBitrate(100_000))
+		})
+		if err != nil {
+			panic(err)
+		}
+
+		congestionController.OnNewPeerConnection(func(id string, estimator cc.BandwidthEstimator) {
+			estimatorChan <- estimator
+		})
+
+		i.Add(congestionController)
+
+		if err = webrtc.ConfigureTWCCHeaderExtensionSender(m, i); err != nil {
+			panic(err)
+		}
+	}
 
 	// Use the default set of Interceptors
 	if err := webrtc.RegisterDefaultInterceptors(m, i); err != nil {
@@ -242,7 +264,6 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 	client = &Client{
 		id:                             id,
 		name:                           name,
-		estimatorChan:                  estimatorChan,
 		context:                        localCtx,
 		cancel:                         cancel,
 		canAddCandidate:                &atomic.Bool{},
@@ -284,6 +305,13 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 	client.stats = newClientStats(client)
 
 	client.bitrateController = newbitrateController(client, s.pliInterval)
+
+	if s.enableBandwidthEstimator {
+		go func() {
+			estimator := <-estimatorChan
+			client.estimator = estimator
+		}()
+	}
 
 	peerConnection.OnConnectionStateChange(func(connectionState webrtc.PeerConnectionState) {
 		if client.isDebug {
@@ -519,10 +547,15 @@ func (c *Client) OnRenegotiation(callback func(context.Context, webrtc.SessionDe
 // TODO:
 // delay negotiation using timeout and make sure only one negotiation is running when a client left and joined again
 func (c *Client) renegotiateQueuOp() {
+	c.mu.Lock()
 	if c.onRenegotiation == nil {
 		glog.Error("client: onRenegotiation is not set, can't do renegotiation")
+		c.mu.Unlock()
+
 		return
 	}
+
+	c.mu.Unlock()
 
 	if c.isInRemoteNegotiation.Load() {
 		glog.Info("sfu: renegotiation is delayed because the remote client is doing negotiation ", c.ID)
@@ -1068,6 +1101,9 @@ func (c *Client) SetQuality(quality QualityLevel) {
 // it will return the initial bandwidth. If the receiving bandwidth is not 0, it will return the smallest value between
 // the estimated bandwidth and the receiving bandwidth.
 func (c *Client) GetEstimatedBandwidth() uint32 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	estimated := uint32(0)
 
 	if c.estimator == nil {
