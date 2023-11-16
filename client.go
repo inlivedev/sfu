@@ -130,7 +130,7 @@ type Client struct {
 	onBeforeRenegotiation             func(context.Context) bool
 	onRenegotiation                   func(context.Context, webrtc.SessionDescription) (webrtc.SessionDescription, error)
 	onAllowedRemoteRenegotiation      func()
-	onTracksAvailable                 func([]ITrack)
+	onTracksAvailableCallbacks        []func([]ITrack)
 	// onTrack is used by SFU to take action when a new track is added to the client
 	onTrack                        func(ITrack)
 	onTracksAdded                  func([]ITrack)
@@ -268,6 +268,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		egressBandwidth:                &atomic.Uint32{},
 		ingressBandwidth:               &atomic.Uint32{},
 		ingressQualityLimitationReason: &atomic.Value{},
+		onTracksAvailableCallbacks:     make([]func([]ITrack), 0),
 	}
 
 	// setup internal data channel
@@ -1262,7 +1263,13 @@ func (c *Client) SFU() *SFU {
 func (c *Client) OnTracksAvailable(callback func([]ITrack)) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.onTracksAvailable = callback
+	c.onTracksAvailableCallbacks = append(c.onTracksAvailableCallbacks, callback)
+}
+
+func (c *Client) onTracksAvailable(tracks []ITrack) {
+	for _, callback := range c.onTracksAvailableCallbacks {
+		callback(tracks)
+	}
 }
 
 func (c *Client) OnVoiceDetected(callback func(activity voiceactivedetector.VoiceActivity)) {
@@ -1329,4 +1336,11 @@ func (c *Client) enableVADStatUpdate() {
 			c.stats.UpdateVoiceActivity(duration)
 		}
 	})
+}
+
+func (c *Client) Tracks() []ITrack {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	return c.tracks.GetTracks()
 }

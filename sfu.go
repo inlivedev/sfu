@@ -100,24 +100,24 @@ func (s *SFUClients) Remove(client *Client) error {
 }
 
 type SFU struct {
-	bitratesConfig           BitratesConfig
-	clients                  *SFUClients
-	context                  context.Context
-	cancel                   context.CancelFunc
-	callbacksOnClientRemoved []func(*Client)
-	callbacksOnClientAdded   []func(*Client)
-	codecs                   []string
-	dataChannels             *SFUDataChannelList
-	idleChan                 chan bool
-	iceServers               []webrtc.ICEServer
-	mu                       sync.Mutex
-	mux                      *UDPMux
-	onStop                   func()
-	OnTracksAvailable        func(tracks []track)
-	pliInterval              time.Duration
-	qualityRef               QualityPreset
-	portStart                uint16
-	portEnd                  uint16
+	bitratesConfig            BitratesConfig
+	clients                   *SFUClients
+	context                   context.Context
+	cancel                    context.CancelFunc
+	codecs                    []string
+	dataChannels              *SFUDataChannelList
+	idleChan                  chan bool
+	iceServers                []webrtc.ICEServer
+	mu                        sync.Mutex
+	mux                       *UDPMux
+	onStop                    func()
+	pliInterval               time.Duration
+	qualityRef                QualityPreset
+	portStart                 uint16
+	portEnd                   uint16
+	onTrackAvailableCallbacks []func(tracks []ITrack)
+	onClientRemovedCallbacks  []func(*Client)
+	onClientAddedCallbacks    []func(*Client)
 }
 
 type PublishedTrack struct {
@@ -141,19 +141,22 @@ func New(ctx context.Context, opts sfuOptions) *SFU {
 	localCtx, cancel := context.WithCancel(ctx)
 
 	sfu := &SFU{
-		clients:        &SFUClients{clients: make(map[string]*Client), mu: sync.Mutex{}},
-		context:        localCtx,
-		cancel:         cancel,
-		codecs:         opts.Codecs,
-		dataChannels:   NewSFUDataChannelList(),
-		mu:             sync.Mutex{},
-		iceServers:     opts.IceServers,
-		mux:            opts.Mux,
-		bitratesConfig: opts.Bitrates,
-		pliInterval:    opts.PLIInterval,
-		qualityRef:     opts.QualityPreset,
-		portStart:      opts.PortStart,
-		portEnd:        opts.PortEnd,
+		clients:                   &SFUClients{clients: make(map[string]*Client), mu: sync.Mutex{}},
+		context:                   localCtx,
+		cancel:                    cancel,
+		codecs:                    opts.Codecs,
+		dataChannels:              NewSFUDataChannelList(),
+		mu:                        sync.Mutex{},
+		iceServers:                opts.IceServers,
+		mux:                       opts.Mux,
+		bitratesConfig:            opts.Bitrates,
+		pliInterval:               opts.PLIInterval,
+		qualityRef:                opts.QualityPreset,
+		portStart:                 opts.PortStart,
+		portEnd:                   opts.PortEnd,
+		onTrackAvailableCallbacks: make([]func(tracks []ITrack), 0),
+		onClientRemovedCallbacks:  make([]func(*Client), 0),
+		onClientAddedCallbacks:    make([]func(*Client), 0),
 	}
 
 	go func() {
@@ -211,20 +214,19 @@ func (s *SFU) NewClient(id, name string, opts ClientOptions) *Client {
 				client.onJoined()
 
 				// trigger available tracks from other clients
-				if client.onTracksAvailable != nil {
-					availableTracks := make([]ITrack, 0)
 
-					for _, c := range s.clients.GetClients() {
-						for _, track := range c.tracks.GetTracks() {
-							if track.Client().ID() != client.ID() {
-								availableTracks = append(availableTracks, track)
-							}
+				availableTracks := make([]ITrack, 0)
+
+				for _, c := range s.clients.GetClients() {
+					for _, track := range c.tracks.GetTracks() {
+						if track.Client().ID() != client.ID() {
+							availableTracks = append(availableTracks, track)
 						}
 					}
+				}
 
-					if len(availableTracks) > 0 {
-						client.onTracksAvailable(availableTracks)
-					}
+				if len(availableTracks) > 0 {
+					client.onTracksAvailable(availableTracks)
 				}
 
 				// make sure the exisiting data channels is created on new clients
@@ -357,14 +359,14 @@ func (s *SFU) OnClientAdded(callback func(*Client)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.callbacksOnClientAdded = append(s.callbacksOnClientAdded, callback)
+	s.onClientAddedCallbacks = append(s.onClientAddedCallbacks, callback)
 }
 
 func (s *SFU) OnClientRemoved(callback func(*Client)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	s.callbacksOnClientRemoved = append(s.callbacksOnClientRemoved, callback)
+	s.onClientRemovedCallbacks = append(s.onClientRemovedCallbacks, callback)
 }
 
 func (s *SFU) onAfterClientStopped(client *Client) {
@@ -374,13 +376,13 @@ func (s *SFU) onAfterClientStopped(client *Client) {
 }
 
 func (s *SFU) onClientAdded(client *Client) {
-	for _, callback := range s.callbacksOnClientAdded {
+	for _, callback := range s.onClientAddedCallbacks {
 		callback(client)
 	}
 }
 
 func (s *SFU) onClientRemoved(client *Client) {
-	for _, callback := range s.callbacksOnClientRemoved {
+	for _, callback := range s.onClientAddedCallbacks {
 		callback(client)
 	}
 }
@@ -399,9 +401,15 @@ func (s *SFU) onTracksAvailable(tracks []ITrack) {
 				}
 			}
 
-			if len(filteredTracks) > 0 && client.onTracksAvailable != nil {
+			if len(filteredTracks) > 0 {
 				client.onTracksAvailable(tracks)
 			}
+		}
+	}
+
+	for _, callback := range s.onTrackAvailableCallbacks {
+		if callback != nil {
+			callback(tracks)
 		}
 	}
 }
@@ -565,4 +573,11 @@ func (s *SFU) QualityPreset() QualityPreset {
 	defer s.mu.Unlock()
 
 	return s.qualityRef
+}
+
+func (s *SFU) OnTracksAvailable(callback func(tracks []ITrack)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.onTrackAvailableCallbacks = append(s.onTrackAvailableCallbacks, callback)
 }

@@ -24,15 +24,6 @@ func (p *PeerConnection) PC() *webrtc.PeerConnection {
 	return p.pc
 }
 
-// Use this lock and unlock to finish all internal operation before it locked
-func (p *PeerConnection) lock() {
-	p.mu.Lock()
-}
-
-func (p *PeerConnection) unlock() {
-	p.mu.Unlock()
-}
-
 func (p *PeerConnection) Close() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
