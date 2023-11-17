@@ -27,14 +27,14 @@ func DefaultBitrates() BitratesConfig {
 	return BitratesConfig{
 		AudioRed:         48_000 * 3,
 		Audio:            48_000,
-		Video:            1_500_000,
-		VideoHigh:        1_500_000,
+		Video:            1_200_000,
+		VideoHigh:        1_200_000,
 		VideoHighPixels:  720,
 		VideoMid:         500_000,
 		VideoMidPixels:   360,
 		VideoLow:         150_000,
 		VideoLowPixels:   180,
-		InitialBandwidth: 1_500_000,
+		InitialBandwidth: 1_000_000,
 	}
 }
 
@@ -383,7 +383,7 @@ func (s *SFU) onClientAdded(client *Client) {
 }
 
 func (s *SFU) onClientRemoved(client *Client) {
-	for _, callback := range s.onClientAddedCallbacks {
+	for _, callback := range s.onClientRemovedCallbacks {
 		callback(client)
 	}
 }
