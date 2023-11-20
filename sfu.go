@@ -220,7 +220,7 @@ func (s *SFU) NewClient(id, name string, opts ClientOptions) *Client {
 
 				for _, c := range s.clients.GetClients() {
 					for _, track := range c.tracks.GetTracks() {
-						if track.Client().ID() != client.ID() {
+						if track.ClientID() != client.ID() {
 							availableTracks = append(availableTracks, track)
 						}
 					}
@@ -397,7 +397,7 @@ func (s *SFU) onTracksAvailable(tracks []ITrack) {
 			// filter out tracks from the same client
 			filteredTracks := make([]ITrack, 0)
 			for _, track := range tracks {
-				if track.Client().ID() != client.ID() {
+				if track.ClientID() != client.ID() {
 					filteredTracks = append(filteredTracks, track)
 				}
 			}
@@ -419,7 +419,7 @@ func (s *SFU) broadcastTracksToAutoSubscribeClients(ownerID string, tracks []ITr
 	trackReq := make([]SubscribeTrackRequest, 0)
 	for _, track := range tracks {
 		trackReq = append(trackReq, SubscribeTrackRequest{
-			ClientID: track.Client().ID(),
+			ClientID: track.ClientID(),
 			TrackID:  track.ID(),
 		})
 	}
@@ -582,3 +582,49 @@ func (s *SFU) OnTracksAvailable(callback func(tracks []ITrack)) {
 
 	s.onTrackAvailableCallbacks = append(s.onTrackAvailableCallbacks, callback)
 }
+
+// func (s *SFU) AddRelayTrack(id, streamid, rid string, kind webrtc.RTPCodecType, ssrc webrtc.SSRC, mimeType string, rtpChan chan *rtp.Packet) error {
+// 	var track ITrack
+
+// 	relayTrack := NewTrackRelay(id, streamid, rid, kind, ssrc, mimeType, rtpChan)
+
+// 	if rid == "" {
+// 		// not simulcast
+// 		track = newTrack(client, remoteTrack, receiver, vad)
+// 		if err := client.tracks.Add(track); err != nil {
+// 			glog.Error("client: error add track ", err)
+// 		}
+
+// 		client.onTrack(track)
+// 		track.SetAsProcessed()
+// 	} else {
+// 		// simulcast
+// 		var simulcast *simulcastTrack
+// 		var ok bool
+
+// 		id := remoteTrack.ID()
+
+// 		track, err = client.tracks.Get(id) // not found because the track is not added yet due to race condition
+
+// 		if err != nil {
+// 			// if track not found, add it
+// 			track = newSimulcastTrack(client, remoteTrack, receiver)
+// 			if err := client.tracks.Add(track); err != nil {
+// 				glog.Error("client: error add track ", err)
+// 			}
+// 		} else if simulcast, ok = track.(*simulcastTrack); ok {
+// 			simulcast.AddRemoteTrack(remoteTrack, receiver)
+// 		}
+
+// 		// // only process track when the highest quality is available
+// 		// simulcast.mu.Lock()
+// 		// isHighAvailable := simulcast.remoteTrackHigh != nil
+// 		// simulcast.mu.Unlock()
+
+// 		if !track.IsProcessed() {
+// 			client.onTrack(track)
+// 			track.SetAsProcessed()
+// 		}
+
+// 	}
+// }

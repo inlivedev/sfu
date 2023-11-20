@@ -329,9 +329,33 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 			vad = vadInterceptor.AddAudioTrack(remoteTrack)
 		}
 
+		onPLI := func() error {
+			if client.peerConnection == nil || client.peerConnection.PC() == nil || client.peerConnection.PC().ConnectionState() != webrtc.PeerConnectionStateConnected {
+				return nil
+			}
+
+			return client.peerConnection.PC().WriteRTCP([]rtcp.Packet{
+				&rtcp.PictureLossIndication{MediaSSRC: uint32(remoteTrack.SSRC())},
+			})
+		}
+
+		onStatsUpdated := func(stats *stats.Stats) {
+			client.mu.Lock()
+			defer client.mu.Unlock()
+
+			client.stats.SetReceiver(track.ID(), *stats)
+			glog.Info("client: stats updated ", track.ID(), " ", stats)
+		}
+
 		if remoteTrack.RID() == "" {
 			// not simulcast
-			track = newTrack(client, remoteTrack, receiver, vad)
+
+			track = newTrack(client.context, client.id, remoteTrack, receiver, s.pliInterval, onPLI, vad, client.statsGetter, onStatsUpdated)
+
+			track.OnEnded(func() {
+				client.stats.removeReceiverStats(remoteTrack.ID())
+			})
+
 			if err := client.tracks.Add(track); err != nil {
 				glog.Error("client: error add track ", err)
 			}
@@ -349,12 +373,16 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 
 			if err != nil {
 				// if track not found, add it
-				track = newSimulcastTrack(client, remoteTrack, receiver)
+				track = newSimulcastTrack(client.context, client.id, remoteTrack, receiver, s.pliInterval, onPLI, client.statsGetter, onStatsUpdated)
 				if err := client.tracks.Add(track); err != nil {
 					glog.Error("client: error add track ", err)
 				}
+
+				track.OnEnded(func() {
+					client.stats.removeReceiverStats(remoteTrack.ID())
+				})
 			} else if simulcast, ok = track.(*simulcastTrack); ok {
-				simulcast.AddRemoteTrack(remoteTrack, receiver)
+				simulcast.AddRemoteTrack(remoteTrack, receiver, client.statsGetter, onStatsUpdated)
 			}
 
 			// // only process track when the highest quality is available
@@ -670,31 +698,6 @@ func (c *Client) setClientTrack(t ITrack) iClientTrack {
 		return nil
 	}
 
-	t.Client().OnLeft(func() {
-		if c == nil {
-			return
-		}
-
-		c.mu.Lock()
-		defer c.mu.Unlock()
-
-		sender := transc.Sender()
-		if sender == nil {
-			return
-		}
-
-		if c.peerConnection == nil || c.peerConnection.PC() == nil || sender == nil {
-			return
-		}
-
-		if err := c.peerConnection.PC().RemoveTrack(sender); err != nil {
-			glog.Error("client: error remove track ", err)
-			return
-		}
-
-		c.renegotiate()
-	})
-
 	t.OnEnded(func() {
 		if c == nil {
 			return
@@ -938,32 +941,6 @@ func (c *Client) PeerConnection() *PeerConnection {
 
 func (c *Client) Stats() *ClientStats {
 	return c.stats
-}
-
-func (c *Client) updateReceiverStats(remoteTrack *remoteTrack) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if c.statsGetter == nil {
-		return
-	}
-
-	if remoteTrack.track == nil {
-		return
-	}
-
-	track := remoteTrack.track
-
-	if track.SSRC() == 0 {
-		return
-	}
-
-	stats := c.statsGetter.Get(uint32(track.SSRC()))
-	if stats != nil {
-		remoteTrack.setReceiverStats(*stats)
-		c.stats.SetReceiver(track.ID(), *stats)
-	}
-
 }
 
 func (c *Client) updateSenderStats(sender *webrtc.RTPSender) {

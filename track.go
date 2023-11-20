@@ -1,6 +1,7 @@
 package sfu
 
 import (
+	"context"
 	"errors"
 	"sync"
 	"sync/atomic"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/golang/glog"
 	"github.com/inlivedev/sfu/pkg/interceptors/voiceactivedetector"
+	"github.com/pion/interceptor/pkg/stats"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v3"
 )
@@ -32,7 +34,7 @@ type baseTrack struct {
 	id           string
 	msid         string
 	streamid     string
-	client       *Client
+	clientid     string
 	isProcessed  bool
 	kind         webrtc.RTPCodecType
 	codec        webrtc.RTPCodecParameters
@@ -43,7 +45,7 @@ type baseTrack struct {
 type ITrack interface {
 	ID() string
 	StreamID() string
-	Client() *Client
+	ClientID() string
 	IsSimulcast() bool
 	IsScaleable() bool
 	IsProcessed() bool
@@ -67,7 +69,7 @@ type track struct {
 	onReadCallbacks  []func(*rtp.Packet, QualityLevel)
 }
 
-func newTrack(client *Client, trackRemote *webrtc.TrackRemote, receiver *webrtc.RTPReceiver, vad *voiceactivedetector.VoiceDetector) ITrack {
+func newTrack(ctx context.Context, clientID string, trackRemote *webrtc.TrackRemote, receiver *webrtc.RTPReceiver, pliInterval time.Duration, onPLI func() error, vad *voiceactivedetector.VoiceDetector, stats stats.Getter, onStatsUpdated func(*stats.Stats)) ITrack {
 	ctList := newClientTrackList()
 
 	baseTrack := baseTrack{
@@ -75,7 +77,7 @@ func newTrack(client *Client, trackRemote *webrtc.TrackRemote, receiver *webrtc.
 		isScreen:     &atomic.Bool{},
 		msid:         trackRemote.Msid(),
 		streamid:     trackRemote.StreamID(),
-		client:       client,
+		clientid:     clientID,
 		kind:         trackRemote.Kind(),
 		codec:        trackRemote.Codec(),
 		clientTracks: ctList,
@@ -89,7 +91,8 @@ func newTrack(client *Client, trackRemote *webrtc.TrackRemote, receiver *webrtc.
 		onEndedCallbacks: make([]func(), 0),
 	}
 
-	onTrackRead := func(p *rtp.Packet) {
+	t.remoteTrack = newRemoteTrack(ctx, trackRemote, receiver, pliInterval, onPLI, stats, onStatsUpdated)
+	t.remoteTrack.OnRead(func(p *rtp.Packet) {
 		// do
 		tracks := ctList.GetTracks()
 		for _, track := range tracks {
@@ -97,15 +100,17 @@ func newTrack(client *Client, trackRemote *webrtc.TrackRemote, receiver *webrtc.
 		}
 
 		t.onRead(p, QualityHigh)
-	}
-
-	t.remoteTrack = newRemoteTrack(client, trackRemote, receiver, onTrackRead)
+	})
 
 	t.remoteTrack.OnEnded(func() {
 		t.onEnded()
 	})
 
 	return t
+}
+
+func (t *track) ClientID() string {
+	return t.base.clientid
 }
 
 func (t *track) createLocalTrack() *webrtc.TrackLocalStaticRTP {
@@ -123,10 +128,6 @@ func (t *track) ID() string {
 
 func (t *track) StreamID() string {
 	return t.base.streamid
-}
-
-func (t *track) Client() *Client {
-	return t.base.client
 }
 
 func (t *track) RemoteTrack() *remoteTrack {
@@ -214,6 +215,13 @@ func (t *track) subscribe(c *Client) iClientTrack {
 		ct.onTrackEnded()
 	})
 
+	go func() {
+		clientCtx, cancel := context.WithCancel(c.context)
+		defer cancel()
+		<-clientCtx.Done()
+		ct.onTrackEnded()
+	}()
+
 	t.base.clientTracks.Add(ct)
 
 	return ct
@@ -263,6 +271,7 @@ func (t *track) onRead(p *rtp.Packet, quality QualityLevel) {
 }
 
 type simulcastTrack struct {
+	context                     context.Context
 	mu                          sync.Mutex
 	base                        *baseTrack
 	baseTS                      uint32
@@ -288,17 +297,20 @@ type simulcastTrack struct {
 	onAddedRemoteTrackCallbacks []func(*remoteTrack)
 	onEndedCallbacks            []func()
 	onReadCallbacks             []func(*rtp.Packet, QualityLevel)
+	pliInterval                 time.Duration
+	onPLI                       func() error
 }
 
-func newSimulcastTrack(client *Client, track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) ITrack {
+func newSimulcastTrack(ctx context.Context, clientid string, track IRemoteTrack, receiver *webrtc.RTPReceiver, pliInterval time.Duration, onPLI func() error, stats stats.Getter, onStatsUpdated func(*stats.Stats)) ITrack {
 	t := &simulcastTrack{
-		mu: sync.Mutex{},
+		context: ctx,
+		mu:      sync.Mutex{},
 		base: &baseTrack{
 			id:           track.ID(),
 			isScreen:     &atomic.Bool{},
 			msid:         track.Msid(),
 			streamid:     track.StreamID(),
-			client:       client,
+			clientid:     clientid,
 			kind:         track.Kind(),
 			codec:        track.Codec(),
 			clientTracks: newClientTrackList(),
@@ -312,11 +324,17 @@ func newSimulcastTrack(client *Client, track *webrtc.TrackRemote, receiver *webr
 		onAddedRemoteTrackCallbacks: make([]func(*remoteTrack), 0),
 		onEndedCallbacks:            make([]func(), 0),
 		onReadCallbacks:             make([]func(*rtp.Packet, QualityLevel), 0),
+		pliInterval:                 pliInterval,
+		onPLI:                       onPLI,
 	}
 
-	_ = t.AddRemoteTrack(track, receiver)
+	_ = t.AddRemoteTrack(track, receiver, stats, onStatsUpdated)
 
 	return t
+}
+
+func (t *simulcastTrack) ClientID() string {
+	return t.base.clientid
 }
 
 func (t *simulcastTrack) onRemoteTrackAdded(f func(*remoteTrack)) {
@@ -351,10 +369,6 @@ func (t *simulcastTrack) StreamID() string {
 	return t.base.streamid
 }
 
-func (t *simulcastTrack) Client() *Client {
-	return t.base.client
-}
-
 func (t *simulcastTrack) IsSimulcast() bool {
 	return true
 }
@@ -374,7 +388,7 @@ func (t *simulcastTrack) Kind() webrtc.RTPCodecType {
 	return t.base.kind
 }
 
-func (t *simulcastTrack) AddRemoteTrack(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) *remoteTrack {
+func (t *simulcastTrack) AddRemoteTrack(track IRemoteTrack, receiver *webrtc.RTPReceiver, stats stats.Getter, onStatsUpdated func(*stats.Stats)) *remoteTrack {
 	var remoteTrack *remoteTrack
 
 	quality := RIDToQuality(track.RID())
@@ -420,9 +434,11 @@ func (t *simulcastTrack) AddRemoteTrack(track *webrtc.TrackRemote, receiver *web
 
 	t.mu.Lock()
 
+	remoteTrack = newRemoteTrack(t.context, track, receiver, t.pliInterval, t.onPLI, stats, onStatsUpdated)
+	remoteTrack.OnRead(onRead)
 	switch quality {
 	case QualityHigh:
-		remoteTrack = newRemoteTrack(t.base.client, track, receiver, onRead)
+
 		t.remoteTrackHigh = remoteTrack
 		remoteTrack.OnEnded(func() {
 			t.mu.Lock()
@@ -435,7 +451,6 @@ func (t *simulcastTrack) AddRemoteTrack(track *webrtc.TrackRemote, receiver *web
 		})
 
 	case QualityMid:
-		remoteTrack = newRemoteTrack(t.base.client, track, receiver, onRead)
 		t.remoteTrackMid = remoteTrack
 		remoteTrack.OnEnded(func() {
 			t.mu.Lock()
@@ -447,7 +462,6 @@ func (t *simulcastTrack) AddRemoteTrack(track *webrtc.TrackRemote, receiver *web
 			}
 		})
 	case QualityLow:
-		remoteTrack = newRemoteTrack(t.base.client, track, receiver, onRead)
 		t.remoteTrackLow = remoteTrack
 		remoteTrack.OnEnded(func() {
 			t.mu.Lock()
@@ -535,6 +549,13 @@ func (t *simulcastTrack) subscribe(client *Client) iClientTrack {
 		})
 	}
 
+	go func() {
+		clientCtx, cancel := context.WithCancel(client.context)
+		defer cancel()
+		<-clientCtx.Done()
+		ct.onTrackEnded()
+	}()
+
 	if t.remoteTrackMid != nil {
 		t.remoteTrackMid.OnEnded(func() {
 			ct.onTrackEnded()
@@ -604,7 +625,7 @@ func (t *simulcastTrack) isTrackActive(quality QualityLevel) bool {
 		delta := time.Since(time.Unix(0, t.lastReadHighTS.Load()))
 
 		if delta > threshold {
-			glog.Warningf("track: remote track %s high is not active, last read was %d ms ago", t.Client().ID(), delta.Milliseconds())
+			glog.Warningf("track: remote track %s high is not active, last read was %d ms ago", delta.Milliseconds())
 			return false
 		}
 
@@ -617,7 +638,7 @@ func (t *simulcastTrack) isTrackActive(quality QualityLevel) bool {
 
 		delta := time.Since(time.Unix(0, t.lastReadMidTS.Load()))
 		if delta > threshold {
-			glog.Warningf("track: remote track %s mid is not active, last read was %d ms ago", t.Client().ID(), delta.Milliseconds())
+			glog.Warningf("track: remote track %s mid is not active, last read was %d ms ago", delta.Milliseconds())
 			return false
 		}
 
@@ -630,7 +651,7 @@ func (t *simulcastTrack) isTrackActive(quality QualityLevel) bool {
 
 		delta := time.Since(time.Unix(0, t.lastReadLowTS.Load()))
 		if delta > threshold {
-			glog.Warningf("track: remote track %s low is not active, last read was %d ms ago", t.Client().ID(), delta.Milliseconds())
+			glog.Warningf("track: remote track %s low is not active, last read was %d ms ago", delta.Milliseconds())
 			return false
 		}
 
