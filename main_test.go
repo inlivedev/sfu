@@ -11,8 +11,8 @@ import (
 var roomManager *Manager
 
 func TestMain(m *testing.M) {
-	// flag.Set("logtostderr", "true")
-	// flag.Set("stderrthreshold", "INFO")
+	flag.Set("logtostderr", "true")
+	flag.Set("stderrthreshold", "INFO")
 
 	flag.Parse()
 	ctx, cancel := context.WithCancel(context.Background())

@@ -192,6 +192,7 @@ Loop:
 		select {
 		case <-timeout.Done():
 			t.Fatal("timeout waiting for track added")
+			break Loop
 		case <-trackChan:
 			trackCount++
 			glog.Info("track added ", trackCount)

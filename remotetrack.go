@@ -11,7 +11,6 @@ import (
 	"github.com/golang/glog"
 	"github.com/pion/interceptor/pkg/stats"
 	"github.com/pion/rtp"
-	"github.com/pion/webrtc/v3"
 )
 
 type remoteTrack struct {
@@ -19,7 +18,6 @@ type remoteTrack struct {
 	cancel                context.CancelFunc
 	mu                    sync.Mutex
 	track                 IRemoteTrack
-	receiver              *webrtc.RTPReceiver
 	onReadCallbacks       []func(*rtp.Packet)
 	onPLI                 func() error
 	bitrate               *atomic.Uint32
@@ -32,14 +30,13 @@ type remoteTrack struct {
 	onStatsUpdated        func(*stats.Stats)
 }
 
-func newRemoteTrack(ctx context.Context, track IRemoteTrack, receiver *webrtc.RTPReceiver, pliInterval time.Duration, onPLI func() error, statsGetter stats.Getter, onStatsUpdated func(*stats.Stats)) *remoteTrack {
+func newRemoteTrack(ctx context.Context, track IRemoteTrack, pliInterval time.Duration, onPLI func() error, statsGetter stats.Getter, onStatsUpdated func(*stats.Stats)) *remoteTrack {
 	localctx, cancel := context.WithCancel(ctx)
 	rt := &remoteTrack{
 		context:               localctx,
 		cancel:                cancel,
 		mu:                    sync.Mutex{},
 		track:                 track,
-		receiver:              receiver,
 		bitrate:               &atomic.Uint32{},
 		previousBytesReceived: &atomic.Uint64{},
 		currentBytesReceived:  &atomic.Uint64{},

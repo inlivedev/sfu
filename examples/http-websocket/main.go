@@ -88,6 +88,7 @@ func main() {
 
 	// create new room
 	roomsOpts := sfu.DefaultRoomOptions()
+	roomsOpts.Bitrates.InitialBandwidth = 1_000_000
 	roomsOpts.PLIInterval = 3 * time.Second
 	roomsOpts.Codecs = []string{webrtc.MimeTypeVP9, webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
 	defaultRoom, _ := roomManager.NewRoom(roomID, roomName, sfu.RoomTypeLocal, roomsOpts)

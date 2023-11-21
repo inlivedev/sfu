@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/golang/glog"
+	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v3"
 	"golang.org/x/exp/slices"
 )
@@ -119,6 +120,7 @@ type SFU struct {
 	onTrackAvailableCallbacks []func(tracks []ITrack)
 	onClientRemovedCallbacks  []func(*Client)
 	onClientAddedCallbacks    []func(*Client)
+	relayTracks               map[string]ITrack
 }
 
 type PublishedTrack struct {
@@ -226,6 +228,11 @@ func (s *SFU) NewClient(id, name string, opts ClientOptions) *Client {
 					}
 				}
 
+				// add relay tracks
+				for _, track := range s.relayTracks {
+					availableTracks = append(availableTracks, track)
+				}
+
 				if len(availableTracks) > 0 {
 					client.onTracksAvailable(availableTracks)
 				}
@@ -296,6 +303,16 @@ func (s *SFU) NewClient(id, name string, opts ClientOptions) *Client {
 	s.addClient(client)
 
 	return client
+}
+
+func (s *SFU) AvailableTracks() []ITrack {
+	tracks := make([]ITrack, 0)
+
+	for _, client := range s.clients.GetClients() {
+		tracks = append(tracks, client.publishedTracks.GetTracks()...)
+	}
+
+	return tracks
 }
 
 // Syncs track from connected client to other clients
@@ -583,48 +600,42 @@ func (s *SFU) OnTracksAvailable(callback func(tracks []ITrack)) {
 	s.onTrackAvailableCallbacks = append(s.onTrackAvailableCallbacks, callback)
 }
 
-// func (s *SFU) AddRelayTrack(id, streamid, rid string, kind webrtc.RTPCodecType, ssrc webrtc.SSRC, mimeType string, rtpChan chan *rtp.Packet) error {
-// 	var track ITrack
+func (s *SFU) AddRelayTrack(ctx context.Context, id, streamid, rid, clientid string, kind webrtc.RTPCodecType, ssrc webrtc.SSRC, mimeType string, rtpChan chan *rtp.Packet) error {
+	var track ITrack
 
-// 	relayTrack := NewTrackRelay(id, streamid, rid, kind, ssrc, mimeType, rtpChan)
+	relayTrack := NewTrackRelay(id, streamid, rid, kind, ssrc, mimeType, rtpChan)
 
-// 	if rid == "" {
-// 		// not simulcast
-// 		track = newTrack(client, remoteTrack, receiver, vad)
-// 		if err := client.tracks.Add(track); err != nil {
-// 			glog.Error("client: error add track ", err)
-// 		}
+	onPLI := func() error {
+		return nil
+	}
 
-// 		client.onTrack(track)
-// 		track.SetAsProcessed()
-// 	} else {
-// 		// simulcast
-// 		var simulcast *simulcastTrack
-// 		var ok bool
+	if rid == "" {
+		// not simulcast
+		track = newTrack(ctx, clientid, relayTrack, s.pliInterval, onPLI, nil, nil)
+		s.mu.Lock()
+		s.relayTracks[relayTrack.ID()] = track
+		s.mu.Unlock()
+	} else {
+		// simulcast
+		var simulcast *SimulcastTrack
+		var ok bool
 
-// 		id := remoteTrack.ID()
+		s.mu.Lock()
+		track, ok := s.relayTracks[relayTrack.ID()]
+		if !ok {
+			// if track not found, add it
+			track = newSimulcastTrack(ctx, clientid, relayTrack, s.pliInterval, onPLI, nil, nil)
+			s.relayTracks[relayTrack.ID()] = track
 
-// 		track, err = client.tracks.Get(id) // not found because the track is not added yet due to race condition
+		} else if simulcast, ok = track.(*SimulcastTrack); ok {
+			simulcast.AddRemoteTrack(relayTrack, nil, nil)
+		}
+		s.mu.Unlock()
+	}
 
-// 		if err != nil {
-// 			// if track not found, add it
-// 			track = newSimulcastTrack(client, remoteTrack, receiver)
-// 			if err := client.tracks.Add(track); err != nil {
-// 				glog.Error("client: error add track ", err)
-// 			}
-// 		} else if simulcast, ok = track.(*simulcastTrack); ok {
-// 			simulcast.AddRemoteTrack(remoteTrack, receiver)
-// 		}
+	s.broadcastTracksToAutoSubscribeClients(clientid, []ITrack{track})
 
-// 		// // only process track when the highest quality is available
-// 		// simulcast.mu.Lock()
-// 		// isHighAvailable := simulcast.remoteTrackHigh != nil
-// 		// simulcast.mu.Unlock()
+	s.onTracksAvailable([]ITrack{track})
 
-// 		if !track.IsProcessed() {
-// 			client.onTrack(track)
-// 			track.SetAsProcessed()
-// 		}
-
-// 	}
-// }
+	return nil
+}

@@ -34,16 +34,13 @@ func (l *clientTrackList) Get(id string) iClientTrack {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	var track iClientTrack
-
 	for _, t := range l.tracks {
 		if t.ID() == id {
-			track = t
-			break
+			return t
 		}
 	}
 
-	return track
+	return nil
 }
 
 func (l *clientTrackList) Length() int {

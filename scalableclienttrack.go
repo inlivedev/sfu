@@ -83,7 +83,7 @@ type scaleabletClientTrack struct {
 	kind                  webrtc.RTPCodecType
 	mimeType              string
 	localTrack            *webrtc.TrackLocalStaticRTP
-	remoteTrack           *track
+	remoteTrack           *Track
 	sequenceNumber        uint16
 	lastQuality           QualityLevel
 	maxQuality            QualityLevel
