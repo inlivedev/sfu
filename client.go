@@ -389,6 +389,11 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 					<-ctx.Done()
 					client.stats.removeReceiverStats(remoteTrack.ID())
 				}()
+
+				if simulcast, ok = track.(*SimulcastTrack); !ok {
+					glog.Error("client: error track is not simulcast track")
+				}
+
 			} else if simulcast, ok = track.(*SimulcastTrack); ok {
 				simulcast.AddRemoteTrack(remoteTrack, client.statsGetter, onStatsUpdated)
 			}
