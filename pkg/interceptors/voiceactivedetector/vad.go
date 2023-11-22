@@ -3,6 +3,7 @@ package voiceactivedetector
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/pion/interceptor"
 	"github.com/pion/rtp"
@@ -63,9 +64,15 @@ func newVAD(ctx context.Context, i *Interceptor, streamInfo *interceptor.StreamI
 // once the tail margin close, stop send the packet.
 func (v *VoiceDetector) run() {
 	go func() {
+		ticker := time.NewTicker(500 * time.Millisecond)
 		ctx, cancel := context.WithCancel(v.context)
 		v.cancel = cancel
-		defer cancel()
+
+		defer func() {
+			ticker.Stop()
+			cancel()
+		}()
+
 		for {
 			select {
 			case <-ctx.Done():
@@ -73,24 +80,21 @@ func (v *VoiceDetector) run() {
 			case voicePacket := <-v.channel:
 				if v.isDetected(voicePacket) {
 					// send all packets to callback
-					v.sendPacketsToCallback()
-				} else {
-					// drop packets in queue if pass the head margin
-					v.dropExpiredPackets()
-
+					go v.sendPacketsToCallback()
 				}
+			case <-ticker.C:
+				go v.dropExpiredPackets()
 			}
 		}
 	}()
 }
 
 func (v *VoiceDetector) dropExpiredPackets() {
-	v.mu.Lock()
-	defer v.mu.Unlock()
-
 loop:
 	for {
+		v.mu.Lock()
 		if len(v.VoicePackets) == 0 {
+			v.mu.Unlock()
 			break loop
 		}
 
@@ -101,8 +105,10 @@ loop:
 			// drop packet
 			v.VoicePackets = v.VoicePackets[1:]
 		} else {
+			v.mu.Unlock()
 			break loop
 		}
+		v.mu.Unlock()
 	}
 }
 
@@ -125,7 +131,9 @@ func (v *VoiceDetector) sendPacketsToCallback() {
 	})
 
 	// clear packets
+	v.mu.Lock()
 	v.VoicePackets = make([]VoicePacketData, 0)
+	v.mu.Unlock()
 }
 
 func (v *VoiceDetector) getPackets() []VoicePacketData {

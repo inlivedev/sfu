@@ -66,7 +66,7 @@ func main() {
 
 	sfuOpts := sfu.DefaultOptions()
 	sfuOpts.EnableMux = false
-	sfuOpts.EnableBandwidthEstimator = false
+	sfuOpts.EnableBandwidthEstimator = true
 
 	_, turnEnabled := os.LookupEnv("TURN_ENABLED")
 	if turnEnabled {
