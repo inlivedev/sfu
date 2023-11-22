@@ -11,7 +11,7 @@ import (
 )
 
 func TestRoomDataChannel(t *testing.T) {
-	// t.Parallel()
+	t.Parallel()
 
 	roomID := roomManager.CreateRoomID()
 	roomName := "test-room"
@@ -22,6 +22,9 @@ func TestRoomDataChannel(t *testing.T) {
 	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal, roomOpts)
 	require.NoError(t, err, "error creating room: %v", err)
 	ctx := testRoom.sfu.context
+
+	err = testRoom.CreateDataChannel("chat", DefaultDataChannelOptions())
+	require.NoError(t, err)
 
 	pc1, client1, _ := CreateDataPair(ctx, testRoom, roomManager.options.IceServers, "peer1")
 	pc2, client2, _ := CreateDataPair(ctx, testRoom, roomManager.options.IceServers, "peer2")
@@ -74,9 +77,6 @@ func TestRoomDataChannel(t *testing.T) {
 
 	require.True(t, isConnected)
 
-	err = testRoom.CreateDataChannel("chat", DefaultDataChannelOptions())
-	require.NoError(t, err)
-
 	// make sure to return error on creating data channel with same label
 	err = testRoom.CreateDataChannel("chat", DefaultDataChannelOptions())
 	require.Error(t, err)
@@ -104,7 +104,7 @@ Loop:
 }
 
 func TestRoomDataChannelWithClientID(t *testing.T) {
-	// t.Parallel()
+	t.Parallel()
 
 	roomID := roomManager.CreateRoomID()
 	roomName := "test-room"
