@@ -90,7 +90,7 @@ func newTrack(ctx context.Context, clientID string, trackRemote IRemoteTrack, pl
 		onEndedCallbacks: make([]func(), 0),
 	}
 
-	onRead := func(p *rtp.Packet) {
+	onRead := func(p rtp.Packet) {
 		// do
 		tracks := t.base.clientTracks.GetTracks()
 		for _, track := range tracks {
@@ -278,13 +278,12 @@ func (t *Track) OnRead(callback func(rtp.Packet, QualityLevel)) {
 	t.onReadCallbacks = append(t.onReadCallbacks, callback)
 }
 
-func (t *Track) onRead(p *rtp.Packet, quality QualityLevel) {
+func (t *Track) onRead(p rtp.Packet, quality QualityLevel) {
 	// t.mu.Lock()
 	// defer t.mu.Unlock()
 
 	for _, callback := range t.onReadCallbacks {
-		pClone := *p
-		callback(pClone, quality)
+		callback(p, quality)
 	}
 }
 
@@ -427,7 +426,7 @@ func (t *SimulcastTrack) AddRemoteTrack(track IRemoteTrack, stats stats.Getter, 
 
 	quality := RIDToQuality(track.RID())
 
-	onRead := func(p *rtp.Packet) {
+	onRead := func(p rtp.Packet) {
 		// set the base timestamp for the track if it is not set yet
 		if t.baseTS == 0 {
 			t.baseTS = p.Timestamp
@@ -466,18 +465,18 @@ func (t *SimulcastTrack) AddRemoteTrack(track IRemoteTrack, stats stats.Getter, 
 		t.onRead(p, quality)
 	}
 
-	t.mu.Lock()
-
 	remoteTrack = newRemoteTrack(t.context, track, t.pliInterval, t.onPLI, stats, onStatsUpdated, onRead)
 
 	switch quality {
 	case QualityHigh:
+		t.mu.Lock()
 		t.remoteTrackHigh = remoteTrack
+		t.mu.Unlock()
 
 		remoteTrack.OnEnded(func() {
 			t.mu.Lock()
-			defer t.mu.Unlock()
 			t.remoteTrackHigh = nil
+			t.mu.Unlock()
 
 			if t.remoteTrackHigh == nil && t.remoteTrackMid == nil && t.remoteTrackLow == nil {
 				t.onEnded()
@@ -485,12 +484,14 @@ func (t *SimulcastTrack) AddRemoteTrack(track IRemoteTrack, stats stats.Getter, 
 		})
 
 	case QualityMid:
+		t.mu.Lock()
 		t.remoteTrackMid = remoteTrack
+		t.mu.Unlock()
 
 		remoteTrack.OnEnded(func() {
 			t.mu.Lock()
-			defer t.mu.Unlock()
 			t.remoteTrackMid = nil
+			t.mu.Unlock()
 
 			if t.remoteTrackHigh == nil && t.remoteTrackMid == nil && t.remoteTrackLow == nil {
 				t.onEnded()
@@ -498,11 +499,14 @@ func (t *SimulcastTrack) AddRemoteTrack(track IRemoteTrack, stats stats.Getter, 
 		})
 
 	case QualityLow:
+		t.mu.Lock()
 		t.remoteTrackLow = remoteTrack
+		t.mu.Unlock()
+
 		remoteTrack.OnEnded(func() {
 			t.mu.Lock()
-			defer t.mu.Unlock()
 			t.remoteTrackLow = nil
+			t.mu.Unlock()
 
 			if t.remoteTrackHigh == nil && t.remoteTrackMid == nil && t.remoteTrackLow == nil {
 				t.onEnded()
@@ -517,8 +521,6 @@ func (t *SimulcastTrack) AddRemoteTrack(track IRemoteTrack, stats stats.Getter, 
 	if t.remoteTrackHigh != nil && t.remoteTrackMid != nil && t.remoteTrackLow != nil {
 		t.onTrackComplete()
 	}
-
-	t.mu.Unlock()
 
 	t.onRemoteTrackAddedCallbacks(remoteTrack)
 
@@ -751,12 +753,9 @@ func (t *SimulcastTrack) OnRead(callback func(rtp.Packet, QualityLevel)) {
 	t.onReadCallbacks = append(t.onReadCallbacks, callback)
 }
 
-func (t *SimulcastTrack) onRead(p *rtp.Packet, quality QualityLevel) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
+func (t *SimulcastTrack) onRead(p rtp.Packet, quality QualityLevel) {
 	for _, callback := range t.onReadCallbacks {
-		callback(*p, quality)
+		callback(p, quality)
 	}
 }
 

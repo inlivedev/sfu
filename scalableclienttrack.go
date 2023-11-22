@@ -106,11 +106,11 @@ func (t *scaleableClientTrack) Client() *Client {
 	return t.client
 }
 
-func (t *scaleableClientTrack) writeRTP(p *rtp.Packet) {
+func (t *scaleableClientTrack) writeRTP(p rtp.Packet) {
 	t.lastTimestamp = p.Timestamp
 	t.sequenceNumber = p.SequenceNumber
 
-	if err := t.localTrack.WriteRTP(p); err != nil {
+	if err := t.localTrack.WriteRTP(&p); err != nil {
 		glog.Error("track: error on write rtp", err)
 	}
 }
@@ -136,7 +136,7 @@ func (t *scaleableClientTrack) isKeyframe(vp9 *codecs.VP9Packet) bool {
 
 // this where the temporal and spatial layers are will be decided to be sent to the client or not
 // compare it with the claimed quality to decide if the packet should be sent or not
-func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
+func (t *scaleableClientTrack) push(p rtp.Packet, _ QualityLevel) {
 	var qualityPreset IQualityPreset
 
 	vp9Packet := &codecs.VP9Packet{}
@@ -211,7 +211,7 @@ func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 	t.send(p)
 }
 
-func (t *scaleableClientTrack) send(p *rtp.Packet) {
+func (t *scaleableClientTrack) send(p rtp.Packet) {
 	p.SequenceNumber = p.SequenceNumber - t.dropCounter
 	t.writeRTP(p)
 }
