@@ -55,17 +55,8 @@ func newRemoteTrack(ctx context.Context, track IRemoteTrack, pliInterval time.Du
 	return rt
 }
 
-func (t *remoteTrack) OnEnded(f func()) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	t.onEndedCallbacks = append(t.onEndedCallbacks, f)
-}
-
-func (t *remoteTrack) onEnded() {
-	for _, f := range t.onEndedCallbacks {
-		f()
-	}
+func (t *remoteTrack) Context() context.Context {
+	return t.context
 }
 
 func (t *remoteTrack) readRTP() {
@@ -80,8 +71,6 @@ func (t *remoteTrack) readRTP() {
 			default:
 				rtp, _, readErr := t.track.ReadRTP()
 				if readErr == io.EOF {
-					t.onEnded()
-
 					return
 				} else if readErr != nil {
 					glog.Error("error reading rtp: ", readErr.Error())

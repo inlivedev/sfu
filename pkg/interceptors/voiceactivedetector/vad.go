@@ -34,7 +34,7 @@ type VoiceDetector struct {
 	startDetected  uint32
 	lastDetectedTS uint32
 	channel        chan VoicePacketData
-	mu             sync.Mutex
+	mu             sync.RWMutex
 	VoicePackets   []VoicePacketData
 	callbacks      []func(activity VoiceActivity)
 }
@@ -45,7 +45,7 @@ func newVAD(ctx context.Context, i *Interceptor, streamInfo *interceptor.StreamI
 		interceptor:  i,
 		streamInfo:   streamInfo,
 		channel:      make(chan VoicePacketData),
-		mu:           sync.Mutex{},
+		mu:           sync.RWMutex{},
 		VoicePackets: make([]VoicePacketData, 0),
 		callbacks:    make([]func(VoiceActivity), 0),
 	}
@@ -80,7 +80,7 @@ func (v *VoiceDetector) run() {
 			case voicePacket := <-v.channel:
 				if v.isDetected(voicePacket) {
 					// send all packets to callback
-					go v.sendPacketsToCallback()
+					v.sendPacketsToCallback()
 				}
 			case <-ticker.C:
 				go v.dropExpiredPackets()
@@ -131,14 +131,14 @@ func (v *VoiceDetector) sendPacketsToCallback() {
 	})
 
 	// clear packets
-	v.mu.Lock()
+	v.mu.RLock()
 	v.VoicePackets = make([]VoicePacketData, 0)
-	v.mu.Unlock()
+	v.mu.RUnlock()
 }
 
 func (v *VoiceDetector) getPackets() []VoicePacketData {
-	v.mu.Lock()
-	defer v.mu.Unlock()
+	v.mu.RLock()
+	defer v.mu.RUnlock()
 	packets := make([]VoicePacketData, 0)
 	packets = append(packets, v.VoicePackets...)
 
@@ -152,13 +152,15 @@ func (v *VoiceDetector) onVoiceDetected(activity VoiceActivity) {
 }
 
 func (v *VoiceDetector) OnVoiceDetected(callback func(VoiceActivity)) {
-	v.mu.Lock()
-	defer v.mu.Unlock()
+	v.mu.RLock()
+	defer v.mu.RUnlock()
 	v.callbacks = append(v.callbacks, callback)
 }
 
 func (v *VoiceDetector) isDetected(vp VoicePacketData) bool {
+	v.mu.RLock()
 	v.VoicePackets = append(v.VoicePackets, vp)
+	v.mu.RUnlock()
 
 	clockRate := v.streamInfo.ClockRate
 
@@ -215,9 +217,6 @@ func (v *VoiceDetector) isDetected(vp VoicePacketData) bool {
 }
 
 func (v *VoiceDetector) addPacket(header *rtp.Header, audioLevel uint8) {
-	v.mu.Lock()
-	defer v.mu.Unlock()
-
 	v.channel <- VoicePacketData{
 		SequenceNo: header.SequenceNumber,
 		Timestamp:  header.Timestamp,
@@ -226,23 +225,20 @@ func (v *VoiceDetector) addPacket(header *rtp.Header, audioLevel uint8) {
 }
 
 func (v *VoiceDetector) UpdateTrack(trackID, streamID string) {
-	v.mu.Lock()
-	defer v.mu.Unlock()
+	v.mu.RLock()
+	defer v.mu.RUnlock()
 
 	v.trackID = trackID
 	v.streamID = streamID
 }
 
 func (v *VoiceDetector) Stop() {
-	v.mu.Lock()
-	defer v.mu.Unlock()
-
 	v.cancel()
 }
 
 func (v *VoiceDetector) updateStreamInfo(streamInfo *interceptor.StreamInfo) {
-	v.mu.Lock()
-	defer v.mu.Unlock()
+	v.mu.RLock()
+	defer v.mu.RUnlock()
 
 	v.streamInfo = streamInfo
 	if streamInfo.ID != "" {

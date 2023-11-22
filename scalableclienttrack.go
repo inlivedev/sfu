@@ -1,6 +1,7 @@
 package sfu
 
 import (
+	"context"
 	"sync"
 
 	"github.com/golang/glog"
@@ -78,6 +79,8 @@ func DefaultQualityPreset() QualityPreset {
 
 type scaleableClientTrack struct {
 	id                    string
+	context               context.Context
+	cancel                context.CancelFunc
 	mu                    sync.RWMutex
 	client                *Client
 	kind                  webrtc.RTPCodecType
@@ -104,6 +107,10 @@ func (t *scaleableClientTrack) Client() *Client {
 	defer t.mu.Unlock()
 
 	return t.client
+}
+
+func (t *scaleableClientTrack) Context() context.Context {
+	return t.context
 }
 
 func (t *scaleableClientTrack) writeRTP(p rtp.Packet) {

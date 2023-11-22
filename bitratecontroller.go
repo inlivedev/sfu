@@ -332,10 +332,16 @@ func (bc *bitrateController) addClaim(clientTrack iClientTrack, quality QualityL
 		bitrate:   bitrate,
 	}
 
-	clientTrack.OnTrackEnded(func() {
+	go func() {
+		ctx, cancel := context.WithCancel(clientTrack.Context())
+		defer cancel()
+		<-ctx.Done()
 		bc.removeClaim(clientTrack.ID())
+		if bc.client.IsDebugEnabled() {
+			glog.Info("clienttrack: track ", clientTrack.ID(), " claim removed")
+		}
 		clientTrack.Client().stats.removeSenderStats(clientTrack.ID())
-	})
+	}()
 
 	return bc.claims[clientTrack.ID()], nil
 }
@@ -345,6 +351,7 @@ func (bc *bitrateController) removeClaim(id string) {
 	defer bc.mu.Unlock()
 
 	if _, ok := bc.claims[id]; !ok {
+		glog.Error("bitrate: track ", id, " is not exists")
 		return
 	}
 

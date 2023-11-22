@@ -352,9 +352,12 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 
 			track = newTrack(client.context, client.id, remoteTrack, s.pliInterval, onPLI, client.statsGetter, onStatsUpdated)
 
-			track.OnEnded(func() {
+			go func() {
+				ctx, cancel := context.WithCancel(track.Context())
+				defer cancel()
+				<-ctx.Done()
 				client.stats.removeReceiverStats(remoteTrack.ID())
-			})
+			}()
 
 			if err := client.tracks.Add(track); err != nil {
 				glog.Error("client: error add track ", err)
@@ -378,9 +381,12 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 					glog.Error("client: error add track ", err)
 				}
 
-				track.OnEnded(func() {
+				go func() {
+					ctx, cancel := context.WithCancel(track.Context())
+					defer cancel()
+					<-ctx.Done()
 					client.stats.removeReceiverStats(remoteTrack.ID())
-				})
+				}()
 			} else if simulcast, ok = track.(*SimulcastTrack); ok {
 				simulcast.AddRemoteTrack(remoteTrack, client.statsGetter, onStatsUpdated)
 			}
@@ -697,7 +703,12 @@ func (c *Client) setClientTrack(t ITrack) iClientTrack {
 		return nil
 	}
 
-	t.OnEnded(func() {
+	go func() {
+		ctx, cancel := context.WithCancel(outputTrack.Context())
+		defer cancel()
+
+		<-ctx.Done()
+
 		if c == nil {
 			return
 		}
@@ -720,7 +731,7 @@ func (c *Client) setClientTrack(t ITrack) iClientTrack {
 		}
 
 		c.renegotiate()
-	})
+	}()
 
 	// enable RTCP report and stats
 	c.enableReportAndStats(transc.Sender(), outputTrack)

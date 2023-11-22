@@ -1,6 +1,7 @@
 package sfu
 
 import (
+	"context"
 	"sync"
 	"sync/atomic"
 
@@ -12,14 +13,13 @@ import (
 type iClientTrack interface {
 	push(rtp rtp.Packet, quality QualityLevel)
 	ID() string
+	Context() context.Context
 	Kind() webrtc.RTPCodecType
 	LocalTrack() *webrtc.TrackLocalStaticRTP
 	IsScreen() bool
 	IsSimulcast() bool
 	IsScaleable() bool
 	SetSourceType(TrackType)
-	OnTrackEnded(func())
-	onTrackEnded()
 	Client() *Client
 	RequestPLI()
 	SetMaxQuality(quality QualityLevel)
@@ -27,19 +27,24 @@ type iClientTrack interface {
 }
 
 type clientTrack struct {
-	id                    string
-	mu                    sync.RWMutex
-	client                *Client
-	kind                  webrtc.RTPCodecType
-	mimeType              string
-	localTrack            *webrtc.TrackLocalStaticRTP
-	remoteTrack           *remoteTrack
-	isScreen              *atomic.Bool
-	onTrackEndedCallbacks []func()
+	id          string
+	context     context.Context
+	cancel      context.CancelFunc
+	mu          sync.RWMutex
+	client      *Client
+	kind        webrtc.RTPCodecType
+	mimeType    string
+	localTrack  *webrtc.TrackLocalStaticRTP
+	remoteTrack *remoteTrack
+	isScreen    *atomic.Bool
 }
 
 func (t *clientTrack) ID() string {
 	return t.id
+}
+
+func (t *clientTrack) Context() context.Context {
+	return t.context
 }
 
 func (t *clientTrack) Client() *Client {
@@ -74,22 +79,6 @@ func (t *clientTrack) IsScreen() bool {
 
 func (t *clientTrack) SetSourceType(sourceType TrackType) {
 	t.isScreen.Store(sourceType == TrackTypeScreen)
-}
-
-func (t *clientTrack) OnTrackEnded(callback func()) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	t.onTrackEndedCallbacks = append(t.onTrackEndedCallbacks, callback)
-}
-
-func (t *clientTrack) onTrackEnded() {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	for _, callback := range t.onTrackEndedCallbacks {
-		callback()
-	}
 }
 
 func (t *clientTrack) IsSimulcast() bool {

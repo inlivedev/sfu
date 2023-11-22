@@ -1,6 +1,7 @@
 package sfu
 
 import (
+	"context"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -14,6 +15,8 @@ type simulcastClientTrack struct {
 	id                      string
 	mu                      sync.RWMutex
 	client                  *Client
+	context                 context.Context
+	cancel                  context.CancelFunc
 	kind                    webrtc.RTPCodecType
 	mimeType                string
 	localTrack              *webrtc.TrackLocalStaticRTP
@@ -32,6 +35,10 @@ type simulcastClientTrack struct {
 
 func (t *simulcastClientTrack) Client() *Client {
 	return t.client
+}
+
+func (t *simulcastClientTrack) Context() context.Context {
+	return t.context
 }
 
 func (t *simulcastClientTrack) isFirstKeyframePacket(p rtp.Packet) bool {

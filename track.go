@@ -56,12 +56,13 @@ type ITrack interface {
 	Kind() webrtc.RTPCodecType
 	MimeType() string
 	TotalTracks() int
-	OnEnded(func())
-	onEnded()
+	Context() context.Context
 	Relay(func(webrtc.SSRC, rtp.Packet))
 }
 
 type Track struct {
+	context          context.Context
+	cancel           context.CancelFunc
 	mu               sync.Mutex
 	base             baseTrack
 	remoteTrack      *remoteTrack
@@ -71,6 +72,8 @@ type Track struct {
 
 func newTrack(ctx context.Context, clientID string, trackRemote IRemoteTrack, pliInterval time.Duration, onPLI func() error, stats stats.Getter, onStatsUpdated func(*stats.Stats)) ITrack {
 	ctList := newClientTrackList()
+
+	localCtx, cancel := context.WithCancel(ctx)
 
 	baseTrack := baseTrack{
 		id:           trackRemote.ID(),
@@ -85,6 +88,8 @@ func newTrack(ctx context.Context, clientID string, trackRemote IRemoteTrack, pl
 
 	t := &Track{
 		mu:               sync.Mutex{},
+		context:          localCtx,
+		cancel:           cancel,
 		base:             baseTrack,
 		onReadCallbacks:  make([]func(rtp.Packet, QualityLevel), 0),
 		onEndedCallbacks: make([]func(), 0),
@@ -100,17 +105,17 @@ func newTrack(ctx context.Context, clientID string, trackRemote IRemoteTrack, pl
 		t.onRead(p, QualityHigh)
 	}
 
-	t.remoteTrack = newRemoteTrack(ctx, trackRemote, pliInterval, onPLI, stats, onStatsUpdated, onRead)
-
-	t.remoteTrack.OnEnded(func() {
-		t.onEnded()
-	})
+	t.remoteTrack = newRemoteTrack(localCtx, trackRemote, pliInterval, onPLI, stats, onStatsUpdated, onRead)
 
 	return t
 }
 
 func (t *Track) ClientID() string {
 	return t.base.clientid
+}
+
+func (t *Track) Context() context.Context {
+	return t.context
 }
 
 func (t *Track) createLocalTrack() *webrtc.TrackLocalStaticRTP {
@@ -187,8 +192,12 @@ func (t *Track) TotalTracks() int {
 func (t *Track) subscribe(c *Client) iClientTrack {
 	var ct iClientTrack
 
+	ctx, cancel := context.WithCancel(t.Context())
+
 	if t.MimeType() == webrtc.MimeTypeVP9 {
 		ct = &scaleableClientTrack{
+			context:               ctx,
+			cancel:                cancel,
 			mu:                    sync.RWMutex{},
 			id:                    t.base.id,
 			kind:                  t.base.kind,
@@ -207,15 +216,16 @@ func (t *Track) subscribe(c *Client) iClientTrack {
 		isScreen.Store(t.IsScreen())
 
 		ct = &clientTrack{
-			id:                    t.base.id,
-			mu:                    sync.RWMutex{},
-			client:                c,
-			kind:                  t.base.kind,
-			mimeType:              t.remoteTrack.track.Codec().MimeType,
-			localTrack:            t.createLocalTrack(),
-			remoteTrack:           t.remoteTrack,
-			isScreen:              isScreen,
-			onTrackEndedCallbacks: make([]func(), 0),
+			id:          t.base.id,
+			context:     ctx,
+			cancel:      cancel,
+			mu:          sync.RWMutex{},
+			client:      c,
+			kind:        t.base.kind,
+			mimeType:    t.remoteTrack.track.Codec().MimeType,
+			localTrack:  t.createLocalTrack(),
+			remoteTrack: t.remoteTrack,
+			isScreen:    isScreen,
 		}
 	}
 
@@ -228,15 +238,9 @@ func (t *Track) subscribe(c *Client) iClientTrack {
 		})
 	}
 
-	t.remoteTrack.OnEnded(func() {
-		ct.onTrackEnded()
-	})
-
 	go func() {
-		clientCtx, cancel := context.WithCancel(c.context)
 		defer cancel()
-		<-clientCtx.Done()
-		ct.onTrackEnded()
+		<-ctx.Done()
 	}()
 
 	t.base.clientTracks.Add(ct)
@@ -253,22 +257,6 @@ func (t *Track) SetAsProcessed() {
 	defer t.mu.Unlock()
 
 	t.base.isProcessed = true
-}
-
-func (t *Track) onEnded() {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	for _, callback := range t.onEndedCallbacks {
-		callback()
-	}
-}
-
-func (t *Track) OnEnded(callback func()) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	t.onEndedCallbacks = append(t.onEndedCallbacks, callback)
 }
 
 func (t *Track) OnRead(callback func(rtp.Packet, QualityLevel)) {
@@ -318,7 +306,6 @@ type SimulcastTrack struct {
 	lastMidKeyframeTS           *atomic.Int64
 	lastLowKeyframeTS           *atomic.Int64
 	onAddedRemoteTrackCallbacks []func(*remoteTrack)
-	onEndedCallbacks            []func()
 	onReadCallbacks             []func(rtp.Packet, QualityLevel)
 	pliInterval                 time.Duration
 	onPLI                       func() error
@@ -346,7 +333,6 @@ func newSimulcastTrack(ctx context.Context, clientid string, track IRemoteTrack,
 		lastLowKeyframeTS:           &atomic.Int64{},
 		onTrackCompleteCallbacks:    make([]func(), 0),
 		onAddedRemoteTrackCallbacks: make([]func(*remoteTrack), 0),
-		onEndedCallbacks:            make([]func(), 0),
 		onReadCallbacks:             make([]func(rtp.Packet, QualityLevel), 0),
 		pliInterval:                 pliInterval,
 		onPLI:                       onPLI,
@@ -359,6 +345,10 @@ func newSimulcastTrack(ctx context.Context, clientid string, track IRemoteTrack,
 
 func (t *SimulcastTrack) ClientID() string {
 	return t.base.clientid
+}
+
+func (t *SimulcastTrack) Context() context.Context {
+	return t.context
 }
 
 func (t *SimulcastTrack) onRemoteTrackAdded(f func(*remoteTrack)) {
@@ -473,45 +463,42 @@ func (t *SimulcastTrack) AddRemoteTrack(track IRemoteTrack, stats stats.Getter, 
 		t.remoteTrackHigh = remoteTrack
 		t.mu.Unlock()
 
-		remoteTrack.OnEnded(func() {
+		go func() {
+			ctx, cancel := context.WithCancel(remoteTrack.Context())
+			defer cancel()
+			<-ctx.Done()
 			t.mu.Lock()
 			t.remoteTrackHigh = nil
 			t.mu.Unlock()
-
-			if t.remoteTrackHigh == nil && t.remoteTrackMid == nil && t.remoteTrackLow == nil {
-				t.onEnded()
-			}
-		})
+		}()
 
 	case QualityMid:
 		t.mu.Lock()
 		t.remoteTrackMid = remoteTrack
 		t.mu.Unlock()
 
-		remoteTrack.OnEnded(func() {
+		go func() {
+			ctx, cancel := context.WithCancel(remoteTrack.Context())
+			defer cancel()
+			<-ctx.Done()
 			t.mu.Lock()
 			t.remoteTrackMid = nil
 			t.mu.Unlock()
-
-			if t.remoteTrackHigh == nil && t.remoteTrackMid == nil && t.remoteTrackLow == nil {
-				t.onEnded()
-			}
-		})
+		}()
 
 	case QualityLow:
 		t.mu.Lock()
 		t.remoteTrackLow = remoteTrack
 		t.mu.Unlock()
 
-		remoteTrack.OnEnded(func() {
+		go func() {
+			ctx, cancel := context.WithCancel(remoteTrack.Context())
+			defer cancel()
+			<-ctx.Done()
 			t.mu.Lock()
 			t.remoteTrackLow = nil
 			t.mu.Unlock()
-
-			if t.remoteTrackHigh == nil && t.remoteTrackMid == nil && t.remoteTrackLow == nil {
-				t.onEnded()
-			}
-		})
+		}()
 	default:
 		glog.Warning("client: unknown track quality ", track.RID())
 		return nil
@@ -559,9 +546,13 @@ func (t *SimulcastTrack) subscribe(client *Client) iClientTrack {
 
 	lastTimestamp := &atomic.Uint32{}
 
+	ctx, cancel := context.WithCancel(t.Context())
+
 	ct := &simulcastClientTrack{
 		mu:                      sync.RWMutex{},
 		id:                      t.base.id,
+		context:                 ctx,
+		cancel:                  cancel,
 		kind:                    t.base.kind,
 		mimeType:                t.base.codec.MimeType,
 		client:                  client,
@@ -581,29 +572,10 @@ func (t *SimulcastTrack) subscribe(client *Client) iClientTrack {
 
 	ct.SetMaxQuality(QualityHigh)
 
-	if t.remoteTrackLow != nil {
-		t.remoteTrackLow.OnEnded(func() {
-			ct.onTrackEnded()
-		})
-	}
-
 	go func() {
-		clientCtx, cancel := context.WithCancel(client.context)
 		defer cancel()
-		<-clientCtx.Done()
-		ct.onTrackEnded()
+		<-ctx.Done()
 	}()
-
-	if t.remoteTrackMid != nil {
-		t.remoteTrackMid.OnEnded(func() {
-			ct.onTrackEnded()
-		})
-	}
-	if t.remoteTrackHigh != nil {
-		t.remoteTrackHigh.OnEnded(func() {
-			ct.onTrackEnded()
-		})
-	}
 
 	t.base.clientTracks.Add(ct)
 
@@ -730,22 +702,6 @@ func (t *SimulcastTrack) MimeType() string {
 	return t.base.codec.MimeType
 }
 
-func (t *SimulcastTrack) OnEnded(f func()) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	t.onEndedCallbacks = append(t.onEndedCallbacks, f)
-}
-
-func (t *SimulcastTrack) onEnded() {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	for _, callback := range t.onEndedCallbacks {
-		callback()
-	}
-}
-
 func (t *SimulcastTrack) OnRead(callback func(rtp.Packet, QualityLevel)) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -850,9 +806,12 @@ func (t *trackList) Add(track ITrack) error {
 
 	t.tracks[id] = track
 
-	track.OnEnded(func() {
+	go func() {
+		ctx, cancel := context.WithCancel(track.Context())
+		defer cancel()
+		<-ctx.Done()
 		t.remove([]string{id})
-	})
+	}()
 
 	return nil
 }
