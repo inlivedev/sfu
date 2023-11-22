@@ -187,7 +187,7 @@ func (t *Track) subscribe(c *Client) iClientTrack {
 	var ct iClientTrack
 
 	if t.MimeType() == webrtc.MimeTypeVP9 {
-		ct = &scaleabletClientTrack{
+		ct = &scaleableClientTrack{
 			mu:                    sync.RWMutex{},
 			id:                    t.base.id,
 			kind:                  t.base.kind,

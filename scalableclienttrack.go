@@ -76,7 +76,7 @@ func DefaultQualityPreset() QualityPreset {
 	}
 }
 
-type scaleabletClientTrack struct {
+type scaleableClientTrack struct {
 	id                    string
 	mu                    sync.RWMutex
 	client                *Client
@@ -99,14 +99,14 @@ type scaleabletClientTrack struct {
 	qualityPreset         QualityPreset
 }
 
-func (t *scaleabletClientTrack) Client() *Client {
+func (t *scaleableClientTrack) Client() *Client {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	return t.client
 }
 
-func (t *scaleabletClientTrack) writeRTP(p *rtp.Packet) {
+func (t *scaleableClientTrack) writeRTP(p *rtp.Packet) {
 	t.lastTimestamp = p.Timestamp
 	t.sequenceNumber = p.SequenceNumber
 
@@ -115,7 +115,7 @@ func (t *scaleabletClientTrack) writeRTP(p *rtp.Packet) {
 	}
 }
 
-func (t *scaleabletClientTrack) isKeyframe(vp9 *codecs.VP9Packet) bool {
+func (t *scaleableClientTrack) isKeyframe(vp9 *codecs.VP9Packet) bool {
 	if len(vp9.Payload) < 1 {
 		return false
 	}
@@ -136,7 +136,7 @@ func (t *scaleabletClientTrack) isKeyframe(vp9 *codecs.VP9Packet) bool {
 
 // this where the temporal and spatial layers are will be decided to be sent to the client or not
 // compare it with the claimed quality to decide if the packet should be sent or not
-func (t *scaleabletClientTrack) push(p *rtp.Packet, _ QualityLevel) {
+func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 	var qualityPreset IQualityPreset
 
 	vp9Packet := &codecs.VP9Packet{}
@@ -211,16 +211,16 @@ func (t *scaleabletClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 	t.send(p)
 }
 
-func (t *scaleabletClientTrack) send(p *rtp.Packet) {
+func (t *scaleableClientTrack) send(p *rtp.Packet) {
 	p.SequenceNumber = p.SequenceNumber - t.dropCounter
 	t.writeRTP(p)
 }
 
-func (t *scaleabletClientTrack) RemoteTrack() *remoteTrack {
+func (t *scaleableClientTrack) RemoteTrack() *remoteTrack {
 	return t.remoteTrack.remoteTrack
 }
 
-func (t *scaleabletClientTrack) getCurrentBitrate() uint32 {
+func (t *scaleableClientTrack) getCurrentBitrate() uint32 {
 	currentTrack := t.RemoteTrack()
 	if currentTrack == nil {
 		return 0
@@ -229,47 +229,47 @@ func (t *scaleabletClientTrack) getCurrentBitrate() uint32 {
 	return currentTrack.GetCurrentBitrate()
 }
 
-func (t *scaleabletClientTrack) ID() string {
+func (t *scaleableClientTrack) ID() string {
 	return t.id
 }
 
-func (t *scaleabletClientTrack) Kind() webrtc.RTPCodecType {
+func (t *scaleableClientTrack) Kind() webrtc.RTPCodecType {
 	return t.kind
 }
 
-func (t *scaleabletClientTrack) LocalTrack() *webrtc.TrackLocalStaticRTP {
+func (t *scaleableClientTrack) LocalTrack() *webrtc.TrackLocalStaticRTP {
 	return t.localTrack
 }
 
-func (t *scaleabletClientTrack) IsScreen() bool {
+func (t *scaleableClientTrack) IsScreen() bool {
 	return t.isScreen
 }
 
-func (t *scaleabletClientTrack) SetSourceType(sourceType TrackType) {
+func (t *scaleableClientTrack) SetSourceType(sourceType TrackType) {
 	t.isScreen = (sourceType == TrackTypeScreen)
 }
 
-func (t *scaleabletClientTrack) SetLastQuality(quality QualityLevel) {
+func (t *scaleableClientTrack) SetLastQuality(quality QualityLevel) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	t.lastQuality = quality
 }
 
-func (t *scaleabletClientTrack) LastQuality() QualityLevel {
+func (t *scaleableClientTrack) LastQuality() QualityLevel {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return QualityLevel(t.lastQuality)
 }
 
-func (t *scaleabletClientTrack) OnTrackEnded(callback func()) {
+func (t *scaleableClientTrack) OnTrackEnded(callback func()) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	t.onTrackEndedCallbacks = append(t.onTrackEndedCallbacks, callback)
 }
 
-func (t *scaleabletClientTrack) onTrackEnded() {
+func (t *scaleableClientTrack) onTrackEnded() {
 	if t.isEnded {
 		return
 	}
@@ -281,33 +281,33 @@ func (t *scaleabletClientTrack) onTrackEnded() {
 	t.isEnded = true
 }
 
-func (t *scaleabletClientTrack) SetMaxQuality(quality QualityLevel) {
+func (t *scaleableClientTrack) SetMaxQuality(quality QualityLevel) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	t.maxQuality = quality
 }
 
-func (t *scaleabletClientTrack) MaxQuality() QualityLevel {
+func (t *scaleableClientTrack) MaxQuality() QualityLevel {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	return t.maxQuality
 }
 
-func (t *scaleabletClientTrack) IsSimulcast() bool {
+func (t *scaleableClientTrack) IsSimulcast() bool {
 	return false
 }
 
-func (t *scaleabletClientTrack) IsScaleable() bool {
+func (t *scaleableClientTrack) IsScaleable() bool {
 	return true
 }
 
-func (t *scaleabletClientTrack) RequestPLI() {
+func (t *scaleableClientTrack) RequestPLI() {
 	t.remoteTrack.remoteTrack.sendPLI()
 }
 
-func (t *scaleabletClientTrack) getQuality() QualityLevel {
+func (t *scaleableClientTrack) getQuality() QualityLevel {
 	claim := t.client.bitrateController.GetClaim(t.ID())
 
 	if claim == nil {
