@@ -1,6 +1,9 @@
 package sfu
 
-import "sync"
+import (
+	"context"
+	"sync"
+)
 
 type clientTrackList struct {
 	mu     sync.RWMutex
@@ -11,9 +14,12 @@ func (l *clientTrackList) Add(track iClientTrack) {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 
-	track.OnTrackEnded(func() {
+	go func() {
+		ctx, cancel := context.WithCancel(track.Context())
+		defer cancel()
+		<-ctx.Done()
 		l.remove(track.ID())
-	})
+	}()
 
 	l.tracks = append(l.tracks, track)
 }
@@ -34,16 +40,13 @@ func (l *clientTrackList) Get(id string) iClientTrack {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	var track iClientTrack
-
 	for _, t := range l.tracks {
 		if t.ID() == id {
-			track = t
-			break
+			return t
 		}
 	}
 
-	return track
+	return nil
 }
 
 func (l *clientTrackList) Length() int {

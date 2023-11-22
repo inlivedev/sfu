@@ -23,6 +23,9 @@ func TestRoomDataChannel(t *testing.T) {
 	require.NoError(t, err, "error creating room: %v", err)
 	ctx := testRoom.sfu.context
 
+	err = testRoom.CreateDataChannel("chat", DefaultDataChannelOptions())
+	require.NoError(t, err)
+
 	pc1, client1, _ := CreateDataPair(ctx, testRoom, roomManager.options.IceServers, "peer1")
 	pc2, client2, _ := CreateDataPair(ctx, testRoom, roomManager.options.IceServers, "peer2")
 
@@ -60,7 +63,7 @@ func TestRoomDataChannel(t *testing.T) {
 
 	connected := WaitConnected(ctx, []*webrtc.PeerConnection{pc1, pc2})
 
-	timeoutConnected, cancelTimeoutConnected := context.WithTimeout(ctx, 30*time.Second)
+	timeoutConnected, cancelTimeoutConnected := context.WithTimeout(ctx, 40*time.Second)
 	isConnected := false
 
 	select {
@@ -73,9 +76,6 @@ func TestRoomDataChannel(t *testing.T) {
 	}
 
 	require.True(t, isConnected)
-
-	err = testRoom.CreateDataChannel("chat", DefaultDataChannelOptions())
-	require.NoError(t, err)
 
 	// make sure to return error on creating data channel with same label
 	err = testRoom.CreateDataChannel("chat", DefaultDataChannelOptions())

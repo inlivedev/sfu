@@ -10,64 +10,53 @@ import (
 
 	"github.com/golang/glog"
 	"github.com/pion/interceptor/pkg/stats"
-	"github.com/pion/rtcp"
 	"github.com/pion/rtp"
-	"github.com/pion/webrtc/v3"
 )
 
 type remoteTrack struct {
-	client                *Client
 	context               context.Context
 	cancel                context.CancelFunc
 	mu                    sync.Mutex
-	track                 *webrtc.TrackRemote
-	receiver              *webrtc.RTPReceiver
-	onRead                func(*rtp.Packet)
+	track                 IRemoteTrack
+	onRead                func(rtp.Packet)
+	onPLI                 func() error
 	bitrate               *atomic.Uint32
 	previousBytesReceived *atomic.Uint64
 	currentBytesReceived  *atomic.Uint64
 	latestUpdatedTS       *atomic.Uint64
 	lastPLIRequestTime    time.Time
 	onEndedCallbacks      []func()
-	stats                 stats.Stats
+	statsGetter           stats.Getter
+	onStatsUpdated        func(*stats.Stats)
 }
 
-func newRemoteTrack(client *Client, track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver, onRead func(*rtp.Packet)) *remoteTrack {
-	ctx, cancel := context.WithCancel(client.context)
+func newRemoteTrack(ctx context.Context, track IRemoteTrack, pliInterval time.Duration, onPLI func() error, statsGetter stats.Getter, onStatsUpdated func(*stats.Stats), onRead func(rtp.Packet)) *remoteTrack {
+	localctx, cancel := context.WithCancel(ctx)
 	rt := &remoteTrack{
-		context:               ctx,
+		context:               localctx,
 		cancel:                cancel,
-		client:                client,
 		mu:                    sync.Mutex{},
 		track:                 track,
-		receiver:              receiver,
-		onRead:                onRead,
 		bitrate:               &atomic.Uint32{},
 		previousBytesReceived: &atomic.Uint64{},
 		currentBytesReceived:  &atomic.Uint64{},
 		latestUpdatedTS:       &atomic.Uint64{},
 		onEndedCallbacks:      make([]func(), 0),
-		stats:                 stats.Stats{},
+		statsGetter:           statsGetter,
+		onStatsUpdated:        onStatsUpdated,
+		onPLI:                 onPLI,
+		onRead:                onRead,
 	}
 
-	rt.enableIntervalPLI(client.sfu.PLIInterval())
+	rt.enableIntervalPLI(pliInterval)
 
 	rt.readRTP()
 
 	return rt
 }
 
-func (t *remoteTrack) OnEnded(f func()) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	t.onEndedCallbacks = append(t.onEndedCallbacks, f)
-}
-
-func (t *remoteTrack) onEnded() {
-	for _, f := range t.onEndedCallbacks {
-		f()
-	}
+func (t *remoteTrack) Context() context.Context {
+	return t.context
 }
 
 func (t *remoteTrack) readRTP() {
@@ -82,27 +71,27 @@ func (t *remoteTrack) readRTP() {
 			default:
 				rtp, _, readErr := t.track.ReadRTP()
 				if readErr == io.EOF {
-					t.onEnded()
-
-					t.client.stats.removeReceiverStats(t.track.ID())
-
 					return
 				} else if readErr != nil {
 					glog.Error("error reading rtp: ", readErr.Error())
 					return
 				}
 
-				t.onRead(rtp)
+				t.onRead(*rtp)
 
-				go t.client.updateReceiverStats(t)
-
+				go t.updateStats()
 			}
 		}
 	}()
 }
 
 func (t *remoteTrack) updateStats() {
-	s := t.stats
+	s := t.statsGetter.Get(uint32(t.track.SSRC()))
+	if s == nil {
+		glog.Warning("remotetrack: stats not found for track: ", t.track.SSRC())
+		return
+	}
+
 	// update the stats if the last update equal or more than 1 second
 	latestUpdated := t.latestUpdatedTS.Load()
 	if time.Since(time.Unix(0, int64(latestUpdated))).Seconds() <= 1 {
@@ -123,29 +112,17 @@ func (t *remoteTrack) updateStats() {
 
 	t.bitrate.Store(uint32((s.BytesReceived-current)*8) / uint32(deltaTime.Seconds()))
 
+	if t.onStatsUpdated != nil {
+		t.onStatsUpdated(s)
+	}
 }
 
-func (t *remoteTrack) Track() *webrtc.TrackRemote {
+func (t *remoteTrack) Track() IRemoteTrack {
 	return t.track
 }
 
 func (t *remoteTrack) GetCurrentBitrate() uint32 {
 	return t.bitrate.Load()
-}
-
-func (t *remoteTrack) receiverStats() stats.Stats {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	return t.stats
-}
-
-func (t *remoteTrack) setReceiverStats(s stats.Stats) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	t.stats = s
-
-	t.updateStats()
 }
 
 func (t *remoteTrack) sendPLI() error {
@@ -161,9 +138,7 @@ func (t *remoteTrack) sendPLI() error {
 
 	t.lastPLIRequestTime = time.Now()
 
-	return t.client.peerConnection.PC().WriteRTCP([]rtcp.Packet{
-		&rtcp.PictureLossIndication{MediaSSRC: uint32(t.track.SSRC())},
-	})
+	return t.onPLI()
 }
 
 func (t *remoteTrack) enableIntervalPLI(interval time.Duration) {

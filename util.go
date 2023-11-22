@@ -107,7 +107,7 @@ func RegisterSimulcastHeaderExtensions(m *webrtc.MediaEngine, codecType webrtc.R
 	}
 }
 
-func IsKeyframe(codec string, packet *rtp.Packet) bool {
+func IsKeyframe(codec string, packet rtp.Packet) bool {
 	isIt1, isIt2 := Keyframe(codec, packet)
 	return isIt1 && isIt2
 }
@@ -119,7 +119,7 @@ func IsKeyframe(codec string, packet *rtp.Packet) bool {
 // It returns (true, true) if that is the case, (false, true) if that is
 // definitely not the case, and (false, false) if the information cannot
 // be determined.
-func Keyframe(codec string, packet *rtp.Packet) (bool, bool) {
+func Keyframe(codec string, packet rtp.Packet) (bool, bool) {
 	if strings.EqualFold(codec, "video/vp8") {
 		var vp8 codecs.VP8Packet
 		_, err := vp8.Unmarshal(packet.Payload)

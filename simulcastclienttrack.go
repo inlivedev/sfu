@@ -1,6 +1,7 @@
 package sfu
 
 import (
+	"context"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -14,10 +15,12 @@ type simulcastClientTrack struct {
 	id                      string
 	mu                      sync.RWMutex
 	client                  *Client
+	context                 context.Context
+	cancel                  context.CancelFunc
 	kind                    webrtc.RTPCodecType
 	mimeType                string
 	localTrack              *webrtc.TrackLocalStaticRTP
-	remoteTrack             *simulcastTrack
+	remoteTrack             *SimulcastTrack
 	lastBlankSequenceNumber *atomic.Uint32
 	sequenceNumber          *atomic.Uint32
 	lastQuality             *atomic.Uint32
@@ -34,35 +37,36 @@ func (t *simulcastClientTrack) Client() *Client {
 	return t.client
 }
 
-func (t *simulcastClientTrack) isFirstKeyframePacket(p *rtp.Packet) bool {
+func (t *simulcastClientTrack) Context() context.Context {
+	return t.context
+}
+
+func (t *simulcastClientTrack) isFirstKeyframePacket(p rtp.Packet) bool {
 	isKeyframe := IsKeyframe(t.mimeType, p)
 
 	return isKeyframe && t.lastTimestamp.Load() != p.Timestamp
 }
 
-func (t *simulcastClientTrack) send(p *rtp.Packet, quality QualityLevel, lastQuality QualityLevel, isPaddingPackets bool) {
-	if !isPaddingPackets {
-		// set the last processed packet timestamp to identify if is begining of the new frame
-		t.lastTimestamp.Store(p.Timestamp)
-	}
+func (t *simulcastClientTrack) send(p rtp.Packet, quality QualityLevel, lastQuality QualityLevel) {
+	t.lastTimestamp.Store(p.Timestamp)
 
 	if lastQuality != quality {
 		t.lastQuality.Store(uint32(quality))
 	}
 
-	t.rewritePacket(p, quality)
+	p = t.rewritePacket(p, quality)
 
 	t.writeRTP(p)
 
 }
 
-func (t *simulcastClientTrack) writeRTP(p *rtp.Packet) {
-	if err := t.localTrack.WriteRTP(p); err != nil {
+func (t *simulcastClientTrack) writeRTP(p rtp.Packet) {
+	if err := t.localTrack.WriteRTP(&p); err != nil {
 		glog.Error("track: error on write rtp", err)
 	}
 }
 
-func (t *simulcastClientTrack) push(p *rtp.Packet, quality QualityLevel) {
+func (t *simulcastClientTrack) push(p rtp.Packet, quality QualityLevel) {
 	var trackQuality QualityLevel
 
 	lastQuality := t.LastQuality()
@@ -130,33 +134,23 @@ func (t *simulcastClientTrack) push(p *rtp.Packet, quality QualityLevel) {
 	}
 
 	if trackQuality == quality {
-		t.send(p, trackQuality, lastQuality, false)
+		t.send(p, trackQuality, lastQuality)
 	} else if trackQuality == QualityNone && quality == QualityLow {
 		if isFirstKeyframePacket {
 			glog.Warning("clienttrack: no quality level to send")
 			if t.localTrack.Codec().MimeType == webrtc.MimeTypeH264 {
 				// if codec is h264, send a blank frame once
 				p.Payload = getH264BlankFrame()
-				t.send(p, QualityLow, lastQuality, false)
+				t.send(p, QualityLow, lastQuality)
 			} else if t.localTrack.Codec().MimeType != webrtc.MimeTypeH264 && t.remoteTrack.isTrackActive(QualityLow) {
 				// if codec is not h264, send a low quality packet
-				t.send(p, QualityLow, lastQuality, false)
+				t.send(p, QualityLow, lastQuality)
 			} else {
 				// last effort, send the last quality
-				t.send(p, lastQuality, lastQuality, false)
+				t.send(p, lastQuality, lastQuality)
 			}
 		}
 	}
-	// } else if Uint32ToQualityLevel(t.paddingQuality.Load()) == quality {
-	// 	paddingTS := t.paddingTS.Load()
-	// 	if p.Timestamp > paddingTS {
-	// 		// new frame, reset padding quality
-	// 		t.paddingQuality.Store(QualityNone)
-	// 	} else if p.Timestamp == paddingTS {
-	// 		// padding packet
-	// 		t.send(p, quality, quality, true)
-	// 	}
-	// }
 
 }
 
@@ -258,7 +252,7 @@ func (t *simulcastClientTrack) IsScaleable() bool {
 	return false
 }
 
-func (t *simulcastClientTrack) rewritePacket(p *rtp.Packet, quality QualityLevel) {
+func (t *simulcastClientTrack) rewritePacket(p rtp.Packet, quality QualityLevel) rtp.Packet {
 	t.remoteTrack.mu.Lock()
 	defer t.remoteTrack.mu.Unlock()
 	// make sure the timestamp and sequence number is consistent from the previous packet even it is not the same track
@@ -278,6 +272,8 @@ func (t *simulcastClientTrack) rewritePacket(p *rtp.Packet, quality QualityLevel
 
 	t.sequenceNumber.Add(uint32(sequenceDelta))
 	p.SequenceNumber = uint16(t.sequenceNumber.Load())
+
+	return p
 }
 
 func (t *simulcastClientTrack) RequestPLI() {

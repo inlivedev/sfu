@@ -37,7 +37,7 @@ func TestTracksManualSubscribe(t *testing.T) {
 			tracksReq := make([]SubscribeTrackRequest, 0)
 			for _, track := range availableTracks {
 				tracksReq = append(tracksReq, SubscribeTrackRequest{
-					ClientID: track.Client().ID(),
+					ClientID: track.ClientID(),
 					TrackID:  track.ID(),
 				})
 			}
@@ -192,6 +192,7 @@ Loop:
 		select {
 		case <-timeout.Done():
 			t.Fatal("timeout waiting for track added")
+			break Loop
 		case <-trackChan:
 			trackCount++
 			glog.Info("track added ", trackCount)
@@ -209,7 +210,7 @@ func addSimulcastPair(t *testing.T, ctx context.Context, room *Room, peerName st
 		tracksReq := make([]SubscribeTrackRequest, 0)
 		for _, track := range availableTracks {
 			tracksReq = append(tracksReq, SubscribeTrackRequest{
-				ClientID: track.Client().ID(),
+				ClientID: track.ClientID(),
 				TrackID:  track.ID(),
 			})
 		}

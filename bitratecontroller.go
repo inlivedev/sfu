@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/golang/glog"
+	"github.com/pion/interceptor/pkg/cc"
 	"github.com/pion/webrtc/v3"
 )
 
@@ -69,19 +70,22 @@ func (c *bitrateClaim) pushbackDelayCounter() {
 }
 
 type bitrateController struct {
-	mu     sync.RWMutex
-	client *Client
-	claims map[string]*bitrateClaim
+	mu                      sync.RWMutex
+	lastBitrateAdjustmentTS time.Time
+	client                  *Client
+	claims                  map[string]*bitrateClaim
 }
 
-func newbitrateController(client *Client, intervalMonitor time.Duration) *bitrateController {
+func newbitrateController(client *Client, intervalMonitor time.Duration, useBandwidthEstimation bool) *bitrateController {
 	bc := &bitrateController{
 		mu:     sync.RWMutex{},
 		client: client,
 		claims: make(map[string]*bitrateClaim, 0),
 	}
 
-	bc.start()
+	if !useBandwidthEstimation {
+		bc.start()
+	}
 
 	return bc
 }
@@ -244,6 +248,7 @@ func (bc *bitrateController) addAudioClaims(clientTracks []iClientTrack) (leftTr
 	return leftTracks, nil
 }
 
+// this should never return QualityNone becaus it will delay onTrack event
 func (bc *bitrateController) getDistributedQuality(totalTracks int) QualityLevel {
 	if totalTracks == 0 {
 		return 0
@@ -255,9 +260,7 @@ func (bc *bitrateController) getDistributedQuality(totalTracks int) QualityLevel
 
 	bitrateConfig := bc.client.SFU().bitratesConfig
 
-	if distributedBandwidth < bitrateConfig.VideoLow {
-		return QualityNone
-	} else if distributedBandwidth < bitrateConfig.VideoMid {
+	if distributedBandwidth < bitrateConfig.VideoMid {
 		return QualityLow
 	} else if distributedBandwidth < bitrateConfig.VideoHigh {
 		return QualityMid
@@ -281,10 +284,6 @@ func (bc *bitrateController) addClaims(clientTracks []iClientTrack) error {
 	for _, clientTrack := range leftTracks {
 		if clientTrack.Kind() == webrtc.RTPCodecTypeVideo {
 			trackQuality := bc.getDistributedQuality(len(leftTracks) - claimed)
-			if clientTrack.IsScreen() && trackQuality == QualityNone {
-				trackQuality = QualityLow
-			}
-
 			if _, ok := bc.claims[clientTrack.ID()]; ok {
 				errors = append(errors, ErrAlreadyClaimed)
 				continue
@@ -298,7 +297,7 @@ func (bc *bitrateController) addClaims(clientTracks []iClientTrack) error {
 			if clientTrack.IsSimulcast() {
 				clientTrack.(*simulcastClientTrack).lastQuality.Store(uint32(trackQuality))
 			} else if clientTrack.IsScaleable() {
-				clientTrack.(*scaleabletClientTrack).lastQuality = trackQuality
+				clientTrack.(*scaleableClientTrack).lastQuality = trackQuality
 			}
 
 			_, err := bc.addClaim(clientTrack, trackQuality, true)
@@ -332,10 +331,16 @@ func (bc *bitrateController) addClaim(clientTrack iClientTrack, quality QualityL
 		bitrate:   bitrate,
 	}
 
-	clientTrack.OnTrackEnded(func() {
+	go func() {
+		ctx, cancel := context.WithCancel(clientTrack.Context())
+		defer cancel()
+		<-ctx.Done()
 		bc.removeClaim(clientTrack.ID())
+		if bc.client.IsDebugEnabled() {
+			glog.Info("clienttrack: track ", clientTrack.ID(), " claim removed")
+		}
 		clientTrack.Client().stats.removeSenderStats(clientTrack.ID())
-	})
+	}()
 
 	return bc.claims[clientTrack.ID()], nil
 }
@@ -345,6 +350,7 @@ func (bc *bitrateController) removeClaim(id string) {
 	defer bc.mu.Unlock()
 
 	if _, ok := bc.claims[id]; !ok {
+		glog.Error("bitrate: track ", id, " is not exists")
 		return
 	}
 
@@ -438,6 +444,37 @@ func (bc *bitrateController) start() {
 			}
 		}
 	}()
+}
+
+func (bc *bitrateController) needIncreaseBitrate(availableBw uint32) bool {
+	claims := bc.Claims()
+
+	for _, claim := range claims {
+		if claim.quality < QualityHigh {
+			if bc.isEnoughBandwidthToIncrase(availableBw, claim) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+func (bc *bitrateController) MonitorBandwidth(estimator cc.BandwidthEstimator) {
+	estimator.OnTargetBitrateChange(func(bw int) {
+
+		availableBw := uint32(bw) - bc.totalSentBitrates()
+
+		if bc.totalSentBitrates() > uint32(bw) || (bc.totalSentBitrates() < uint32(bw) && bc.needIncreaseBitrate(availableBw)) {
+			if time.Since(bc.lastBitrateAdjustmentTS) > 500*time.Millisecond {
+				glog.Info("brcontroller: target bitrate changed to ", ThousandSeparator(bw), ", will check and adjust bitrates")
+
+				bc.checkAndAdjustBitrates()
+
+				bc.lastBitrateAdjustmentTS = time.Now()
+			}
+		}
+	})
 }
 
 // checkAndAdjustBitrates will check if the available bandwidth is enough to send the current bitrate

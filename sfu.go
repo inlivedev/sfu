@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/golang/glog"
+	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v3"
 	"golang.org/x/exp/slices"
 )
@@ -119,6 +120,7 @@ type SFU struct {
 	onTrackAvailableCallbacks []func(tracks []ITrack)
 	onClientRemovedCallbacks  []func(*Client)
 	onClientAddedCallbacks    []func(*Client)
+	relayTracks               map[string]ITrack
 }
 
 type PublishedTrack struct {
@@ -220,10 +222,15 @@ func (s *SFU) NewClient(id, name string, opts ClientOptions) *Client {
 
 				for _, c := range s.clients.GetClients() {
 					for _, track := range c.tracks.GetTracks() {
-						if track.Client().ID() != client.ID() {
+						if track.ClientID() != client.ID() {
 							availableTracks = append(availableTracks, track)
 						}
 					}
+				}
+
+				// add relay tracks
+				for _, track := range s.relayTracks {
+					availableTracks = append(availableTracks, track)
 				}
 
 				if len(availableTracks) > 0 {
@@ -296,6 +303,16 @@ func (s *SFU) NewClient(id, name string, opts ClientOptions) *Client {
 	s.addClient(client)
 
 	return client
+}
+
+func (s *SFU) AvailableTracks() []ITrack {
+	tracks := make([]ITrack, 0)
+
+	for _, client := range s.clients.GetClients() {
+		tracks = append(tracks, client.publishedTracks.GetTracks()...)
+	}
+
+	return tracks
 }
 
 // Syncs track from connected client to other clients
@@ -397,7 +414,7 @@ func (s *SFU) onTracksAvailable(tracks []ITrack) {
 			// filter out tracks from the same client
 			filteredTracks := make([]ITrack, 0)
 			for _, track := range tracks {
-				if track.Client().ID() != client.ID() {
+				if track.ClientID() != client.ID() {
 					filteredTracks = append(filteredTracks, track)
 				}
 			}
@@ -419,7 +436,7 @@ func (s *SFU) broadcastTracksToAutoSubscribeClients(ownerID string, tracks []ITr
 	trackReq := make([]SubscribeTrackRequest, 0)
 	for _, track := range tracks {
 		trackReq = append(trackReq, SubscribeTrackRequest{
-			ClientID: track.Client().ID(),
+			ClientID: track.ClientID(),
 			TrackID:  track.ID(),
 		})
 	}
@@ -581,4 +598,44 @@ func (s *SFU) OnTracksAvailable(callback func(tracks []ITrack)) {
 	defer s.mu.Unlock()
 
 	s.onTrackAvailableCallbacks = append(s.onTrackAvailableCallbacks, callback)
+}
+
+func (s *SFU) AddRelayTrack(ctx context.Context, id, streamid, rid, clientid string, kind webrtc.RTPCodecType, ssrc webrtc.SSRC, mimeType string, rtpChan chan *rtp.Packet) error {
+	var track ITrack
+
+	relayTrack := NewTrackRelay(id, streamid, rid, kind, ssrc, mimeType, rtpChan)
+
+	onPLI := func() error {
+		return nil
+	}
+
+	if rid == "" {
+		// not simulcast
+		track = newTrack(ctx, clientid, relayTrack, s.pliInterval, onPLI, nil, nil)
+		s.mu.Lock()
+		s.relayTracks[relayTrack.ID()] = track
+		s.mu.Unlock()
+	} else {
+		// simulcast
+		var simulcast *SimulcastTrack
+		var ok bool
+
+		s.mu.Lock()
+		track, ok := s.relayTracks[relayTrack.ID()]
+		if !ok {
+			// if track not found, add it
+			track = newSimulcastTrack(ctx, clientid, relayTrack, s.pliInterval, onPLI, nil, nil)
+			s.relayTracks[relayTrack.ID()] = track
+
+		} else if simulcast, ok = track.(*SimulcastTrack); ok {
+			simulcast.AddRemoteTrack(relayTrack, nil, nil)
+		}
+		s.mu.Unlock()
+	}
+
+	s.broadcastTracksToAutoSubscribeClients(clientid, []ITrack{track})
+
+	s.onTracksAvailable([]ITrack{track})
+
+	return nil
 }
