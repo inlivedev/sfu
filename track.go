@@ -51,14 +51,14 @@ type ITrack interface {
 	IsProcessed() bool
 	SetSourceType(TrackType)
 	SetAsProcessed()
-	OnRead(func(*rtp.Packet, QualityLevel))
+	OnRead(func(rtp.Packet, QualityLevel))
 	IsScreen() bool
 	Kind() webrtc.RTPCodecType
 	MimeType() string
 	TotalTracks() int
 	OnEnded(func())
 	onEnded()
-	Relay(func(webrtc.SSRC, *rtp.Packet))
+	Relay(func(webrtc.SSRC, rtp.Packet))
 }
 
 type Track struct {
@@ -66,7 +66,7 @@ type Track struct {
 	base             baseTrack
 	remoteTrack      *remoteTrack
 	onEndedCallbacks []func()
-	onReadCallbacks  []func(*rtp.Packet, QualityLevel)
+	onReadCallbacks  []func(rtp.Packet, QualityLevel)
 }
 
 func newTrack(ctx context.Context, clientID string, trackRemote IRemoteTrack, pliInterval time.Duration, onPLI func() error, stats stats.Getter, onStatsUpdated func(*stats.Stats)) ITrack {
@@ -86,12 +86,11 @@ func newTrack(ctx context.Context, clientID string, trackRemote IRemoteTrack, pl
 	t := &Track{
 		mu:               sync.Mutex{},
 		base:             baseTrack,
-		onReadCallbacks:  make([]func(*rtp.Packet, QualityLevel), 0),
+		onReadCallbacks:  make([]func(rtp.Packet, QualityLevel), 0),
 		onEndedCallbacks: make([]func(), 0),
 	}
 
-	t.remoteTrack = newRemoteTrack(ctx, trackRemote, pliInterval, onPLI, stats, onStatsUpdated)
-	t.remoteTrack.OnRead(func(p *rtp.Packet) {
+	onRead := func(p *rtp.Packet) {
 		// do
 		tracks := t.base.clientTracks.GetTracks()
 		for _, track := range tracks {
@@ -99,7 +98,9 @@ func newTrack(ctx context.Context, clientID string, trackRemote IRemoteTrack, pl
 		}
 
 		t.onRead(p, QualityHigh)
-	})
+	}
+
+	t.remoteTrack = newRemoteTrack(ctx, trackRemote, pliInterval, onPLI, stats, onStatsUpdated, onRead)
 
 	t.remoteTrack.OnEnded(func() {
 		t.onEnded()
@@ -270,7 +271,7 @@ func (t *Track) OnEnded(callback func()) {
 	t.onEndedCallbacks = append(t.onEndedCallbacks, callback)
 }
 
-func (t *Track) OnRead(callback func(*rtp.Packet, QualityLevel)) {
+func (t *Track) OnRead(callback func(rtp.Packet, QualityLevel)) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -278,16 +279,17 @@ func (t *Track) OnRead(callback func(*rtp.Packet, QualityLevel)) {
 }
 
 func (t *Track) onRead(p *rtp.Packet, quality QualityLevel) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
+	// t.mu.Lock()
+	// defer t.mu.Unlock()
 
 	for _, callback := range t.onReadCallbacks {
-		callback(p, quality)
+		pClone := *p
+		callback(pClone, quality)
 	}
 }
 
-func (t *Track) Relay(f func(webrtc.SSRC, *rtp.Packet)) {
-	t.OnRead(func(p *rtp.Packet, quality QualityLevel) {
+func (t *Track) Relay(f func(webrtc.SSRC, rtp.Packet)) {
+	t.OnRead(func(p rtp.Packet, quality QualityLevel) {
 		f(t.SSRC(), p)
 	})
 }
@@ -318,7 +320,7 @@ type SimulcastTrack struct {
 	lastLowKeyframeTS           *atomic.Int64
 	onAddedRemoteTrackCallbacks []func(*remoteTrack)
 	onEndedCallbacks            []func()
-	onReadCallbacks             []func(*rtp.Packet, QualityLevel)
+	onReadCallbacks             []func(rtp.Packet, QualityLevel)
 	pliInterval                 time.Duration
 	onPLI                       func() error
 }
@@ -346,7 +348,7 @@ func newSimulcastTrack(ctx context.Context, clientid string, track IRemoteTrack,
 		onTrackCompleteCallbacks:    make([]func(), 0),
 		onAddedRemoteTrackCallbacks: make([]func(*remoteTrack), 0),
 		onEndedCallbacks:            make([]func(), 0),
-		onReadCallbacks:             make([]func(*rtp.Packet, QualityLevel), 0),
+		onReadCallbacks:             make([]func(rtp.Packet, QualityLevel), 0),
 		pliInterval:                 pliInterval,
 		onPLI:                       onPLI,
 	}
@@ -466,9 +468,7 @@ func (t *SimulcastTrack) AddRemoteTrack(track IRemoteTrack, stats stats.Getter, 
 
 	t.mu.Lock()
 
-	remoteTrack = newRemoteTrack(t.context, track, t.pliInterval, t.onPLI, stats, onStatsUpdated)
-
-	remoteTrack.OnRead(onRead)
+	remoteTrack = newRemoteTrack(t.context, track, t.pliInterval, t.onPLI, stats, onStatsUpdated, onRead)
 
 	switch quality {
 	case QualityHigh:
@@ -744,7 +744,7 @@ func (t *SimulcastTrack) onEnded() {
 	}
 }
 
-func (t *SimulcastTrack) OnRead(callback func(*rtp.Packet, QualityLevel)) {
+func (t *SimulcastTrack) OnRead(callback func(rtp.Packet, QualityLevel)) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -756,7 +756,7 @@ func (t *SimulcastTrack) onRead(p *rtp.Packet, quality QualityLevel) {
 	defer t.mu.Unlock()
 
 	for _, callback := range t.onReadCallbacks {
-		callback(p, quality)
+		callback(*p, quality)
 	}
 }
 
@@ -808,8 +808,8 @@ func (t *SimulcastTrack) RIDLow() string {
 	return t.remoteTrackLow.track.RID()
 }
 
-func (t *SimulcastTrack) Relay(f func(webrtc.SSRC, *rtp.Packet)) {
-	t.OnRead(func(p *rtp.Packet, quality QualityLevel) {
+func (t *SimulcastTrack) Relay(f func(webrtc.SSRC, rtp.Packet)) {
+	t.OnRead(func(p rtp.Packet, quality QualityLevel) {
 		switch quality {
 		case QualityHigh:
 			f(t.SSRCHigh(), p)

@@ -298,7 +298,7 @@ func (bc *bitrateController) addClaims(clientTracks []iClientTrack) error {
 			if clientTrack.IsSimulcast() {
 				clientTrack.(*simulcastClientTrack).lastQuality.Store(uint32(trackQuality))
 			} else if clientTrack.IsScaleable() {
-				clientTrack.(*scaleabletClientTrack).lastQuality = trackQuality
+				clientTrack.(*scaleableClientTrack).lastQuality = trackQuality
 			}
 
 			_, err := bc.addClaim(clientTrack, trackQuality, true)

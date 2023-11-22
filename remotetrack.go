@@ -18,7 +18,7 @@ type remoteTrack struct {
 	cancel                context.CancelFunc
 	mu                    sync.Mutex
 	track                 IRemoteTrack
-	onReadCallbacks       []func(*rtp.Packet)
+	onRead                func(*rtp.Packet)
 	onPLI                 func() error
 	bitrate               *atomic.Uint32
 	previousBytesReceived *atomic.Uint64
@@ -30,7 +30,7 @@ type remoteTrack struct {
 	onStatsUpdated        func(*stats.Stats)
 }
 
-func newRemoteTrack(ctx context.Context, track IRemoteTrack, pliInterval time.Duration, onPLI func() error, statsGetter stats.Getter, onStatsUpdated func(*stats.Stats)) *remoteTrack {
+func newRemoteTrack(ctx context.Context, track IRemoteTrack, pliInterval time.Duration, onPLI func() error, statsGetter stats.Getter, onStatsUpdated func(*stats.Stats), onRead func(*rtp.Packet)) *remoteTrack {
 	localctx, cancel := context.WithCancel(ctx)
 	rt := &remoteTrack{
 		context:               localctx,
@@ -45,7 +45,7 @@ func newRemoteTrack(ctx context.Context, track IRemoteTrack, pliInterval time.Du
 		statsGetter:           statsGetter,
 		onStatsUpdated:        onStatsUpdated,
 		onPLI:                 onPLI,
-		onReadCallbacks:       make([]func(*rtp.Packet), 0),
+		onRead:                onRead,
 	}
 
 	rt.enableIntervalPLI(pliInterval)
@@ -53,24 +53,6 @@ func newRemoteTrack(ctx context.Context, track IRemoteTrack, pliInterval time.Du
 	rt.readRTP()
 
 	return rt
-}
-
-func (t *remoteTrack) OnRead(f func(*rtp.Packet)) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	t.onReadCallbacks = append(t.onReadCallbacks, f)
-}
-
-func (t *remoteTrack) onRead(p *rtp.Packet) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	for _, f := range t.onReadCallbacks {
-		f(p)
-	}
-
-	go t.updateStats()
 }
 
 func (t *remoteTrack) OnEnded(f func()) {
@@ -107,6 +89,8 @@ func (t *remoteTrack) readRTP() {
 				}
 
 				t.onRead(rtp)
+
+				go t.updateStats()
 			}
 		}
 	}()
