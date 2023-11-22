@@ -11,7 +11,7 @@ import (
 )
 
 func TestRoomDataChannel(t *testing.T) {
-	t.Parallel()
+	// t.Parallel()
 
 	roomID := roomManager.CreateRoomID()
 	roomName := "test-room"
@@ -104,7 +104,7 @@ Loop:
 }
 
 func TestRoomDataChannelWithClientID(t *testing.T) {
-	t.Parallel()
+	// t.Parallel()
 
 	roomID := roomManager.CreateRoomID()
 	roomName := "test-room"
