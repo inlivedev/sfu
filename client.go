@@ -304,7 +304,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 
 	client.stats = newClientStats(client)
 
-	client.bitrateController = newbitrateController(client, s.pliInterval)
+	client.bitrateController = newbitrateController(client, s.pliInterval, s.enableBandwidthEstimator)
 
 	if s.enableBandwidthEstimator {
 		go func() {
@@ -313,6 +313,8 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 			defer client.mu.Unlock()
 
 			client.estimator = estimator
+
+			client.bitrateController.MonitorBandwidth(estimator)
 		}()
 	}
 
@@ -391,12 +393,12 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 				simulcast.AddRemoteTrack(remoteTrack, client.statsGetter, onStatsUpdated)
 			}
 
-			// // only process track when the lowest quality is available
-			// simulcast.mu.Lock()
-			// isLowAvailable := simulcast.remoteTrackLow != nil
-			// simulcast.mu.Unlock()
+			// only process track when the lowest quality is available
+			simulcast.mu.Lock()
+			isLowAvailable := simulcast.remoteTrackLow != nil
+			simulcast.mu.Unlock()
 
-			if !track.IsProcessed() {
+			if !track.IsProcessed() && isLowAvailable {
 				client.onTrack(track)
 				track.SetAsProcessed()
 			}
