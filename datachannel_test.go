@@ -63,7 +63,7 @@ func TestRoomDataChannel(t *testing.T) {
 
 	connected := WaitConnected(ctx, []*webrtc.PeerConnection{pc1, pc2})
 
-	timeoutConnected, cancelTimeoutConnected := context.WithTimeout(ctx, 30*time.Second)
+	timeoutConnected, cancelTimeoutConnected := context.WithTimeout(ctx, 40*time.Second)
 	isConnected := false
 
 	select {

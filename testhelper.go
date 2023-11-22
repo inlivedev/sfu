@@ -421,7 +421,7 @@ func CreatePeerPair(ctx context.Context, room *Room, iceServers []webrtc.ICEServ
 
 	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
 		if state == webrtc.PeerConnectionStateClosed || state == webrtc.PeerConnectionStateFailed {
-			glog.Info("test: peer connection closed ", peerName)
+			glog.Info("test: peer connection ", peerName, " stated changed ", state)
 			if client != nil {
 				_ = room.StopClient(client.ID())
 				cancelClient()
@@ -576,7 +576,13 @@ func CreateDataPair(ctx context.Context, room *Room, iceServers []webrtc.ICEServ
 		ICEServers: iceServers,
 	})
 
-	pc.AddTransceiverFromKind(webrtc.RTPCodecTypeVideo, webrtc.RtpTransceiverInit{Direction: webrtc.RTPTransceiverDirectionRecvonly})
+	if _, err := pc.AddTransceiverFromKind(webrtc.RTPCodecTypeVideo, webrtc.RtpTransceiverInit{Direction: webrtc.RTPTransceiverDirectionRecvonly}); err != nil {
+		panic(err)
+	}
+
+	if _, err := pc.AddTransceiverFromKind(webrtc.RTPCodecTypeAudio, webrtc.RtpTransceiverInit{Direction: webrtc.RTPTransceiverDirectionRecvonly}); err != nil {
+		panic(err)
+	}
 
 	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
 		if state == webrtc.PeerConnectionStateClosed || state == webrtc.PeerConnectionStateFailed {
@@ -638,17 +644,6 @@ func WaitConnected(ctx context.Context, peers []*webrtc.PeerConnection) chan boo
 	connectedCount := 0
 	ctxx, cancel := context.WithCancel(ctx)
 
-	for _, pc := range peers {
-		pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
-			if state == webrtc.PeerConnectionStateConnected {
-				connected <- true
-			} else if state == webrtc.PeerConnectionStateFailed || state == webrtc.PeerConnectionStateClosed {
-				waitChan <- false
-				cancel()
-			}
-		})
-	}
-
 	go func() {
 		defer cancel()
 
@@ -666,6 +661,22 @@ func WaitConnected(ctx context.Context, peers []*webrtc.PeerConnection) chan boo
 			}
 		}
 	}()
+
+	for _, pc := range peers {
+		if pc.ConnectionState() == webrtc.PeerConnectionStateConnected {
+			connected <- true
+		} else {
+			pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
+				if state == webrtc.PeerConnectionStateConnected {
+					connected <- true
+				} else if state == webrtc.PeerConnectionStateFailed || state == webrtc.PeerConnectionStateClosed {
+					waitChan <- false
+					cancel()
+				}
+			})
+		}
+
+	}
 
 	return waitChan
 }
