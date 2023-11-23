@@ -225,7 +225,7 @@ func (bc *bitrateController) addAudioClaims(clientTracks []iClientTrack) (leftTr
 		var trackQuality QualityLevel
 
 		if clientTrack.Kind() == webrtc.RTPCodecTypeAudio {
-			if clientTrack.LocalTrack().Codec().MimeType == "audio/RED" {
+			if clientTrack.LocalTrack().Codec().MimeType == "audio/red" {
 				trackQuality = QualityAudioRed
 			} else {
 				trackQuality = QualityAudio
