@@ -58,6 +58,7 @@ type ITrack interface {
 	TotalTracks() int
 	Context() context.Context
 	Relay(func(webrtc.SSRC, rtp.Packet))
+	PayloadType() webrtc.PayloadType
 }
 
 type Track struct {
@@ -120,6 +121,18 @@ func (t *Track) Context() context.Context {
 
 func (t *Track) createLocalTrack() *webrtc.TrackLocalStaticRTP {
 	track, newTrackErr := webrtc.NewTrackLocalStaticRTP(t.remoteTrack.track.Codec().RTPCodecCapability, t.base.id, t.base.streamid)
+	if newTrackErr != nil {
+		panic(newTrackErr)
+	}
+
+	return track
+}
+
+func (t *Track) createOpusLocalTrack() *webrtc.TrackLocalStaticRTP {
+	c := t.remoteTrack.track.Codec().RTPCodecCapability
+	c.MimeType = webrtc.MimeTypeOpus
+	c.SDPFmtpLine = "minptime=10;useinbandfec=1"
+	track, newTrackErr := webrtc.NewTrackLocalStaticRTP(c, t.base.id, t.base.streamid)
 	if newTrackErr != nil {
 		panic(newTrackErr)
 	}
@@ -205,11 +218,34 @@ func (t *Track) subscribe(c *Client) iClientTrack {
 			client:                c,
 			localTrack:            t.createLocalTrack(),
 			remoteTrack:           t,
-			isScreen:              false,
+			isScreen:              t.IsScreen(),
 			onTrackEndedCallbacks: make([]func(), 0),
 			qualityPreset:         c.SFU().QualityPreset(),
 			maxQuality:            QualityHigh,
 			lastQuality:           QualityHigh,
+		}
+	} else if t.Kind() == webrtc.RTPCodecTypeAudio && t.PayloadType() == 63 {
+		glog.Info("track: red enabled", c.receiveRED)
+
+		mimeType := t.remoteTrack.track.Codec().MimeType
+		localTrack := t.createLocalTrack()
+
+		if !c.receiveRED {
+			mimeType = webrtc.MimeTypeOpus
+			localTrack = t.createOpusLocalTrack()
+		}
+
+		ct = &clientTrackRed{
+			id:           t.base.id,
+			context:      ctx,
+			cancel:       cancel,
+			mu:           sync.RWMutex{},
+			client:       c,
+			kind:         t.base.kind,
+			mimeType:     mimeType,
+			localTrack:   localTrack,
+			remoteTrack:  t.remoteTrack,
+			isReceiveRed: c.receiveRED,
 		}
 	} else {
 		isScreen := &atomic.Bool{}
@@ -227,6 +263,7 @@ func (t *Track) subscribe(c *Client) iClientTrack {
 			remoteTrack: t.remoteTrack,
 			isScreen:    isScreen,
 		}
+
 	}
 
 	if t.Kind() == webrtc.RTPCodecTypeAudio && c.IsVADEnabled() {
@@ -279,6 +316,10 @@ func (t *Track) Relay(f func(webrtc.SSRC, rtp.Packet)) {
 	t.OnRead(func(p rtp.Packet, quality QualityLevel) {
 		f(t.SSRC(), p)
 	})
+}
+
+func (t *Track) PayloadType() webrtc.PayloadType {
+	return t.base.codec.PayloadType
 }
 
 type SimulcastTrack struct {
@@ -774,6 +815,10 @@ func (t *SimulcastTrack) Relay(f func(webrtc.SSRC, rtp.Packet)) {
 			f(t.SSRCLow(), p)
 		}
 	})
+}
+
+func (t *SimulcastTrack) PayloadType() webrtc.PayloadType {
+	return t.base.codec.PayloadType
 }
 
 type SubscribeTrackRequest struct {

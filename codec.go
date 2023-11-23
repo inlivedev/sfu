@@ -103,6 +103,10 @@ var (
 
 	audioCodecs = []webrtc.RTPCodecParameters{
 		{
+			RTPCodecCapability: webrtc.RTPCodecCapability{"audio/red", 48000, 2, "111/111", nil},
+			PayloadType:        63,
+		},
+		{
 			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypeOpus, 48000, 2, "minptime=10;useinbandfec=1", nil},
 			PayloadType:        111,
 		},
