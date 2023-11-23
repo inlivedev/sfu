@@ -127,6 +127,8 @@
 
         let videoObserver = null
 
+        let red = true
+
         peerConnection.ondatachannel = function(e) {
             console.log("ondatachannel");
             if (e.channel.label == "internal") {
@@ -152,6 +154,11 @@
             if (urlParams.has('debug')){
                 debug = true
             }
+
+            if (urlParams.has('disablered')){
+                red = false
+            }
+
             ws = new WebSocket(`ws://${window.location.host}/ws?${debug?'debug=1':''}`);
             const promise = new Promise((resolve, reject) => {
                 ws.onopen = function() {
@@ -297,6 +304,7 @@
                 e.receiver.playoutDelayHint = 0.1;
                 e.streams.forEach((stream) => {
                     console.log("ontrack");
+                    console.log(e.track.getCapabilities());
                     
                     let container = document.getElementById("container-"+stream.id);
                     if (!container) {
@@ -352,14 +360,39 @@
             // peerConnection.addTrack(stream.getVideoTracks()[0], stream);
 
  
-            peerConnection.addTransceiver(stream.getAudioTracks()[0], {
+            const audioTcvr= peerConnection.addTransceiver(stream.getAudioTracks()[0], {
                 direction: 'sendonly',
                 streams: [stream],
                 sendEncodings: [{priority: 'high'}],
             })
 
+            
+
+            if(audioTcvr.setCodecPreferences != undefined){
+                const audioCodecs = RTCRtpReceiver.getCapabilities('audio').codecs;
+                
+                let audioCodecsPref = [];
+                if (red){
+                    for(let i = 0; i < audioCodecs.length; i++){
+                        // audio/red 48000 111/111
+                        if(audioCodecs[i].mimeType == "audio/red"){
+                            audioCodecsPref.push(audioCodecs[i]);
+                        }
+                    }
+                }
+                
+                for(let i = 0; i < audioCodecs.length; i++){
+                    if(audioCodecs[i].mimeType == "audio/opus"){
+                        audioCodecsPref.push(audioCodecs[i]);
+                    }
+                }
+                
+                audioTcvr.setCodecPreferences(audioCodecsPref);
+            }
+            
+
             if (codec ==='vp9'){
-                const tcvr = peerConnection.addTransceiver(stream.getVideoTracks()[0], {
+                const videoTcvr = peerConnection.addTransceiver(stream.getVideoTracks()[0], {
                 direction: 'sendonly',
                 streams: [stream],
                 sendEncodings: [
@@ -371,7 +404,7 @@
                     ]
                 })
 
-                let codecs = RTCRtpReceiver.getCapabilities('video').codecs;
+                const codecs = RTCRtpReceiver.getCapabilities('video').codecs;
                 let vp9_codecs = [];
                 // iterate over supported codecs and pull out the codecs we want
                 for(let i = 0; i < codecs.length; i++){
@@ -388,8 +421,8 @@
                 }
 
                 // currently not all browsers support setCodecPreferences
-                if(tcvr.setCodecPreferences != undefined){
-                    tcvr.setCodecPreferences(vp9_codecs);
+                if(videoTcvr.setCodecPreferences != undefined){
+                    videoTcvr.setCodecPreferences(vp9_codecs);
                 }
             } else {
                 peerConnection.addTransceiver(stream.getVideoTracks()[0], {

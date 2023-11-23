@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -119,6 +120,7 @@ type Client struct {
 	publishedTracks                   *trackList
 	pendingRemoteRenegotiation        *atomic.Bool
 	queue                             *queue
+	receiveRED                        bool
 	state                             *atomic.Value
 	sfu                               *SFU
 	onConnectionStateChangedCallbacks []func(webrtc.PeerConnectionState)
@@ -518,6 +520,14 @@ func (c *Client) negotiateQueuOp(offer webrtc.SessionDescription) (*webrtc.Sessi
 
 	currentTransceiverCount := len(c.peerConnection.PC().GetTransceivers())
 
+	if !c.receiveRED {
+		match, err := regexp.MatchString(`a=rtpmap:63`, offer.SDP)
+		if err != nil {
+			glog.Error("client: error on check RED support in SDP ", err)
+		} else {
+			c.receiveRED = match
+		}
+	}
 	// Set the remote SessionDescription
 	err := c.peerConnection.PC().SetRemoteDescription(offer)
 	if err != nil {

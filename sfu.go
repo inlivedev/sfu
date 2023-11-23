@@ -26,7 +26,7 @@ type BitratesConfig struct {
 
 func DefaultBitrates() BitratesConfig {
 	return BitratesConfig{
-		AudioRed:         48_000 * 3,
+		AudioRed:         48_000 * 1.5,
 		Audio:            48_000,
 		Video:            1_200_000,
 		VideoHigh:        1_200_000,
