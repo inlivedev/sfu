@@ -34,16 +34,20 @@ type RelayTrack struct {
 	payloadType webrtc.PayloadType
 	kind        webrtc.RTPCodecType
 	ssrc        webrtc.SSRC
-	codec       webrtc.RTPCodecParameters
+	mimeType    string
 	rid         string
 	rtpChan     chan *rtp.Packet
 }
 
 func NewTrackRelay(id, streamid, rid string, kind webrtc.RTPCodecType, ssrc webrtc.SSRC, mimeType string, rtpChan chan *rtp.Packet) IRemoteTrack {
 	return &RelayTrack{
-		kind: kind,
-		ssrc: ssrc,
-		rid:  rid,
+		id:       id,
+		streamID: streamid,
+		mimeType: mimeType,
+		kind:     kind,
+		ssrc:     ssrc,
+		rid:      rid,
+		rtpChan:  rtpChan,
 	}
 }
 
@@ -103,7 +107,7 @@ func (t *RelayTrack) Msid() string {
 func (t *RelayTrack) Codec() webrtc.RTPCodecParameters {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
-	return t.codec
+	return getRTPParameters(t.mimeType)
 }
 
 // Read reads data from the track.
@@ -120,4 +124,9 @@ func (t *RelayTrack) ReadRTP() (*rtp.Packet, interceptor.Attributes, error) {
 // SetReadDeadline sets the max amount of time the RTP stream will block before returning. 0 is forever.
 func (t *RelayTrack) SetReadDeadline(deadline time.Time) error {
 	return errors.New("relaytrack: not implemented")
+}
+
+// IsRelay returns true if this track is a relay track
+func (t *RelayTrack) IsRelay() bool {
+	return true
 }

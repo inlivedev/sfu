@@ -53,6 +53,7 @@ type ITrack interface {
 	SetAsProcessed()
 	OnRead(func(rtp.Packet, QualityLevel))
 	IsScreen() bool
+	IsRelay() bool
 	Kind() webrtc.RTPCodecType
 	MimeType() string
 	TotalTracks() int
@@ -322,8 +323,13 @@ func (t *Track) PayloadType() webrtc.PayloadType {
 	return t.base.codec.PayloadType
 }
 
+func (t *Track) IsRelay() bool {
+	return t.remoteTrack.IsRelay()
+}
+
 type SimulcastTrack struct {
 	context                     context.Context
+	cancel                      context.CancelFunc
 	mu                          sync.Mutex
 	base                        *baseTrack
 	baseTS                      uint32
@@ -353,8 +359,10 @@ type SimulcastTrack struct {
 }
 
 func newSimulcastTrack(ctx context.Context, clientid string, track IRemoteTrack, pliInterval time.Duration, onPLI func() error, stats stats.Getter, onStatsUpdated func(*stats.Stats)) ITrack {
+	localCtx, cancel := context.WithCancel(ctx)
 	t := &SimulcastTrack{
-		context: ctx,
+		context: localCtx,
+		cancel:  cancel,
 		mu:      sync.Mutex{},
 		base: &baseTrack{
 			id:           track.ID(),
@@ -511,6 +519,7 @@ func (t *SimulcastTrack) AddRemoteTrack(track IRemoteTrack, stats stats.Getter, 
 			t.mu.Lock()
 			t.remoteTrackHigh = nil
 			t.mu.Unlock()
+			t.cancel()
 		}()
 
 	case QualityMid:
@@ -525,6 +534,7 @@ func (t *SimulcastTrack) AddRemoteTrack(track IRemoteTrack, stats stats.Getter, 
 			t.mu.Lock()
 			t.remoteTrackMid = nil
 			t.mu.Unlock()
+			t.cancel()
 		}()
 
 	case QualityLow:
@@ -539,6 +549,7 @@ func (t *SimulcastTrack) AddRemoteTrack(track IRemoteTrack, stats stats.Getter, 
 			t.mu.Lock()
 			t.remoteTrackLow = nil
 			t.mu.Unlock()
+			t.cancel()
 		}()
 	default:
 		glog.Warning("client: unknown track quality ", track.RID())
@@ -819,6 +830,18 @@ func (t *SimulcastTrack) Relay(f func(webrtc.SSRC, rtp.Packet)) {
 
 func (t *SimulcastTrack) PayloadType() webrtc.PayloadType {
 	return t.base.codec.PayloadType
+}
+
+func (t *SimulcastTrack) IsRelay() bool {
+	if t.remoteTrackHigh != nil {
+		return t.remoteTrackHigh.IsRelay()
+	} else if t.remoteTrackMid != nil {
+		return t.remoteTrackMid.IsRelay()
+	} else if t.remoteTrackLow != nil {
+		return t.remoteTrackLow.IsRelay()
+	}
+
+	return false
 }
 
 type SubscribeTrackRequest struct {

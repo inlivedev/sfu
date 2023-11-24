@@ -157,6 +157,7 @@ func New(ctx context.Context, opts sfuOptions) *SFU {
 		enableBandwidthEstimator:  opts.EnableBandwidthEstimator,
 		pliInterval:               opts.PLIInterval,
 		qualityRef:                opts.QualityPreset,
+		relayTracks:               make(map[string]ITrack),
 		portStart:                 opts.PortStart,
 		portEnd:                   opts.PortEnd,
 		onTrackAvailableCallbacks: make([]func(tracks []ITrack), 0),
@@ -635,6 +636,7 @@ func (s *SFU) AddRelayTrack(ctx context.Context, id, streamid, rid, clientid str
 
 	s.broadcastTracksToAutoSubscribeClients(clientid, []ITrack{track})
 
+	// notify the local clients that a relay track is available
 	s.onTracksAvailable([]ITrack{track})
 
 	return nil

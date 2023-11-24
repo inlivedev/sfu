@@ -263,3 +263,51 @@ func SendBlackImageFrames(startSequence uint16, localRTP *webrtc.TrackLocalStati
 
 	return lastSequenceNumber + uint16(len(packets)), FlattenErrors(writeErrs)
 }
+
+func getPayloadType(mimeType string) webrtc.PayloadType {
+	for _, codec := range audioCodecs {
+		if codec.RTPCodecCapability.MimeType == mimeType {
+			return codec.PayloadType
+		}
+	}
+
+	for _, codec := range videoCodecs {
+		if codec.RTPCodecCapability.MimeType == mimeType {
+			return codec.PayloadType
+		}
+	}
+
+	return 0
+}
+
+func getRTPParameters(mimeType string) webrtc.RTPCodecParameters {
+	for _, codec := range audioCodecs {
+		if codec.RTPCodecCapability.MimeType == mimeType {
+			return codec
+		}
+	}
+
+	for _, codec := range videoCodecs {
+		if codec.RTPCodecCapability.MimeType == mimeType {
+			return codec
+		}
+	}
+
+	return webrtc.RTPCodecParameters{}
+}
+
+func getCodecCapability(mimeType string) webrtc.RTPCodecCapability {
+	for _, codec := range audioCodecs {
+		if codec.RTPCodecCapability.MimeType == mimeType {
+			return codec.RTPCodecCapability
+		}
+	}
+
+	for _, codec := range videoCodecs {
+		if codec.RTPCodecCapability.MimeType == mimeType {
+			return codec.RTPCodecCapability
+		}
+	}
+
+	return webrtc.RTPCodecCapability{}
+}

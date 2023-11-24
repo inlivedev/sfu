@@ -79,7 +79,9 @@ func (t *remoteTrack) readRTP() {
 
 				t.onRead(*rtp)
 
-				go t.updateStats()
+				if !t.IsRelay() {
+					go t.updateStats()
+				}
 			}
 		}
 	}()
@@ -159,4 +161,9 @@ func (t *remoteTrack) enableIntervalPLI(interval time.Duration) {
 			}
 		}
 	}()
+}
+
+func (t *remoteTrack) IsRelay() bool {
+	_, ok := t.track.(*RelayTrack)
+	return ok
 }
