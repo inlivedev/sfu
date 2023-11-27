@@ -75,8 +75,6 @@ type Track struct {
 func newTrack(ctx context.Context, clientID string, trackRemote IRemoteTrack, pliInterval time.Duration, onPLI func() error, stats stats.Getter, onStatsUpdated func(*stats.Stats)) ITrack {
 	ctList := newClientTrackList()
 
-	localCtx, cancel := context.WithCancel(ctx)
-
 	baseTrack := baseTrack{
 		id:           trackRemote.ID(),
 		isScreen:     &atomic.Bool{},
@@ -90,8 +88,6 @@ func newTrack(ctx context.Context, clientID string, trackRemote IRemoteTrack, pl
 
 	t := &Track{
 		mu:               sync.Mutex{},
-		context:          localCtx,
-		cancel:           cancel,
 		base:             baseTrack,
 		onReadCallbacks:  make([]func(rtp.Packet, QualityLevel), 0),
 		onEndedCallbacks: make([]func(), 0),
@@ -107,7 +103,14 @@ func newTrack(ctx context.Context, clientID string, trackRemote IRemoteTrack, pl
 		t.onRead(p, QualityHigh)
 	}
 
-	t.remoteTrack = newRemoteTrack(localCtx, trackRemote, pliInterval, onPLI, stats, onStatsUpdated, onRead)
+	t.remoteTrack = newRemoteTrack(ctx, trackRemote, pliInterval, onPLI, stats, onStatsUpdated, onRead)
+
+	t.context, t.cancel = context.WithCancel(t.remoteTrack.Context())
+
+	go func() {
+		defer t.cancel()
+		<-t.context.Done()
+	}()
 
 	return t
 }
@@ -359,11 +362,8 @@ type SimulcastTrack struct {
 }
 
 func newSimulcastTrack(ctx context.Context, clientid string, track IRemoteTrack, pliInterval time.Duration, onPLI func() error, stats stats.Getter, onStatsUpdated func(*stats.Stats)) ITrack {
-	localCtx, cancel := context.WithCancel(ctx)
 	t := &SimulcastTrack{
-		context: localCtx,
-		cancel:  cancel,
-		mu:      sync.Mutex{},
+		mu: sync.Mutex{},
 		base: &baseTrack{
 			id:           track.ID(),
 			isScreen:     &atomic.Bool{},
@@ -387,7 +387,13 @@ func newSimulcastTrack(ctx context.Context, clientid string, track IRemoteTrack,
 		onPLI:                       onPLI,
 	}
 
-	_ = t.AddRemoteTrack(track, stats, onStatsUpdated)
+	rt := t.AddRemoteTrack(track, stats, onStatsUpdated)
+	t.context, t.cancel = context.WithCancel(rt.Context())
+
+	go func() {
+		defer t.cancel()
+		<-t.context.Done()
+	}()
 
 	return t
 }
