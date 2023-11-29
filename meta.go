@@ -2,7 +2,12 @@ package sfu
 
 import (
 	"context"
+	"errors"
 	"sync"
+)
+
+var (
+	ErrMetaNotFound = errors.New("meta: metadata not found")
 )
 
 type Metadata struct {
@@ -27,11 +32,14 @@ func (m *Metadata) Set(key string, value interface{}) {
 	m.onChanged(key, value)
 }
 
-func (m *Metadata) Get(key string) interface{} {
+func (m *Metadata) Get(key string) (interface{}, error) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	return m.m[key]
+	if _, ok := m.m[key]; !ok {
+		return nil, ErrMetaNotFound
+	}
+	return m.m[key], nil
 }
 
 func (m *Metadata) Delete(key string) {
