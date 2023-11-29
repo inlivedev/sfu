@@ -55,9 +55,11 @@ type Room struct {
 	context                 context.Context
 	cancel                  context.CancelFunc
 	id                      string
+	token                   string
 	RenegotiationChan       map[string]chan bool
 	name                    string
 	mutex                   *sync.Mutex
+	meta                    *Metadata
 	sfu                     *SFU
 	state                   string
 	stats                   map[string]*ClientStats
@@ -88,7 +90,7 @@ func DefaultRoomOptions() RoomOptions {
 	return RoomOptions{
 		Bitrates:      DefaultBitrates(),
 		QualityPreset: DefaultQualityPreset(),
-		Codecs:        []string{webrtc.MimeTypeVP9, webrtc.MimeTypeH264, "audio/red", webrtc.MimeTypeOpus},
+		Codecs:        []string{"video/flexfec-03", webrtc.MimeTypeVP9, webrtc.MimeTypeH264, "audio/red", webrtc.MimeTypeOpus},
 		ClientTimeout: 10 * time.Minute,
 		PLIInterval:   5 * time.Second,
 	}
@@ -102,10 +104,12 @@ func newRoom(id, name string, sfu *SFU, kind string, opts RoomOptions) *Room {
 		context:    localContext,
 		cancel:     cancel,
 		sfu:        sfu,
+		token:      GenerateID(),
 		stats:      make(map[string]*ClientStats),
 		state:      StateRoomOpen,
 		name:       name,
 		mutex:      &sync.Mutex{},
+		meta:       NewMetadata(),
 		extensions: make([]IExtension, 0),
 		kind:       kind,
 		options:    opts,
@@ -355,4 +359,8 @@ func (r *Room) BitratesConfig() BitratesConfig {
 
 func (r *Room) Context() context.Context {
 	return r.context
+}
+
+func (r *Room) Meta() *Metadata {
+	return r.meta
 }
