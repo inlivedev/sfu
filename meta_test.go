@@ -3,6 +3,7 @@ package sfu
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -28,10 +29,13 @@ func TestMetadata(t *testing.T) {
 	}
 
 	// Test Delete method
-	m.Delete("key1")
+	_ = m.Delete("key1")
 	if value, _ := m.Get("key1"); value != nil {
 		t.Errorf("Get returned %v, expected nil", value)
 	}
+
+	err = m.Delete("key1")
+	require.Equal(t, ErrMetaNotFound, err)
 
 	// Test ForEach method
 	m.Set("key3", "value3")
@@ -67,8 +71,9 @@ func TestMetadata(t *testing.T) {
 
 	cancel1()
 
+	time.Sleep(100 * time.Millisecond)
+
 	m.Set("key6", "value6")
 
 	require.Equal(t, true, state)
-
 }

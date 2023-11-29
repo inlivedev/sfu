@@ -42,12 +42,19 @@ func (m *Metadata) Get(key string) (interface{}, error) {
 	return m.m[key], nil
 }
 
-func (m *Metadata) Delete(key string) {
+func (m *Metadata) Delete(key string) error {
 	m.mu.Lock()
+	if _, ok := m.m[key]; !ok {
+		m.mu.Unlock()
+		return ErrMetaNotFound
+	}
+
 	delete(m.m, key)
 	m.mu.Unlock()
 
 	m.onChanged(key, nil)
+
+	return nil
 }
 
 func (m *Metadata) ForEach(f func(key string, value interface{})) {
