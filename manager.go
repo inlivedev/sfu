@@ -190,3 +190,7 @@ func (m *Manager) Stop() {
 		room.StopAllClients()
 	}
 }
+
+func (m *Manager) Context() context.Context {
+	return m.context
+}
