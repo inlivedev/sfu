@@ -3,6 +3,8 @@ package sfu
 import (
 	"context"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestMetadata(t *testing.T) {
@@ -12,19 +14,22 @@ func TestMetadata(t *testing.T) {
 		t.Error("NewMetadata returned nil")
 	}
 
+	_, err := m.Get("key1")
+	require.Equal(t, ErrMetaNotFound, err)
+
 	// Test Set and Get methods
 	m.Set("key1", "value1")
 	m.Set("key2", 123)
-	if value := m.Get("key1"); value != "value1" {
+	if value, _ := m.Get("key1"); value != "value1" {
 		t.Errorf("Get returned %v, expected %v", value, "value1")
 	}
-	if value := m.Get("key2"); value != 123 {
+	if value, _ := m.Get("key2"); value != 123 {
 		t.Errorf("Get returned %v, expected %v", value, 123)
 	}
 
 	// Test Delete method
 	m.Delete("key1")
-	if value := m.Get("key1"); value != nil {
+	if value, _ := m.Get("key1"); value != nil {
 		t.Errorf("Get returned %v, expected nil", value)
 	}
 
