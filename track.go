@@ -387,7 +387,7 @@ func newSimulcastTrack(ctx context.Context, clientid string, track IRemoteTrack,
 		onPLI:                       onPLI,
 	}
 
-	rt := t.AddRemoteTrack(track, stats, onStatsUpdated)
+	rt := t.AddRemoteTrack(ctx, track, stats, onStatsUpdated)
 	t.context, t.cancel = context.WithCancel(rt.Context())
 
 	go func() {
@@ -466,7 +466,7 @@ func (t *SimulcastTrack) Kind() webrtc.RTPCodecType {
 	return t.base.kind
 }
 
-func (t *SimulcastTrack) AddRemoteTrack(track IRemoteTrack, stats stats.Getter, onStatsUpdated func(*stats.Stats)) *remoteTrack {
+func (t *SimulcastTrack) AddRemoteTrack(ctx context.Context, track IRemoteTrack, stats stats.Getter, onStatsUpdated func(*stats.Stats)) *remoteTrack {
 	var remoteTrack *remoteTrack
 
 	quality := RIDToQuality(track.RID())
@@ -510,7 +510,7 @@ func (t *SimulcastTrack) AddRemoteTrack(track IRemoteTrack, stats stats.Getter, 
 		t.onRead(p, quality)
 	}
 
-	remoteTrack = newRemoteTrack(t.context, track, t.pliInterval, t.onPLI, stats, onStatsUpdated, onRead)
+	remoteTrack = newRemoteTrack(ctx, track, t.pliInterval, t.onPLI, stats, onStatsUpdated, onRead)
 
 	switch quality {
 	case QualityHigh:

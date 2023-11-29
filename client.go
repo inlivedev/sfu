@@ -397,7 +397,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 				}
 
 			} else if simulcast, ok = track.(*SimulcastTrack); ok {
-				simulcast.AddRemoteTrack(remoteTrack, client.statsGetter, onStatsUpdated)
+				simulcast.AddRemoteTrack(simulcast.context, remoteTrack, client.statsGetter, onStatsUpdated)
 			}
 
 			// only process track when the lowest quality is available
