@@ -26,9 +26,9 @@ func NewMetadata() *Metadata {
 
 func (m *Metadata) Set(key string, value interface{}) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	m.m[key] = value
+	m.mu.Unlock()
+
 	m.onChanged(key, value)
 }
 
@@ -44,9 +44,9 @@ func (m *Metadata) Get(key string) (interface{}, error) {
 
 func (m *Metadata) Delete(key string) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	delete(m.m, key)
+	m.mu.Unlock()
+
 	m.onChanged(key, nil)
 }
 
@@ -67,17 +67,17 @@ func (m *Metadata) onChanged(key string, value interface{}) {
 
 func (m *Metadata) OnChanged(ctx context.Context, f func(key string, value interface{})) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
-
 	nextIdx := len(m.onChangedCallbacks)
 	m.onChangedCallbacks = append(m.onChangedCallbacks, f)
+	m.mu.Unlock()
 
 	go func() {
 		localCtx, cancel := context.WithCancel(ctx)
 		defer cancel()
 
 		<-localCtx.Done()
-
+		m.mu.Lock()
+		defer m.mu.Unlock()
 		for i, _ := range m.onChangedCallbacks {
 			if nextIdx == i {
 				m.onChangedCallbacks = append(m.onChangedCallbacks[:i], m.onChangedCallbacks[i+1:]...)

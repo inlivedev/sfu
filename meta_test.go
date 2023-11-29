@@ -42,7 +42,7 @@ func TestMetadata(t *testing.T) {
 
 	// Test OnChanged method
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+
 	ch := make(chan struct{})
 	m.OnChanged(ctx, func(key string, value interface{}) {
 		t.Logf("Key: %s, Value: %v", key, value)
@@ -53,4 +53,22 @@ func TestMetadata(t *testing.T) {
 	}()
 
 	<-ch
+
+	// cancel the listener above
+	cancel()
+
+	// Test OnChanged method with cancel
+	var state = true
+	ctx1, cancel1 := context.WithCancel(context.Background())
+	m.OnChanged(ctx1, func(key string, value interface{}) {
+		t.Logf("Key: %s, Value: %v", key, value)
+		state = false
+	})
+
+	cancel1()
+
+	m.Set("key6", "value6")
+
+	require.Equal(t, true, state)
+
 }
