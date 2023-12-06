@@ -483,8 +483,8 @@ func (bc *bitrateController) MonitorBandwidth(estimator cc.BandwidthEstimator) {
 // each time adjustment needed, it will only increase or decrese single track.
 func (bc *bitrateController) checkAndAdjustBitrates() {
 	claims := bc.Claims()
-	lowestQuality := QualityLevel(QualityHigh)
-	highestQuality := QualityLevel(QualityNone)
+	currentLowestQuality := QualityLevel(QualityHigh)
+	currentHighestQuality := QualityLevel(QualityNone)
 
 	noneCount := 0
 	lowCount := 0
@@ -498,12 +498,12 @@ func (bc *bitrateController) checkAndAdjustBitrates() {
 			bc.setQuality(claim.track.ID(), quality)
 		}
 
-		if claim.quality < lowestQuality {
-			lowestQuality = claim.quality
+		if claim.quality < currentLowestQuality {
+			currentLowestQuality = claim.quality
 		}
 
-		if claim.quality > highestQuality {
-			highestQuality = claim.quality
+		if claim.quality > currentHighestQuality {
+			currentHighestQuality = claim.quality
 		}
 
 		if claim.track.IsScreen() {
@@ -550,13 +550,15 @@ func (bc *bitrateController) checkAndAdjustBitrates() {
 						continue
 					}
 
-					if claim.track.IsScreen() && reducedQuality == QualityNone {
-						// never reduce screen track to none
+					if reducedQuality == QualityNone {
+						// never reduce track to none
+						// this could make the ontrack never triggered on the receiver
 						continue
-					} else if claim.track.IsScreen() && bc.isThereNonScreenCanDecrease(lowestQuality) {
+					} else if claim.track.IsScreen() && bc.isThereNonScreenCanDecrease(currentLowestQuality) {
 						// skip if there is a non screen track can be reduced
 						continue
 					}
+
 					if claim.track.IsSimulcast() {
 						claim.track.(*simulcastClientTrack).remoteTrack.sendPLI(reducedQuality)
 					} else {
@@ -579,7 +581,7 @@ func (bc *bitrateController) checkAndAdjustBitrates() {
 						continue
 					}
 
-					if !claim.track.IsScreen() && bc.isScreenNeedIncrease(highestQuality) {
+					if !claim.track.IsScreen() && bc.isScreenNeedIncrease(currentHighestQuality) {
 						continue
 					}
 
@@ -627,9 +629,9 @@ func (bc *bitrateController) onRemoteViewedSizeChanged(videoSize videoSize) {
 		claim.track.SetMaxQuality(QualityNone)
 	}
 
-	if videoSize.Width <= bc.client.sfu.bitratesConfig.VideoLowPixels {
+	if videoSize.Width*videoSize.Height <= bc.client.sfu.bitratesConfig.VideoLowPixels {
 		claim.track.SetMaxQuality(QualityLow)
-	} else if videoSize.Width <= bc.client.sfu.bitratesConfig.VideoMidPixels {
+	} else if videoSize.Width*videoSize.Height <= bc.client.sfu.bitratesConfig.VideoMidPixels {
 		claim.track.SetMaxQuality(QualityMid)
 	} else {
 		claim.track.SetMaxQuality(QualityHigh)

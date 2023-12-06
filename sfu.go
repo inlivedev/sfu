@@ -30,11 +30,11 @@ func DefaultBitrates() BitratesConfig {
 		Audio:            48_000,
 		Video:            1_200_000,
 		VideoHigh:        1_200_000,
-		VideoHighPixels:  720,
+		VideoHighPixels:  720 * 360,
 		VideoMid:         500_000,
-		VideoMidPixels:   360,
+		VideoMidPixels:   360 * 180,
 		VideoLow:         150_000,
-		VideoLowPixels:   180,
+		VideoLowPixels:   180 * 90,
 		InitialBandwidth: 1_000_000,
 	}
 }
