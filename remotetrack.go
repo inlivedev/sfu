@@ -80,9 +80,6 @@ func (t *remoteTrack) readRTP() {
 				rtp, _, readErr := t.track.ReadRTP()
 				if readErr == io.EOF {
 					return
-				} else if readErr != nil {
-					glog.Error("error reading rtp: ", readErr.Error())
-					return
 				}
 
 				t.onRead(*rtp)
