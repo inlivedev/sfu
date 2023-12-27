@@ -82,11 +82,14 @@ func (t *remoteTrack) readRTP() {
 					return
 				}
 
-				t.onRead(*rtp)
+				if rtp != nil {
+					t.onRead(*rtp)
 
-				if !t.IsRelay() {
-					go t.updateStats()
+					if !t.IsRelay() {
+						go t.updateStats()
+					}
 				}
+
 			}
 		}
 	}()
