@@ -334,14 +334,17 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 
 		defer glog.Info("client: new track ", remoteTrack.ID(), " Kind:", remoteTrack.Kind(), " Codec: ", remoteTrack.Codec().MimeType, " RID: ", remoteTrack.RID())
 
-		onPLI := func() error {
+		onPLI := func() {
 			if client.peerConnection == nil || client.peerConnection.PC() == nil || client.peerConnection.PC().ConnectionState() != webrtc.PeerConnectionStateConnected {
-				return nil
+				return
 			}
 
-			return client.peerConnection.PC().WriteRTCP([]rtcp.Packet{
+			glog.Info("client: send pli ", remoteTrack.ID())
+			if err := client.peerConnection.PC().WriteRTCP([]rtcp.Packet{
 				&rtcp.PictureLossIndication{MediaSSRC: uint32(remoteTrack.SSRC())},
-			})
+			}); err != nil {
+				glog.Error("client: error write pli ", err)
+			}
 		}
 
 		onStatsUpdated := func(stats *stats.Stats) {
@@ -629,47 +632,53 @@ func (c *Client) renegotiateQueuOp() {
 		<-timout.Done()
 
 		for c.negotiationNeeded.Load() {
-			// mark negotiation is not needed after this done, so it will out of the loop
-			c.negotiationNeeded.Store(false)
+			ctxx, cancell := context.WithCancel(c.context)
+			defer cancell()
+			select {
+			case <-ctxx.Done():
+				return
+			default:
+				// mark negotiation is not needed after this done, so it will out of the loop
+				c.negotiationNeeded.Store(false)
 
-			// only renegotiate when client is connected
-			if c.state.Load() != ClientStateEnded &&
-				c.peerConnection.PC().SignalingState() == webrtc.SignalingStateStable &&
-				c.peerConnection.PC().ConnectionState() == webrtc.PeerConnectionStateConnected {
+				// only renegotiate when client is connected
+				if c.state.Load() != ClientStateEnded &&
+					c.peerConnection.PC().SignalingState() == webrtc.SignalingStateStable &&
+					c.peerConnection.PC().ConnectionState() == webrtc.PeerConnectionStateConnected {
 
-				offer, err := c.peerConnection.PC().CreateOffer(nil)
-				if err != nil {
-					glog.Error("sfu: error create offer on renegotiation ", err)
-					return
-				}
+					offer, err := c.peerConnection.PC().CreateOffer(nil)
+					if err != nil {
+						glog.Error("sfu: error create offer on renegotiation ", err)
+						return
+					}
 
-				// Sets the LocalDescription, and starts our UDP listeners
-				err = c.peerConnection.PC().SetLocalDescription(offer)
-				if err != nil {
-					glog.Error("sfu: error set local description on renegotiation ", err)
-					return
-				}
+					// Sets the LocalDescription, and starts our UDP listeners
+					err = c.peerConnection.PC().SetLocalDescription(offer)
+					if err != nil {
+						glog.Error("sfu: error set local description on renegotiation ", err)
+						return
+					}
 
-				// this will be blocking until the renegotiation is done
-				answer, err := c.onRenegotiation(c.context, *c.peerConnection.PC().LocalDescription())
-				if err != nil {
-					//TODO: when this happen, we need to close the client and ask the remote client to reconnect
-					glog.Error("sfu: error on renegotiation ", err)
-					return
-				}
+					// this will be blocking until the renegotiation is done
+					answer, err := c.onRenegotiation(c.context, *c.peerConnection.PC().LocalDescription())
+					if err != nil {
+						//TODO: when this happen, we need to close the client and ask the remote client to reconnect
+						glog.Error("sfu: error on renegotiation ", err)
+						return
+					}
 
-				if answer.Type != webrtc.SDPTypeAnswer {
-					glog.Error("sfu: error on renegotiation, the answer is not an answer type")
-					return
-				}
+					if answer.Type != webrtc.SDPTypeAnswer {
+						glog.Error("sfu: error on renegotiation, the answer is not an answer type")
+						return
+					}
 
-				err = c.peerConnection.PC().SetRemoteDescription(answer)
-				if err != nil {
-					return
+					err = c.peerConnection.PC().SetRemoteDescription(answer)
+					if err != nil {
+						return
+					}
 				}
 			}
 		}
-
 	}()
 
 }
@@ -742,6 +751,8 @@ func (c *Client) setClientTrack(t ITrack) iClientTrack {
 			return
 		}
 
+		_ = sender.Stop()
+
 		if err := c.peerConnection.PC().RemoveTrack(sender); err != nil {
 			glog.Error("client: error remove track ", err)
 			return
@@ -758,8 +769,6 @@ func (c *Client) setClientTrack(t ITrack) iClientTrack {
 
 func (c *Client) enableReportAndStats(rtpSender *webrtc.RTPSender, track iClientTrack) {
 	go func() {
-		rtcpBuf := make([]byte, 1500)
-
 		localCtx, cancel := context.WithCancel(c.context)
 
 		defer cancel()
@@ -767,37 +776,20 @@ func (c *Client) enableReportAndStats(rtpSender *webrtc.RTPSender, track iClient
 		for {
 			select {
 			case <-localCtx.Done():
-
 				return
 			default:
-				if _, _, rtcpErr := rtpSender.Read(rtcpBuf); rtcpErr != nil {
-					return
-				}
-
-			}
-		}
-	}()
-
-	go func() {
-		localCtx, cancel := context.WithCancel(c.context)
-		defer cancel()
-		for {
-			select {
-			case <-localCtx.Done():
-				return
-			default:
-				rtcpPkts, _, err := rtpSender.ReadRTCP()
+				rtcpPackets, _, err := rtpSender.ReadRTCP()
 				if err != nil {
 					return
 				}
 
-				for _, p := range rtcpPkts {
+				for _, p := range rtcpPackets {
 					switch p.(type) {
 					case *rtcp.PictureLossIndication:
+						glog.Info("client: got pli ", track.ID())
 						track.RequestPLI()
-
-						// case *rtcp.ReceiverEstimatedMaximumBitrate:
-
+					case *rtcp.FullIntraRequest:
+						track.RequestPLI()
 					}
 				}
 			}
@@ -848,6 +840,7 @@ func (c *Client) afterClosed() {
 	c.cancel()
 
 	c.sfu.onAfterClientStopped(c)
+
 }
 
 func (c *Client) stop() error {

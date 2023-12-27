@@ -9,6 +9,11 @@ import (
 )
 
 func TestMetadata(t *testing.T) {
+	type dataValue struct {
+		key   string
+		value interface{}
+	}
+
 	// Test NewMetadata function
 	m := NewMetadata()
 	if m == nil {
@@ -18,45 +23,60 @@ func TestMetadata(t *testing.T) {
 	_, err := m.Get("key1")
 	require.Equal(t, ErrMetaNotFound, err)
 
-	// Test Set and Get methods
-	m.Set("key1", "value1")
-	m.Set("key2", 123)
-	if value, _ := m.Get("key1"); value != "value1" {
-		t.Errorf("Get returned %v, expected %v", value, "value1")
+	reqData := map[string]interface{}{
+		"key1":  "data1",
+		"key2":  "data2",
+		"key3":  "data3",
+		"key4":  "data4",
+		"key5":  "data5",
+		"key6":  "data6",
+		"key7":  "data7",
+		"key8":  "data8",
+		"key9":  "data9",
+		"key10": "data10",
 	}
-	if value, _ := m.Get("key2"); value != 123 {
-		t.Errorf("Get returned %v, expected %v", value, 123)
-	}
-
-	// Test Delete method
-	_ = m.Delete("key1")
-	if value, _ := m.Get("key1"); value != nil {
-		t.Errorf("Get returned %v, expected nil", value)
-	}
-
-	err = m.Delete("key1")
-	require.Equal(t, ErrMetaNotFound, err)
-
-	// Test ForEach method
-	m.Set("key3", "value3")
-	m.Set("key4", 456)
-	m.ForEach(func(key string, value interface{}) {
-		t.Logf("Key: %s, Value: %v", key, value)
-	})
 
 	// Test OnChanged method
 	ctx, cancel := context.WithCancel(context.Background())
 
-	ch := make(chan struct{})
+	receivedMetas := make(map[string]interface{})
+	chanMeta := make(chan dataValue, len(reqData))
 	m.OnChanged(ctx, func(key string, value interface{}) {
 		t.Logf("Key: %s, Value: %v", key, value)
-		ch <- struct{}{}
+		chanMeta <- dataValue{key: key, value: value}
 	})
-	go func() {
-		m.Set("key5", "value5")
-	}()
 
-	<-ch
+	// Test Set and Get methods
+	for k, v := range reqData {
+		m.Set(k, v)
+		if value, _ := m.Get(k); value != v {
+			t.Errorf("Get returned %v, expected %v", value, "value1")
+		}
+	}
+
+	for i := 0; i < len(reqData); i++ {
+		select {
+		case data := <-chanMeta:
+			receivedMetas[data.key] = data.value
+		case <-time.After(100 * time.Millisecond):
+			t.Error("timeout waiting for meta")
+		}
+	}
+
+	require.Equal(t, len(reqData), len(receivedMetas))
+
+	// Test ForEach method
+	m.ForEach(func(key string, value interface{}) {
+		t.Logf("Key: %s, Value: %v", key, value)
+	})
+
+	// Test Delete method
+	for k := range reqData {
+		_ = m.Delete(k)
+		if _, err := m.Get(k); err != ErrMetaNotFound {
+			t.Errorf("Get returned %v, expected %v", err, ErrMetaNotFound)
+		}
+	}
 
 	// cancel the listener above
 	cancel()

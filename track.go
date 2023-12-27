@@ -60,6 +60,7 @@ type ITrack interface {
 	Context() context.Context
 	Relay(func(webrtc.SSRC, rtp.Packet))
 	PayloadType() webrtc.PayloadType
+	KeyFrameReceived()
 }
 
 type Track struct {
@@ -72,7 +73,7 @@ type Track struct {
 	onReadCallbacks  []func(rtp.Packet, QualityLevel)
 }
 
-func newTrack(ctx context.Context, clientID string, trackRemote IRemoteTrack, pliInterval time.Duration, onPLI func() error, stats stats.Getter, onStatsUpdated func(*stats.Stats)) ITrack {
+func newTrack(ctx context.Context, clientID string, trackRemote IRemoteTrack, pliInterval time.Duration, onPLI func(), stats stats.Getter, onStatsUpdated func(*stats.Stats)) ITrack {
 	ctList := newClientTrackList()
 
 	baseTrack := baseTrack{
@@ -330,6 +331,10 @@ func (t *Track) IsRelay() bool {
 	return t.remoteTrack.IsRelay()
 }
 
+func (t *Track) KeyFrameReceived() {
+	t.remoteTrack.KeyFrameReceived()
+}
+
 type SimulcastTrack struct {
 	context                     context.Context
 	cancel                      context.CancelFunc
@@ -358,10 +363,10 @@ type SimulcastTrack struct {
 	onAddedRemoteTrackCallbacks []func(*remoteTrack)
 	onReadCallbacks             []func(rtp.Packet, QualityLevel)
 	pliInterval                 time.Duration
-	onPLI                       func() error
+	onPLI                       func()
 }
 
-func newSimulcastTrack(ctx context.Context, clientid string, track IRemoteTrack, pliInterval time.Duration, onPLI func() error, stats stats.Getter, onStatsUpdated func(*stats.Stats)) ITrack {
+func newSimulcastTrack(ctx context.Context, clientid string, track IRemoteTrack, pliInterval time.Duration, onPLI func(), stats stats.Getter, onStatsUpdated func(*stats.Stats)) ITrack {
 	t := &SimulcastTrack{
 		mu: sync.Mutex{},
 		base: &baseTrack{
@@ -737,21 +742,15 @@ func (t *SimulcastTrack) sendPLI(quality QualityLevel) {
 	switch quality {
 	case QualityHigh:
 		if t.remoteTrackHigh != nil {
-			if err := t.remoteTrackHigh.sendPLI(); err != nil {
-				glog.Error("client: error sending PLI ", err)
-			}
+			t.remoteTrackHigh.sendPLI()
 		}
 	case QualityMid:
 		if t.remoteTrackMid != nil {
-			if err := t.remoteTrackMid.sendPLI(); err != nil {
-				glog.Error("client: error sending PLI ", err)
-			}
+			t.remoteTrackMid.sendPLI()
 		}
 	case QualityLow:
 		if t.remoteTrackLow != nil {
-			if err := t.remoteTrackLow.sendPLI(); err != nil {
-				glog.Error("client: error sending PLI ", err)
-			}
+			t.remoteTrackLow.sendPLI()
 		}
 	}
 }
@@ -848,6 +847,20 @@ func (t *SimulcastTrack) IsRelay() bool {
 	}
 
 	return false
+}
+
+func (t *SimulcastTrack) KeyFrameReceived() {
+	if t.remoteTrackHigh != nil {
+		t.remoteTrackHigh.KeyFrameReceived()
+	}
+
+	if t.remoteTrackMid != nil {
+		t.remoteTrackMid.KeyFrameReceived()
+	}
+
+	if t.remoteTrackLow != nil {
+		t.remoteTrackLow.KeyFrameReceived()
+	}
 }
 
 type SubscribeTrackRequest struct {

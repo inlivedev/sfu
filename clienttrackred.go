@@ -80,9 +80,7 @@ func (t *clientTrackRed) IsScaleable() bool {
 }
 
 func (t *clientTrackRed) RequestPLI() {
-	if err := t.remoteTrack.sendPLI(); err != nil {
-		glog.Error("clienttrack: error on send pli", err)
-	}
+	t.remoteTrack.sendPLI()
 }
 
 func (t *clientTrackRed) SetMaxQuality(_ QualityLevel) {

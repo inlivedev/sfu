@@ -77,6 +77,9 @@ func (t *simulcastClientTrack) push(p rtp.Packet, quality QualityLevel) {
 	}
 
 	isFirstKeyframePacket := t.isFirstKeyframePacket(p)
+	if isFirstKeyframePacket {
+		t.remoteTrack.KeyFrameReceived()
+	}
 
 	// check if it's a first packet to send
 	if lastQuality == QualityNone && t.sequenceNumber.Load() == 0 {

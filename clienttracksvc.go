@@ -174,6 +174,9 @@ func (t *scaleableClientTrack) push(p rtp.Packet, _ QualityLevel) {
 	}
 
 	isKeyframe := t.isKeyframe(vp9Packet)
+	if isKeyframe {
+		t.remoteTrack.KeyFrameReceived()
+	}
 
 	if vp9Packet.B && t.sid != qualityPreset.GetSID() {
 		if vp9Packet.SID == qualityPreset.GetSID() && !vp9Packet.P {

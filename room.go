@@ -92,7 +92,7 @@ func DefaultRoomOptions() RoomOptions {
 		QualityPreset: DefaultQualityPreset(),
 		Codecs:        []string{"video/flexfec-03", webrtc.MimeTypeVP9, webrtc.MimeTypeH264, "audio/red", webrtc.MimeTypeOpus},
 		ClientTimeout: 10 * time.Minute,
-		PLIInterval:   5 * time.Second,
+		PLIInterval:   0,
 	}
 }
 

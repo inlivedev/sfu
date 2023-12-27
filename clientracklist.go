@@ -25,8 +25,8 @@ func (l *clientTrackList) Add(track iClientTrack) {
 }
 
 func (l *clientTrackList) remove(id string) {
-	l.mu.RLock()
-	defer l.mu.RUnlock()
+	l.mu.Lock()
+	defer l.mu.Unlock()
 
 	for i, track := range l.tracks {
 		if track.ID() == id {

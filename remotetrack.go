@@ -16,10 +16,12 @@ import (
 type remoteTrack struct {
 	context               context.Context
 	cancel                context.CancelFunc
+	pliContext            context.Context
+	pliCancel             context.CancelFunc
 	mu                    sync.Mutex
 	track                 IRemoteTrack
 	onRead                func(rtp.Packet)
-	onPLI                 func() error
+	onPLI                 func()
 	bitrate               *atomic.Uint32
 	previousBytesReceived *atomic.Uint64
 	currentBytesReceived  *atomic.Uint64
@@ -30,7 +32,7 @@ type remoteTrack struct {
 	onStatsUpdated        func(*stats.Stats)
 }
 
-func newRemoteTrack(ctx context.Context, track IRemoteTrack, pliInterval time.Duration, onPLI func() error, statsGetter stats.Getter, onStatsUpdated func(*stats.Stats), onRead func(rtp.Packet)) *remoteTrack {
+func newRemoteTrack(ctx context.Context, track IRemoteTrack, pliInterval time.Duration, onPLI func(), statsGetter stats.Getter, onStatsUpdated func(*stats.Stats), onRead func(rtp.Packet)) *remoteTrack {
 	localctx, cancel := context.WithCancel(ctx)
 	rt := &remoteTrack{
 		context:               localctx,
@@ -48,7 +50,9 @@ func newRemoteTrack(ctx context.Context, track IRemoteTrack, pliInterval time.Du
 		onRead:                onRead,
 	}
 
-	rt.enableIntervalPLI(pliInterval)
+	if pliInterval > 0 {
+		rt.enableIntervalPLI(pliInterval)
+	}
 
 	rt.readRTP()
 
@@ -66,9 +70,13 @@ func (t *remoteTrack) readRTP() {
 		for {
 			select {
 			case <-t.context.Done():
-
 				return
 			default:
+				if err := t.track.SetReadDeadline(time.Now().Add(100 * time.Millisecond)); err != nil {
+					glog.Error("error setting read deadline: ", err.Error())
+					return
+				}
+
 				rtp, _, readErr := t.track.ReadRTP()
 				if readErr == io.EOF {
 					return
@@ -85,6 +93,16 @@ func (t *remoteTrack) readRTP() {
 			}
 		}
 	}()
+}
+
+func (t *remoteTrack) KeyFrameReceived() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if t.pliCancel != nil {
+		glog.Info("remotetrack: keyframe received ", t.track.ID())
+		t.pliCancel()
+	}
 }
 
 func (t *remoteTrack) updateStats() {
@@ -127,7 +145,8 @@ func (t *remoteTrack) GetCurrentBitrate() uint32 {
 	return t.bitrate.Load()
 }
 
-func (t *remoteTrack) sendPLI() error {
+func (t *remoteTrack) sendPLI() {
+	// return if there is a pending PLI request
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -135,12 +154,12 @@ func (t *remoteTrack) sendPLI() error {
 	requestGap := time.Since(t.lastPLIRequestTime)
 
 	if requestGap < maxGapSeconds {
-		return nil
+		return // ignore PLI request
 	}
 
 	t.lastPLIRequestTime = time.Now()
 
-	return t.onPLI()
+	t.onPLI()
 }
 
 func (t *remoteTrack) enableIntervalPLI(interval time.Duration) {
@@ -155,9 +174,7 @@ func (t *remoteTrack) enableIntervalPLI(interval time.Duration) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				if err := t.sendPLI(); err != nil {
-					glog.Error("remotetrack: error sending PLI: ", err.Error())
-				}
+				t.sendPLI()
 			}
 		}
 	}()

@@ -89,7 +89,7 @@ func main() {
 	// create new room
 	roomsOpts := sfu.DefaultRoomOptions()
 	roomsOpts.Bitrates.InitialBandwidth = 1_000_000
-	roomsOpts.PLIInterval = 3 * time.Second
+	// roomsOpts.PLIInterval = 3 * time.Second
 	defaultRoom, _ := roomManager.NewRoom(roomID, roomName, sfu.RoomTypeLocal, roomsOpts)
 
 	fakeClientCount := 0

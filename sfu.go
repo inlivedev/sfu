@@ -606,9 +606,7 @@ func (s *SFU) AddRelayTrack(ctx context.Context, id, streamid, rid, clientid str
 
 	relayTrack := NewTrackRelay(id, streamid, rid, kind, ssrc, mimeType, rtpChan)
 
-	onPLI := func() error {
-		return nil
-	}
+	onPLI := func() {}
 
 	if rid == "" {
 		// not simulcast
