@@ -209,8 +209,10 @@ func (s *SFU) createClient(id string, name string, peerConnectionConfig webrtc.C
 }
 
 func (s *SFU) NewClient(id, name string, opts ClientOptions) *Client {
-	peerConnectionConfig := webrtc.Configuration{
-		ICEServers: s.iceServers,
+	peerConnectionConfig := webrtc.Configuration{}
+
+	if len(s.iceServers) > 0 {
+		peerConnectionConfig.ICEServers = s.iceServers
 	}
 
 	client := s.createClient(id, name, peerConnectionConfig, opts)
