@@ -88,6 +88,8 @@ func (m *Manager) NewRoom(id, name, roomType string, opts RoomOptions) (*Room, e
 		PLIInterval:              opts.PLIInterval,
 		QualityPreset:            opts.QualityPreset,
 		EnableBandwidthEstimator: m.options.EnableBandwidthEstimator,
+		PublicIP:                 m.options.PublicIP,
+		NAT1To1IPsCandidateType:  m.options.NAT1To1IPsCandidateType,
 	}
 
 	newSFU := New(m.context, sfuOpts)

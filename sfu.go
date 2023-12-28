@@ -109,6 +109,7 @@ type SFU struct {
 	dataChannels              *SFUDataChannelList
 	idleChan                  chan bool
 	iceServers                []webrtc.ICEServer
+	nat1To1IPsCandidateType   webrtc.ICECandidateType
 	mu                        sync.Mutex
 	mux                       *UDPMux
 	onStop                    func()
@@ -117,6 +118,7 @@ type SFU struct {
 	qualityRef                QualityPreset
 	portStart                 uint16
 	portEnd                   uint16
+	publicIP                  string
 	onTrackAvailableCallbacks []func(tracks []ITrack)
 	onClientRemovedCallbacks  []func(*Client)
 	onClientAddedCallbacks    []func(*Client)
@@ -138,6 +140,8 @@ type sfuOptions struct {
 	Codecs                   []string
 	PLIInterval              time.Duration
 	EnableBandwidthEstimator bool
+	PublicIP                 string
+	NAT1To1IPsCandidateType  webrtc.ICECandidateType
 }
 
 // @Param muxPort: port for udp mux
@@ -157,12 +161,14 @@ func New(ctx context.Context, opts sfuOptions) *SFU {
 		enableBandwidthEstimator:  opts.EnableBandwidthEstimator,
 		pliInterval:               opts.PLIInterval,
 		qualityRef:                opts.QualityPreset,
+		publicIP:                  opts.PublicIP,
 		relayTracks:               make(map[string]ITrack),
 		portStart:                 opts.PortStart,
 		portEnd:                   opts.PortEnd,
 		onTrackAvailableCallbacks: make([]func(tracks []ITrack), 0),
 		onClientRemovedCallbacks:  make([]func(*Client), 0),
 		onClientAddedCallbacks:    make([]func(*Client), 0),
+		nat1To1IPsCandidateType:   opts.NAT1To1IPsCandidateType,
 	}
 
 	go func() {

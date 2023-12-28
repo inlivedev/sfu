@@ -251,6 +251,10 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		}
 	}
 
+	if s.publicIP != "" {
+		settingEngine.SetNAT1To1IPs([]string{s.publicIP}, s.nat1To1IPsCandidateType)
+	}
+
 	// Create a new RTCPeerConnection
 	peerConnection, err := webrtc.NewAPI(webrtc.WithMediaEngine(m), webrtc.WithSettingEngine(settingEngine), webrtc.WithInterceptorRegistry(i)).NewPeerConnection(peerConnectionConfig)
 	if err != nil {
