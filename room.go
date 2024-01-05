@@ -375,10 +375,10 @@ func (r *Room) BitrateConfigs() BitrateConfigs {
 	return r.sfu.bitrateConfigs
 }
 
-// CodecsPreference return the current codecs preference that used in SFU
+// CodecPreferences return the current codec preferences that used in SFU
 // Client should use this to configure the used codecs when publishing media tracks
-// Inconsistent codecs preference between client and server can make the SFU cannot handle the codec properly
-func (r *Room) CodecsPreference() []string {
+// Inconsistent codec preferences between client and server can make the SFU cannot handle the codec properly
+func (r *Room) CodecPreferences() []string {
 	return r.sfu.codecs
 }
 
