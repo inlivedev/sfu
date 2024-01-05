@@ -228,6 +228,7 @@ func (t *Track) subscribe(c *Client) iClientTrack {
 			qualityPreset:         c.SFU().QualityPreset(),
 			maxQuality:            QualityHigh,
 			lastQuality:           QualityHigh,
+			processedPacket:       make(map[uint16]packetSequence),
 		}
 	} else if t.Kind() == webrtc.RTPCodecTypeAudio && t.PayloadType() == 63 {
 		glog.Info("track: red enabled", c.receiveRED)
@@ -623,7 +624,6 @@ func (t *SimulcastTrack) subscribe(client *Client) iClientTrack {
 		remoteTrack:             t,
 		sequenceNumber:          sequenceNumber,
 		lastQuality:             lastQuality,
-		paddingQuality:          &atomic.Uint32{},
 		paddingTS:               &atomic.Uint32{},
 		maxQuality:              &atomic.Uint32{},
 		lastBlankSequenceNumber: &atomic.Uint32{},
