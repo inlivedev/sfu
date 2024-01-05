@@ -404,12 +404,13 @@ func (bc *bitrateController) getQuality(t *simulcastClientTrack) QualityLevel {
 			return QualityLow
 		}
 
-		lastQuality := QualityLevel(t.lastQuality.Load())
-		if track.isTrackActive(lastQuality) {
-			return lastQuality
+		if quality != QualityMid && track.isTrackActive(QualityMid) {
+			return QualityMid
 		}
 
-		return QualityNone
+		if quality != QualityHigh && track.isTrackActive(QualityHigh) {
+			return QualityHigh
+		}
 	}
 
 	return quality

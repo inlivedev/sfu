@@ -24,7 +24,6 @@ type simulcastClientTrack struct {
 	lastBlankSequenceNumber *atomic.Uint32
 	sequenceNumber          *atomic.Uint32
 	lastQuality             *atomic.Uint32
-	paddingQuality          *atomic.Uint32
 	paddingTS               *atomic.Uint32
 	maxQuality              *atomic.Uint32
 	lastTimestamp           *atomic.Uint32
@@ -125,36 +124,13 @@ func (t *simulcastClientTrack) push(p rtp.Packet, quality QualityLevel) {
 				t.remoteTrack.lastLowKeyframeTS.Store(time.Now().UnixNano())
 			}
 
-			if trackQuality == QualityNone {
-				// could be because not enough bandwidth to send any track
-				t.lastQuality.Store(uint32(trackQuality))
-			}
-
-			if trackQuality != lastQuality {
-				t.paddingQuality.Store(uint32(lastQuality))
-			}
+			t.lastQuality.Store(uint32(trackQuality))
 		}
 	}
 
 	if trackQuality == quality {
 		t.send(p, trackQuality, lastQuality)
-	} else if trackQuality == QualityNone && quality == QualityLow {
-		if isFirstKeyframePacket {
-			glog.Warning("clienttrack: no quality level to send")
-			if t.localTrack.Codec().MimeType == webrtc.MimeTypeH264 {
-				// if codec is h264, send a blank frame once
-				p.Payload = getH264BlankFrame()
-				t.send(p, QualityLow, lastQuality)
-			} else if t.localTrack.Codec().MimeType != webrtc.MimeTypeH264 && t.remoteTrack.isTrackActive(QualityLow) {
-				// if codec is not h264, send a low quality packet
-				t.send(p, QualityLow, lastQuality)
-			} else {
-				// last effort, send the last quality
-				t.send(p, lastQuality, lastQuality)
-			}
-		}
 	}
-
 }
 
 func (t *simulcastClientTrack) GetRemoteTrack() *remoteTrack {
