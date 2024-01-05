@@ -94,7 +94,7 @@ type Room struct {
 type RoomOptions struct {
 	// Configures the bitrates configuration that will be used by the room
 	// Make sure to use the same bitrate config when publishing video because this is used to manage the usage bandwidth in this room
-	Bitrates BitratesConfig
+	Bitrates BitrateConfigs
 	// Configures the codecs that will be used by the room
 	Codecs []string
 	// Configures the timeout for client to join the room after register
@@ -367,12 +367,12 @@ func (r *Room) CreateDataChannel(label string, opts DataChannelOptions) error {
 	return r.sfu.CreateDataChannel(label, opts)
 }
 
-// BitratesConfig return the current bitrate configuration that used in bitrate controller
+// BitrateConfigs return the current bitrate configuration that used in bitrate controller
 // Client should use this to configure the bitrate when publishing media tracks
 // Inconsistent bitrate configuration between client and server will result missed bitrate calculation and
 // could affecting packet loss and media quality
-func (r *Room) BitratesConfig() BitratesConfig {
-	return r.sfu.bitratesConfig
+func (r *Room) BitrateConfigs() BitrateConfigs {
+	return r.sfu.bitrateConfigs
 }
 
 // CodecsPreference return the current codecs preference that used in SFU

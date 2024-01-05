@@ -258,7 +258,7 @@ func (bc *bitrateController) getDistributedQuality(totalTracks int) QualityLevel
 
 	distributedBandwidth := availableBandwidth / uint32(totalTracks)
 
-	bitrateConfig := bc.client.SFU().bitratesConfig
+	bitrateConfig := bc.client.SFU().bitrateConfigs
 
 	if distributedBandwidth < bitrateConfig.VideoMid {
 		return QualityLow
@@ -630,9 +630,9 @@ func (bc *bitrateController) onRemoteViewedSizeChanged(videoSize videoSize) {
 		claim.track.SetMaxQuality(QualityNone)
 	}
 
-	if videoSize.Width*videoSize.Height <= bc.client.sfu.bitratesConfig.VideoLowPixels {
+	if videoSize.Width*videoSize.Height <= bc.client.sfu.bitrateConfigs.VideoLowPixels {
 		claim.track.SetMaxQuality(QualityLow)
-	} else if videoSize.Width*videoSize.Height <= bc.client.sfu.bitratesConfig.VideoMidPixels {
+	} else if videoSize.Width*videoSize.Height <= bc.client.sfu.bitrateConfigs.VideoMidPixels {
 		claim.track.SetMaxQuality(QualityMid)
 	} else {
 		claim.track.SetMaxQuality(QualityHigh)

@@ -11,11 +11,11 @@ import (
 	"golang.org/x/exp/slices"
 )
 
-// BitratesConfig is the configuration for the bitrate that will be used for adaptive bitrates controller
+// BitrateConfigs is the configuration for the bitrate that will be used for adaptive bitrates controller
 // The paramenter is in bps (bit per second) for non pixels parameters.
 // For pixels parameters, it is total pixels (width * height) of the video.
 // High, Mid, and Low are the references for bitrate controller to decide the max bitrate to send to the client.
-type BitratesConfig struct {
+type BitrateConfigs struct {
 	AudioRed         uint32 `json:"audio_red,omitempty" yaml:"audio_red,omitempty" mapstructure:"audio_red,omitempty"`
 	Audio            uint32 `json:"audio,omitempty" yaml:"audio,omitempty" mapstructure:"audio,omitempty"`
 	Video            uint32 `json:"video,omitempty" yaml:"video,omitempty" mapstructure:"video,omitempty"`
@@ -28,8 +28,8 @@ type BitratesConfig struct {
 	InitialBandwidth uint32 `json:"initial_bandwidth,omitempty" yaml:"initial_bandwidth,omitempty" mapstructure:"initial_bandwidth,omitempty"`
 }
 
-func DefaultBitrates() BitratesConfig {
-	return BitratesConfig{
+func DefaultBitrates() BitrateConfigs {
+	return BitrateConfigs{
 		AudioRed:         65_000,
 		Audio:            48_000,
 		Video:            1_200_000,
@@ -105,7 +105,7 @@ func (s *SFUClients) Remove(client *Client) error {
 }
 
 type SFU struct {
-	bitratesConfig            BitratesConfig
+	bitrateConfigs            BitrateConfigs
 	clients                   *SFUClients
 	context                   context.Context
 	cancel                    context.CancelFunc
@@ -139,7 +139,7 @@ type sfuOptions struct {
 	Mux                      *UDPMux
 	PortStart                uint16
 	PortEnd                  uint16
-	Bitrates                 BitratesConfig
+	Bitrates                 BitrateConfigs
 	QualityPreset            QualityPreset
 	Codecs                   []string
 	PLIInterval              time.Duration
@@ -161,7 +161,7 @@ func New(ctx context.Context, opts sfuOptions) *SFU {
 		mu:                        sync.Mutex{},
 		iceServers:                opts.IceServers,
 		mux:                       opts.Mux,
-		bitratesConfig:            opts.Bitrates,
+		bitrateConfigs:            opts.Bitrates,
 		enableBandwidthEstimator:  opts.EnableBandwidthEstimator,
 		pliInterval:               opts.PLIInterval,
 		qualityRef:                opts.QualityPreset,
@@ -578,15 +578,15 @@ func (s *SFU) TotalActiveSessions() int {
 func (s *SFU) QualityLevelToBitrate(level QualityLevel) uint32 {
 	switch level {
 	case QualityAudioRed:
-		return s.bitratesConfig.AudioRed
+		return s.bitrateConfigs.AudioRed
 	case QualityAudio:
-		return s.bitratesConfig.Audio
+		return s.bitrateConfigs.Audio
 	case QualityLow:
-		return s.bitratesConfig.VideoLow
+		return s.bitrateConfigs.VideoLow
 	case QualityMid:
-		return s.bitratesConfig.VideoMid
+		return s.bitrateConfigs.VideoMid
 	case QualityHigh:
-		return s.bitratesConfig.VideoHigh
+		return s.bitrateConfigs.VideoHigh
 	default:
 		return 0
 	}

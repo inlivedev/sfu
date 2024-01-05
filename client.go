@@ -219,7 +219,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		congestionController, err := cc.NewInterceptor(func() (cc.BandwidthEstimator, error) {
 			// if bw below 100_000, somehow the estimator will struggle to probe the bandwidth and will stuck there. So we set the min to 100_000
 			// TODO: we need to use packet loss based bandwidth adjuster when the bandwidth is below 100_000
-			return gcc.NewSendSideBWE(gcc.SendSideBWEInitialBitrate(int(s.bitratesConfig.InitialBandwidth)))
+			return gcc.NewSendSideBWE(gcc.SendSideBWEInitialBitrate(int(s.bitrateConfigs.InitialBandwidth)))
 		})
 		if err != nil {
 			panic(err)
@@ -1149,7 +1149,7 @@ func (c *Client) GetEstimatedBandwidth() uint32 {
 	estimated := uint32(0)
 
 	if c.estimator == nil {
-		estimated = uint32(c.sfu.bitratesConfig.InitialBandwidth)
+		estimated = uint32(c.sfu.bitrateConfigs.InitialBandwidth)
 	} else {
 		estimated = uint32(c.estimator.GetTargetBitrate())
 		c.egressBandwidth.Store(estimated)
