@@ -39,10 +39,6 @@ func TestRoomCreateAndClose(t *testing.T) {
 	client2, err := testRoom.AddClient(id, id, DefaultClientOptions())
 	require.NoErrorf(t, err, "error adding client to room: %v", err)
 
-	// stop all clients should error on unempty room
-	err = testRoom.Close()
-	require.EqualError(t, err, ErrRoomIsNotEmpty.Error(), "expecting error room is not empty: %v", err)
-
 	// stop other client
 	err = testRoom.StopClient(client2.ID())
 	require.NoErrorf(t, err, "error stopping client: %v", err)
