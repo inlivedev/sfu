@@ -278,6 +278,8 @@ func (t *Track) subscribe(c *Client) iClientTrack {
 			// send through datachannel
 			c.onVoiceDetected(activity)
 		})
+	} else if t.Kind() == webrtc.RTPCodecTypeVideo {
+		t.remoteTrack.sendPLI()
 	}
 
 	go func() {
@@ -633,6 +635,10 @@ func (t *SimulcastTrack) subscribe(client *Client) iClientTrack {
 	}
 
 	ct.SetMaxQuality(QualityHigh)
+
+	ct.remoteTrack.sendPLI(QualityHigh)
+	ct.remoteTrack.sendPLI(QualityMid)
+	ct.remoteTrack.sendPLI(QualityLow)
 
 	go func() {
 		defer cancel()
