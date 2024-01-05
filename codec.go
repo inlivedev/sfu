@@ -131,23 +131,33 @@ var (
 func RegisterCodecs(m *webrtc.MediaEngine, codecs []string) error {
 	errors := []error{}
 
-	if !slices.Contains(codecs, "video/rtx") {
-		codecs = append(codecs, "video/rtx")
-	}
-
 	for _, codec := range audioCodecs {
 		if slices.Contains(codecs, codec.MimeType) {
 			if err := m.RegisterCodec(codec, webrtc.RTPCodecTypeAudio); err != nil {
 				errors = append(errors, err)
 			}
 		}
-
 	}
 
+	registeredVideoCodecs := make([]webrtc.RTPCodecParameters, 0)
+
 	for _, codec := range videoCodecs {
+
 		if slices.Contains(codecs, codec.MimeType) {
 			if err := m.RegisterCodec(codec, webrtc.RTPCodecTypeVideo); err != nil {
 				errors = append(errors, err)
+			}
+
+			registeredVideoCodecs = append(registeredVideoCodecs, codec)
+		}
+	}
+
+	for _, codec := range registeredVideoCodecs {
+		for _, videoCodec := range videoCodecs {
+			if videoCodec.RTPCodecCapability.MimeType == "video/rtx" && videoCodec.RTPCodecCapability.SDPFmtpLine == "apt="+string(codec.PayloadType) {
+				if err := m.RegisterCodec(videoCodec, webrtc.RTPCodecTypeVideo); err != nil {
+					errors = append(errors, err)
+				}
 			}
 		}
 	}

@@ -343,7 +343,6 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 				return
 			}
 
-			glog.Info("client: send pli ", remoteTrack.ID())
 			if err := client.peerConnection.PC().WriteRTCP([]rtcp.Packet{
 				&rtcp.PictureLossIndication{MediaSSRC: uint32(remoteTrack.SSRC())},
 			}); err != nil {
@@ -454,11 +453,14 @@ func (c *Client) Context() context.Context {
 	return c.context
 }
 
-func (c *Client) OnTracksAdded(f func(addedTracks []ITrack)) {
+// OnTrackAdded event is to confirmed the source type of the pending published tracks.
+// If the event is not listened, the pending published tracks will be ignored and not published to other clients.
+// Once received, respond with `client.SetTracksSourceType()“ to confirm the source type of the pending published tracks
+func (c *Client) OnTracksAdded(callback func(addedTracks []ITrack)) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	c.onTracksAdded = f
+	c.onTracksAdded = callback
 }
 
 // Init and Complete negotiation is used for bridging the room between servers
@@ -585,6 +587,9 @@ func (c *Client) renegotiate() {
 	})
 }
 
+// OnBeforeRenegotiation event is called before the SFU is trying to renegotiate with the client.
+// The client must be listen for this event and set the callback to return true if the client is ready to renegotiate
+// and no current negotiation is in progress from the client.
 func (c *Client) OnBeforeRenegotiation(callback func(context.Context) bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -592,6 +597,9 @@ func (c *Client) OnBeforeRenegotiation(callback func(context.Context) bool) {
 	c.onBeforeRenegotiation = callback
 }
 
+// OnRenegotiation event is called when the SFU is trying to renegotiate with the client.
+// The callback will receive the SDP offer from the SFU that must be use to create the SDP answer from the client.
+// The SDP answer then can be passed back to the SFU using `client.CompleteNegotiation()` method.
 func (c *Client) OnRenegotiation(callback func(context.Context, webrtc.SessionDescription) (webrtc.SessionDescription, error)) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -693,6 +701,9 @@ func (c *Client) allowRemoteRenegotiation() {
 	})
 }
 
+// OnAllowedRemoteRenegotiation event is called when the SFU is done with the renegotiation
+// and ready to receive the renegotiation from the client.
+// Use this event to trigger the client to do renegotiation if needed.
 func (c *Client) OnAllowedRemoteRenegotiation(callback func()) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -790,7 +801,6 @@ func (c *Client) enableReportAndStats(rtpSender *webrtc.RTPSender, track iClient
 				for _, p := range rtcpPackets {
 					switch p.(type) {
 					case *rtcp.PictureLossIndication:
-						glog.Info("client: got pli ", track.ID())
 						track.RequestPLI()
 					case *rtcp.FullIntraRequest:
 						track.RequestPLI()
@@ -872,6 +882,9 @@ func (c *Client) AddICECandidate(candidate webrtc.ICECandidateInit) error {
 	return nil
 }
 
+// OnTracksAvailable event is called when the SFU has ice candidate that need to pass to the client.
+// This event will triggered during negotiation process to exchanges ice candidates between SFU and client.
+// The client can also pass the ice candidate to the SFU using `client.AddICECandidate()` method.
 func (c *Client) OnIceCandidate(callback func(context.Context, *webrtc.ICECandidate)) {
 	c.onIceCandidate = callback
 }
@@ -896,6 +909,8 @@ func (c *Client) sendPendingLocalCandidates() {
 	c.pendingLocalCandidates = nil
 }
 
+// OnConnectionStateChanged event is called when the SFU connection state is changed.
+// The callback will receive the connection state as the new state.
 func (c *Client) OnConnectionStateChanged(callback func(webrtc.PeerConnectionState)) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -915,10 +930,15 @@ func (c *Client) onJoined() {
 	}
 }
 
+// OnJoined event is called when the client is joined to the room.
+// This doesn't mean that the client's tracks are already published to the room.
+// This event can be use to track number of clients in the room.
 func (c *Client) OnJoined(callback func()) {
 	c.onJoinedCallbacks = append(c.onJoinedCallbacks, callback)
 }
 
+// OnLeft event is called when the client is left from the room.
+// This event can be use to track number of clients in the room.
 func (c *Client) OnLeft(callback func()) {
 	c.onLeftCallbacks = append(c.onLeftCallbacks, callback)
 }
@@ -929,6 +949,8 @@ func (c *Client) onLeft() {
 	}
 }
 
+// OnTrackRemoved event is called when the client's track is removed from the room.
+// Usually this triggered when the client is disconnected from the room or a track is unpublished from the client.
 func (c *Client) OnTrackRemoved(callback func(sourceType string, track *webrtc.TrackLocalStaticRTP)) {
 	c.onTrackRemovedCallbacks = append(c.onTrackRemovedCallbacks, callback)
 }
@@ -991,6 +1013,11 @@ func (c *Client) updateSenderStats(sender *webrtc.RTPSender) {
 	}
 }
 
+// SetTracksSourceType set the source type of the pending published tracks.
+// This function must be called after receiving OnTracksAdded event.
+// The source type can be "media" or "screen"
+// Calling this method will trigger `client.OnTracksAvailable` event to other clients.
+// The other clients then can subscribe the tracks using `client.SubscribeTracks()` method.
 func (c *Client) SetTracksSourceType(trackTypes map[string]TrackType) {
 	availableTracks := make([]ITrack, 0)
 	removeTrackIDs := make([]string, 0)
@@ -1011,6 +1038,10 @@ func (c *Client) SetTracksSourceType(trackTypes map[string]TrackType) {
 	}
 }
 
+// SubscribeTracks subscribe tracks from other clients that are published to this client
+// The client must listen for `client.OnTracksAvailable` to know if a new track is available to subscribe.
+// Calling subscribe tracks will trigger the SFU renegotiation with the client.
+// Make sure you already listen for `client.OnRenegotiation()` before calling this method to track subscription can complete.
 func (c *Client) SubscribeTracks(req []SubscribeTrackRequest) error {
 	if c.peerConnection.PC().ConnectionState() != webrtc.PeerConnectionStateConnected {
 		c.pendingReceivedTracks = append(c.pendingReceivedTracks, req...)
@@ -1086,6 +1117,8 @@ func (c *Client) SubscribeAllTracks() {
 	}
 }
 
+// SetQuality method is to set the maximum quality of the video that will be sent to the client.
+// This is for bandwidth efficiency purpose and use when the video is rendered in smaller size than the original size.
 func (c *Client) SetQuality(quality QualityLevel) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -1305,6 +1338,8 @@ func (c *Client) SFU() *SFU {
 	return c.sfu
 }
 
+// OnTracksAvailable event is called when the SFU is trying to publish new tracks to the client.
+// The client then can subscribe to the tracks by calling `client.SubscribeTracks()` method.
 func (c *Client) OnTracksAvailable(callback func([]ITrack)) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -1317,6 +1352,8 @@ func (c *Client) onTracksAvailable(tracks []ITrack) {
 	}
 }
 
+// OnVoiceDetected event is called when the SFU is detecting voice activity in the room.
+// The callback will receive the voice activity data that can be use for visual indicator of current speaker.
 func (c *Client) OnVoiceDetected(callback func(activity voiceactivedetector.VoiceActivity)) {
 	c.mu.Lock()
 	defer c.mu.Unlock()

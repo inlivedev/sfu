@@ -112,7 +112,7 @@ func DefaultRoomOptions() RoomOptions {
 	return RoomOptions{
 		Bitrates:      DefaultBitrates(),
 		QualityPreset: DefaultQualityPreset(),
-		Codecs:        []string{"video/flexfec-03", webrtc.MimeTypeVP9, webrtc.MimeTypeH264, "audio/red", webrtc.MimeTypeOpus},
+		Codecs:        []string{webrtc.MimeTypeVP9, webrtc.MimeTypeH264, "audio/red", webrtc.MimeTypeOpus},
 		ClientTimeout: 10 * time.Minute,
 		PLIInterval:   0,
 	}
@@ -160,14 +160,12 @@ func (r *Room) AddExtension(extension IExtension) {
 	r.extensions = append(r.extensions, extension)
 }
 
-// room can only closed once it's empty or it will return error
+// Close the room and stop all clients. All connected clients will stopped and removed from the room.
+// All clients will get `connectionstateevent` with `closed` state.
+// https://developer.mozilla.org/en-US/docs/Web/API/RTCPeerConnection/connectionstatechange_event
 func (r *Room) Close() error {
 	if r.state == StateRoomClosed {
 		return ErrRoomIsClosed
-	}
-
-	if r.sfu.clients.Length() > 0 {
-		return ErrRoomIsNotEmpty
 	}
 
 	r.cancel()
@@ -198,12 +196,6 @@ func (r *Room) StopClient(id string) error {
 	}
 
 	return client.stop()
-}
-
-func (r *Room) StopAllClients() {
-	for _, client := range r.sfu.clients.GetClients() {
-		client.PeerConnection().Close()
-	}
 }
 
 func (r *Room) AddClient(id, name string, opts ClientOptions) (*Client, error) {
@@ -375,8 +367,19 @@ func (r *Room) CreateDataChannel(label string, opts DataChannelOptions) error {
 	return r.sfu.CreateDataChannel(label, opts)
 }
 
+// BitratesConfig return the current bitrate configuration that used in bitrate controller
+// Client should use this to configure the bitrate when publishing media tracks
+// Inconsistent bitrate configuration between client and server will result missed bitrate calculation and
+// could affecting packet loss and media quality
 func (r *Room) BitratesConfig() BitratesConfig {
 	return r.sfu.bitratesConfig
+}
+
+// CodecsPreference return the current codecs preference that used in SFU
+// Client should use this to configure the used codecs when publishing media tracks
+// Inconsistent codecs preference between client and server can make the SFU cannot handle the codec properly
+func (r *Room) CodecsPreference() []string {
+	return r.sfu.codecs
 }
 
 func (r *Room) Context() context.Context {

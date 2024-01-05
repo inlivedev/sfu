@@ -168,7 +168,9 @@ func (m *Manager) getRoom(id string) (*Room, error) {
 	return room, nil
 }
 
-func (m *Manager) EndRoom(id string) error {
+// CloseRoom will stop all clients in the room and close it.
+// This is a shortcut to find a room with id and close it.
+func (m *Manager) CloseRoom(id string) error {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
@@ -180,16 +182,15 @@ func (m *Manager) EndRoom(id string) error {
 		return ErrRoomNotFound
 	}
 
-	room.StopAllClients()
-
-	return nil
+	return room.Close()
 }
 
-func (m *Manager) Stop() {
+// Close will close all room and canceling the context
+func (m *Manager) Close() {
 	defer m.cancel()
 
 	for _, room := range m.rooms {
-		room.StopAllClients()
+		room.Close()
 	}
 }
 

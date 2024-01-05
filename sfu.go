@@ -11,6 +11,10 @@ import (
 	"golang.org/x/exp/slices"
 )
 
+// BitratesConfig is the configuration for the bitrate that will be used for adaptive bitrates controller
+// The paramenter is in bps (bit per second) for non pixels parameters.
+// For pixels parameters, it is total pixels (width * height) of the video.
+// High, Mid, and Low are the references for bitrate controller to decide the max bitrate to send to the client.
 type BitratesConfig struct {
 	AudioRed         uint32 `json:"audio_red,omitempty" yaml:"audio_red,omitempty" mapstructure:"audio_red,omitempty"`
 	Audio            uint32 `json:"audio,omitempty" yaml:"audio,omitempty" mapstructure:"audio,omitempty"`
