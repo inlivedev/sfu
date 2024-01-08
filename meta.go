@@ -1,7 +1,6 @@
 package sfu
 
 import (
-	"context"
 	"errors"
 	"sync"
 )
@@ -14,6 +13,20 @@ type Metadata struct {
 	mu                 sync.RWMutex
 	m                  map[string]interface{}
 	onChangedCallbacks []func(key string, value interface{})
+}
+
+type OnMetaChangedSubscription struct {
+	meta *Metadata
+	idx  int
+}
+
+// Unsubscribe removes the callback from the metadata
+// Make sure to call the method once the callback is no longer needed
+func (s *OnMetaChangedSubscription) Unsubscribe() {
+	s.meta.mu.Lock()
+	defer s.meta.mu.Unlock()
+
+	s.meta.onChangedCallbacks = append(s.meta.onChangedCallbacks[:s.idx], s.meta.onChangedCallbacks[s.idx+1:]...)
 }
 
 func NewMetadata() *Metadata {
@@ -67,29 +80,26 @@ func (m *Metadata) ForEach(f func(key string, value interface{})) {
 }
 
 func (m *Metadata) onChanged(key string, value interface{}) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	for _, f := range m.onChangedCallbacks {
 		f(key, value)
 	}
 }
 
-func (m *Metadata) OnChanged(ctx context.Context, f func(key string, value interface{})) {
+// OnChanged registers a callback to be called when a metadata is changed
+// Make sure OnMetaChangedSubscription.Unsubscribe() is called when the callback is no longer needed
+func (m *Metadata) OnChanged(f func(key string, value interface{})) *OnMetaChangedSubscription {
 	m.mu.Lock()
 	nextIdx := len(m.onChangedCallbacks)
 	m.onChangedCallbacks = append(m.onChangedCallbacks, f)
 	m.mu.Unlock()
 
-	go func() {
-		localCtx, cancel := context.WithCancel(ctx)
-		defer cancel()
+	sub := &OnMetaChangedSubscription{
+		meta: m,
+		idx:  nextIdx,
+	}
 
-		<-localCtx.Done()
-		m.mu.Lock()
-		defer m.mu.Unlock()
-		for i, _ := range m.onChangedCallbacks {
-			if nextIdx == i {
-				m.onChangedCallbacks = append(m.onChangedCallbacks[:i], m.onChangedCallbacks[i+1:]...)
-				return
-			}
-		}
-	}()
+	return sub
 }

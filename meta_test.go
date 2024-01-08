@@ -1,7 +1,6 @@
 package sfu
 
 import (
-	"context"
 	"testing"
 	"time"
 
@@ -37,13 +36,13 @@ func TestMetadata(t *testing.T) {
 	}
 
 	// Test OnChanged method
-	ctx, cancel := context.WithCancel(context.Background())
 
 	receivedMetas := make(map[string]interface{})
 	chanMeta := make(chan dataValue, len(reqData))
-	m.OnChanged(ctx, func(key string, value interface{}) {
+	sub1 := m.OnChanged(func(key string, value interface{}) {
 		t.Logf("Key: %s, Value: %v", key, value)
 		chanMeta <- dataValue{key: key, value: value}
+
 	})
 
 	// Test Set and Get methods
@@ -79,19 +78,18 @@ func TestMetadata(t *testing.T) {
 	}
 
 	// cancel the listener above
-	cancel()
+	sub1.Unsubscribe()
+	close(chanMeta)
 
 	// Test OnChanged method with cancel
 	var state = true
-	ctx1, cancel1 := context.WithCancel(context.Background())
-	m.OnChanged(ctx1, func(key string, value interface{}) {
+
+	sub2 := m.OnChanged(func(key string, value interface{}) {
 		t.Logf("Key: %s, Value: %v", key, value)
 		state = false
 	})
 
-	cancel1()
-
-	time.Sleep(100 * time.Millisecond)
+	sub2.Unsubscribe()
 
 	m.Set("key6", "value6")
 
