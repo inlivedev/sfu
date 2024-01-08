@@ -658,6 +658,10 @@ func (c *Client) renegotiateQueuOp() {
 					c.peerConnection.PC().SignalingState() == webrtc.SignalingStateStable &&
 					c.peerConnection.PC().ConnectionState() == webrtc.PeerConnectionStateConnected {
 
+					if c.onRenegotiation == nil {
+						return
+					}
+
 					offer, err := c.peerConnection.PC().CreateOffer(nil)
 					if err != nil {
 						glog.Error("sfu: error create offer on renegotiation ", err)
