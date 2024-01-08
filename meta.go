@@ -12,12 +12,12 @@ var (
 type Metadata struct {
 	mu                 sync.RWMutex
 	m                  map[string]interface{}
-	onChangedCallbacks []func(key string, value interface{})
+	onChangedCallbacks map[string]func(key string, value interface{})
 }
 
 type OnMetaChangedCallback struct {
 	meta *Metadata
-	idx  int
+	key  string
 }
 
 // Unsubscribe removes the callback from the metadata
@@ -26,14 +26,14 @@ func (s *OnMetaChangedCallback) Remove() {
 	s.meta.mu.Lock()
 	defer s.meta.mu.Unlock()
 
-	s.meta.onChangedCallbacks = append(s.meta.onChangedCallbacks[:s.idx], s.meta.onChangedCallbacks[s.idx+1:]...)
+	delete(s.meta.onChangedCallbacks, s.key)
 }
 
 func NewMetadata() *Metadata {
 	return &Metadata{
 		mu:                 sync.RWMutex{},
 		m:                  make(map[string]interface{}),
-		onChangedCallbacks: make([]func(key string, value interface{}), 0),
+		onChangedCallbacks: make(map[string]func(key string, value interface{}), 0),
 	}
 }
 
@@ -92,13 +92,13 @@ func (m *Metadata) onChanged(key string, value interface{}) {
 // Make sure OnMetaChangedSubscription.Unsubscribe() is called when the callback is no longer needed
 func (m *Metadata) OnChanged(f func(key string, value interface{})) *OnMetaChangedCallback {
 	m.mu.Lock()
-	nextIdx := len(m.onChangedCallbacks)
-	m.onChangedCallbacks = append(m.onChangedCallbacks, f)
+	key := GenerateID()
+	m.onChangedCallbacks[key] = f
 	m.mu.Unlock()
 
 	sub := &OnMetaChangedCallback{
 		meta: m,
-		idx:  nextIdx,
+		key:  key,
 	}
 
 	return sub
