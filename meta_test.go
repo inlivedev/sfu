@@ -39,7 +39,7 @@ func TestMetadata(t *testing.T) {
 
 	receivedMetas := make(map[string]interface{})
 	chanMeta := make(chan dataValue, len(reqData))
-	sub1 := m.OnChanged(func(key string, value interface{}) {
+	callback1 := m.OnChanged(func(key string, value interface{}) {
 		t.Logf("Key: %s, Value: %v", key, value)
 		chanMeta <- dataValue{key: key, value: value}
 
@@ -78,18 +78,18 @@ func TestMetadata(t *testing.T) {
 	}
 
 	// cancel the listener above
-	sub1.Unsubscribe()
+	callback1.Remove()
 	close(chanMeta)
 
 	// Test OnChanged method with cancel
 	var state = true
 
-	sub2 := m.OnChanged(func(key string, value interface{}) {
+	callback2 := m.OnChanged(func(key string, value interface{}) {
 		t.Logf("Key: %s, Value: %v", key, value)
 		state = false
 	})
 
-	sub2.Unsubscribe()
+	callback2.Remove()
 
 	m.Set("key6", "value6")
 

@@ -15,14 +15,14 @@ type Metadata struct {
 	onChangedCallbacks []func(key string, value interface{})
 }
 
-type OnMetaChangedSubscription struct {
+type OnMetaChangedCallback struct {
 	meta *Metadata
 	idx  int
 }
 
 // Unsubscribe removes the callback from the metadata
 // Make sure to call the method once the callback is no longer needed
-func (s *OnMetaChangedSubscription) Unsubscribe() {
+func (s *OnMetaChangedCallback) Remove() {
 	s.meta.mu.Lock()
 	defer s.meta.mu.Unlock()
 
@@ -90,13 +90,13 @@ func (m *Metadata) onChanged(key string, value interface{}) {
 
 // OnChanged registers a callback to be called when a metadata is changed
 // Make sure OnMetaChangedSubscription.Unsubscribe() is called when the callback is no longer needed
-func (m *Metadata) OnChanged(f func(key string, value interface{})) *OnMetaChangedSubscription {
+func (m *Metadata) OnChanged(f func(key string, value interface{})) *OnMetaChangedCallback {
 	m.mu.Lock()
 	nextIdx := len(m.onChangedCallbacks)
 	m.onChangedCallbacks = append(m.onChangedCallbacks, f)
 	m.mu.Unlock()
 
-	sub := &OnMetaChangedSubscription{
+	sub := &OnMetaChangedCallback{
 		meta: m,
 		idx:  nextIdx,
 	}
