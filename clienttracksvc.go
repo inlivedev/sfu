@@ -100,6 +100,7 @@ type scaleableClientTrack struct {
 	onTrackEndedCallbacks []func()
 	dropCounter           uint16
 	qualityPreset         QualityPreset
+	packetCaches          *packetCaches
 }
 
 func (t *scaleableClientTrack) Client() *Client {
@@ -113,9 +114,8 @@ func (t *scaleableClientTrack) Context() context.Context {
 	return t.context
 }
 
-func (t *scaleableClientTrack) writeRTP(p rtp.Packet) {
+func (t *scaleableClientTrack) writeRTP(p rtp.Packet, isLate bool) {
 	t.lastTimestamp = p.Timestamp
-	t.sequenceNumber = p.SequenceNumber
 
 	if err := t.localTrack.WriteRTP(&p); err != nil {
 		glog.Error("track: error on write rtp", err)
@@ -144,11 +144,25 @@ func (t *scaleableClientTrack) isKeyframe(vp9 *codecs.VP9Packet) bool {
 // this where the temporal and spatial layers are will be decided to be sent to the client or not
 // compare it with the claimed quality to decide if the packet should be sent or not
 func (t *scaleableClientTrack) push(p rtp.Packet, _ QualityLevel) {
+	var isLate bool
+
+	// 65531,x,65533,65534,65535
+	// 0,1,2,3,4
+	// packet sequence reset
+	// 65535,0,1,2,3
+	if t.sequenceNumber > p.SequenceNumber && t.sequenceNumber-p.SequenceNumber < 1000 {
+		// late packet or retransmission
+		glog.Info("scalabletrack: late packet ", p.SequenceNumber, " previously ", t.sequenceNumber)
+		isLate = true
+	} else {
+		t.sequenceNumber = p.SequenceNumber
+	}
+
 	var qualityPreset IQualityPreset
 
 	vp9Packet := &codecs.VP9Packet{}
 	if _, err := vp9Packet.Unmarshal(p.Payload); err != nil {
-		t.send(p)
+		t.send(p, isLate)
 		return
 	}
 
@@ -178,28 +192,34 @@ func (t *scaleableClientTrack) push(p rtp.Packet, _ QualityLevel) {
 		t.remoteTrack.KeyFrameReceived()
 	}
 
-	if vp9Packet.B && t.sid != qualityPreset.GetSID() {
-		if vp9Packet.SID == qualityPreset.GetSID() && !vp9Packet.P {
-			t.sid = qualityPreset.GetSID()
+	// check if possible to scale up spatial layer
+	targetSID := qualityPreset.GetSID()
+	if vp9Packet.B && t.sid != targetSID {
+		if vp9Packet.SID == targetSID && !vp9Packet.P {
+			t.sid = targetSID
 		}
 	}
 
-	if vp9Packet.B && t.tid != qualityPreset.GetTID() {
-		if isKeyframe || t.tid > qualityPreset.GetTID() || vp9Packet.U {
-			t.tid = qualityPreset.GetTID()
+	// check if possible to scale up temporal layer
+	targetTID := qualityPreset.GetTID()
+	if vp9Packet.B && t.tid != targetTID {
+		if isKeyframe || t.tid > targetTID || vp9Packet.U {
+			t.tid = targetTID
 		}
 	}
 
-	if t.tid == qualityPreset.GetTID() && t.sid == qualityPreset.GetSID() {
+	if t.tid == targetTID && t.sid == targetSID {
 		t.SetLastQuality(quality)
 	}
 
+	// mark packet as a last spatial layer packet
 	if vp9Packet.E && t.sid == vp9Packet.SID {
 		p.Marker = true
 	}
 
+	// base layer
 	if vp9Packet.TID == 0 && vp9Packet.SID == 0 {
-		t.send(p)
+		t.send(p, isLate)
 		return
 	}
 
@@ -211,6 +231,7 @@ func (t *scaleableClientTrack) push(p rtp.Packet, _ QualityLevel) {
 	// to wait for the "D" bit in the higher-layer frame
 	if t.tid < vp9Packet.TID || t.sid < vp9Packet.SID || (t.sid > vp9Packet.SID && vp9Packet.Z) {
 		t.dropCounter++
+
 		return
 	}
 
@@ -218,12 +239,35 @@ func (t *scaleableClientTrack) push(p rtp.Packet, _ QualityLevel) {
 	// 	glog.Info("scalabletrack: marker is set, sid: ", vp9Packet.SID)
 	// }
 
-	t.send(p)
+	t.send(p, isLate)
 }
 
-func (t *scaleableClientTrack) send(p rtp.Packet) {
-	p.SequenceNumber = p.SequenceNumber - t.dropCounter
-	t.writeRTP(p)
+func (t *scaleableClientTrack) getSequenceNumber(sequenceNumber uint16, isLate bool) uint16 {
+	if isLate {
+		// find the previous packet in the cache before the sequenceNumber
+		pkt, ok := t.packetCaches.getPacketOrBefore(sequenceNumber)
+		if ok {
+			return normalizeSequenceNumber(sequenceNumber, pkt.dropCounter)
+		}
+	}
+
+	return normalizeSequenceNumber(sequenceNumber, t.dropCounter)
+}
+
+// functiont to normalize the sequence number in case the sequence is rollover
+func normalizeSequenceNumber(sequence, drop uint16) uint16 {
+	if sequence > drop {
+		return sequence - drop
+	} else {
+		return 65535 - drop + sequence
+	}
+}
+
+func (t *scaleableClientTrack) send(p rtp.Packet, isLate bool) {
+	// TODO: need to check if p is RTX packet and correct the sequence number
+	p.SequenceNumber = t.getSequenceNumber(p.SequenceNumber, isLate)
+	t.packetCaches.push(p.SequenceNumber, p.Timestamp, t.dropCounter)
+	t.writeRTP(p, isLate)
 }
 
 func (t *scaleableClientTrack) RemoteTrack() *remoteTrack {
@@ -296,6 +340,7 @@ func (t *scaleableClientTrack) SetMaxQuality(quality QualityLevel) {
 	defer t.mu.Unlock()
 
 	t.maxQuality = quality
+	t.RemoteTrack().sendPLI()
 }
 
 func (t *scaleableClientTrack) MaxQuality() QualityLevel {

@@ -139,6 +139,7 @@ func (v *VoiceDetector) sendPacketsToCallback() {
 func (v *VoiceDetector) getPackets() []VoicePacketData {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
+
 	packets := make([]VoicePacketData, 0)
 	packets = append(packets, v.VoicePackets...)
 
@@ -146,6 +147,9 @@ func (v *VoiceDetector) getPackets() []VoicePacketData {
 }
 
 func (v *VoiceDetector) onVoiceDetected(activity VoiceActivity) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
 	for _, callback := range v.callbacks {
 		callback(activity)
 	}

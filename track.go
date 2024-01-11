@@ -228,6 +228,7 @@ func (t *Track) subscribe(c *Client) iClientTrack {
 			qualityPreset:         c.SFU().QualityPreset(),
 			maxQuality:            QualityHigh,
 			lastQuality:           QualityHigh,
+			packetCaches:          newPacketCaches(500),
 		}
 	} else if t.Kind() == webrtc.RTPCodecTypeAudio && t.PayloadType() == 63 {
 		glog.Info("track: red enabled", c.receiveRED)
@@ -271,13 +272,15 @@ func (t *Track) subscribe(c *Client) iClientTrack {
 
 	}
 
-	if t.Kind() == webrtc.RTPCodecTypeAudio && c.IsVADEnabled() {
-		glog.Info("track: voice activity detector enabled")
-		vad := c.vad.AddAudioTrack(ct.LocalTrack())
-		vad.OnVoiceDetected(func(activity voiceactivedetector.VoiceActivity) {
-			// send through datachannel
-			c.onVoiceDetected(activity)
-		})
+	if t.Kind() == webrtc.RTPCodecTypeAudio {
+		if c.IsVADEnabled() {
+			glog.Info("track: voice activity detector enabled")
+			vad := c.vad.AddAudioTrack(ct.LocalTrack())
+			vad.OnVoiceDetected(func(activity voiceactivedetector.VoiceActivity) {
+				// send through datachannel
+				c.onVoiceDetected(activity)
+			})
+		}
 	} else if t.Kind() == webrtc.RTPCodecTypeVideo {
 		t.remoteTrack.sendPLI()
 	}

@@ -3,6 +3,7 @@ package sfu
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path"
@@ -18,6 +19,7 @@ import (
 	"github.com/pion/webrtc/v3/pkg/media"
 
 	"github.com/pion/webrtc/v3/pkg/media/h264reader"
+	"github.com/pion/webrtc/v3/pkg/media/ivfreader"
 
 	"github.com/pion/webrtc/v3/pkg/media/oggreader"
 )
@@ -679,4 +681,136 @@ func WaitConnected(ctx context.Context, peers []*webrtc.PeerConnection) chan boo
 	}
 
 	return waitChan
+}
+
+func LoadVp9Track(ctx context.Context, pc *webrtc.PeerConnection, videoFileName string, loop bool) *webrtc.RTPSender {
+	iceConnectedCtx, iceConnectedCtxCancel := context.WithCancel(ctx)
+
+	pc.OnICEConnectionStateChange(func(connectionState webrtc.ICEConnectionState) {
+		glog.Info("Connection State has changed %s \n", connectionState.String())
+		if connectionState == webrtc.ICEConnectionStateConnected {
+			iceConnectedCtxCancel()
+		}
+	})
+
+	file, openErr := os.Open(videoFileName)
+	if openErr != nil {
+		panic(openErr)
+	}
+
+	_, header, openErr := ivfreader.NewWith(file)
+	if openErr != nil {
+		panic(openErr)
+	}
+
+	// Determine video codec
+	var trackCodec string
+	switch header.FourCC {
+	case "AV01":
+		trackCodec = webrtc.MimeTypeAV1
+	case "VP90":
+		trackCodec = webrtc.MimeTypeVP9
+	case "VP80":
+		trackCodec = webrtc.MimeTypeVP8
+	default:
+		panic(fmt.Sprintf("Unable to handle FourCC %s", header.FourCC))
+	}
+
+	// Create a video track
+	videoTrack, videoTrackErr := webrtc.NewTrackLocalStaticSample(webrtc.RTPCodecCapability{MimeType: trackCodec}, "video", "pion")
+	if videoTrackErr != nil {
+		panic(videoTrackErr)
+	}
+
+	transcv, videoTrackErr := pc.AddTransceiverFromTrack(videoTrack, webrtc.RtpTransceiverInit{
+		Direction: webrtc.RTPTransceiverDirectionSendrecv,
+	})
+
+	if videoTrackErr != nil {
+		panic(videoTrackErr)
+	}
+
+	// Read incoming RTCP packets
+	// Before these packets are returned they are processed by interceptors. For things
+	// like NACK this needs to be called.
+	ctxx, cancell := context.WithCancel(ctx)
+
+	sender := transcv.Sender()
+
+	go func() {
+		rtcpBuf := make([]byte, 1500)
+
+		for {
+			select {
+			case <-ctxx.Done():
+				cancell()
+				return
+			default:
+				if _, _, rtcpErr := sender.Read(rtcpBuf); rtcpErr != nil {
+					return
+				}
+			}
+		}
+	}()
+
+	go func() {
+		ivf, header, ivfErr := openV9File(videoFileName)
+		if ivfErr != nil {
+			panic(ivfErr)
+		}
+
+		defer pc.Close()
+
+		// Wait for connection established
+		<-iceConnectedCtx.Done()
+		glog.Info("Connection established, start sending track: %s \n", header.FourCC)
+
+		// Send our video file frame at a time. Pace our sending so we send it at the same speed it should be played back as.
+		// This isn't required since the video is timestamped, but we will such much higher loss if we send all at once.
+		//
+		// It is important to use a time.Ticker instead of time.Sleep because
+		// * avoids accumulating skew, just calling time.Sleep didn't compensate for the time spent parsing the data
+		// * works around latency issues with Sleep (see https://github.com/golang/go/issues/44343)
+		ticker := time.NewTicker(time.Millisecond * time.Duration((float32(header.TimebaseNumerator)/float32(header.TimebaseDenominator))*1000))
+		for {
+			select {
+			case <-ctxx.Done():
+				cancell()
+				return
+			case <-ticker.C:
+				frame, _, ivfErr := ivf.ParseNextFrame()
+				if errors.Is(ivfErr, io.EOF) {
+					glog.Info("All video frames parsed and sent")
+					if !loop {
+						return
+					} else {
+						ivf, _, ivfErr = openV9File(videoFileName)
+						if ivfErr != nil {
+							panic(ivfErr)
+						}
+					}
+				}
+
+				if ivfErr = videoTrack.WriteSample(media.Sample{Data: frame, Duration: time.Second}); ivfErr != nil {
+					panic(ivfErr)
+				}
+			}
+		}
+	}()
+
+	return sender
+}
+
+func openV9File(videoFileName string) (*ivfreader.IVFReader, *ivfreader.IVFFileHeader, error) {
+	file, ivfErr := os.Open(videoFileName)
+	if ivfErr != nil {
+		return nil, nil, ivfErr
+	}
+
+	ivf, header, ivfErr := ivfreader.NewWith(file)
+	if ivfErr != nil {
+		return nil, nil, ivfErr
+	}
+
+	return ivf, header, nil
 }
