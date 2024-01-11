@@ -139,8 +139,8 @@ func (bc *bitrateController) totalBitrates() uint32 {
 }
 
 func (bc *bitrateController) setQuality(clientTrackID string, quality QualityLevel) {
-	bc.mu.RLock()
-	defer bc.mu.RUnlock()
+	bc.mu.Lock()
+	defer bc.mu.Unlock()
 
 	if claim, ok := bc.claims[clientTrackID]; ok {
 		claim.mu.Lock()
@@ -153,6 +153,7 @@ func (bc *bitrateController) setQuality(clientTrackID string, quality QualityLev
 		claim.quality = quality
 		claim.bitrate = bitrate
 		claim.mu.Unlock()
+
 		bc.claims[clientTrackID] = claim
 	}
 }
@@ -361,6 +362,9 @@ func (bc *bitrateController) exists(id string) bool {
 }
 
 func (bc *bitrateController) isScreenNeedIncrease(highestQuality QualityLevel) bool {
+	bc.mu.RLock()
+	defer bc.mu.RUnlock()
+
 	for _, claim := range bc.claims {
 		if claim.track.IsScreen() && claim.quality <= highestQuality {
 			return true
@@ -371,6 +375,9 @@ func (bc *bitrateController) isScreenNeedIncrease(highestQuality QualityLevel) b
 }
 
 func (bc *bitrateController) isThereNonScreenCanDecrease(lowestQuality QualityLevel) bool {
+	bc.mu.RLock()
+	defer bc.mu.RUnlock()
+
 	for _, claim := range bc.claims {
 		if !claim.track.IsScreen() && claim.quality > lowestQuality {
 			return true
@@ -409,13 +416,12 @@ func (bc *bitrateController) getQuality(t *simulcastClientTrack) QualityLevel {
 }
 
 func (bc *bitrateController) totalSentBitrates() uint32 {
-	bc.mu.Lock()
-	defer bc.mu.Unlock()
-
 	total := uint32(0)
 
-	for _, claim := range bc.claims {
+	for _, claim := range bc.Claims() {
+		bc.mu.RLock()
 		total += claim.bitrate
+		bc.mu.RUnlock()
 	}
 
 	return total
@@ -455,10 +461,11 @@ func (bc *bitrateController) needIncreaseBitrate(availableBw uint32) bool {
 
 func (bc *bitrateController) MonitorBandwidth(estimator cc.BandwidthEstimator) {
 	estimator.OnTargetBitrateChange(func(bw int) {
+		totalSendBitrates := bc.totalSentBitrates()
 
-		availableBw := uint32(bw) - bc.totalSentBitrates()
+		availableBw := uint32(bw) - totalSendBitrates
 
-		if bc.totalSentBitrates() > uint32(bw) || (bc.totalSentBitrates() < uint32(bw) && bc.needIncreaseBitrate(availableBw)) {
+		if totalSendBitrates > uint32(bw) || (totalSendBitrates < uint32(bw) && bc.needIncreaseBitrate(availableBw)) {
 			if time.Since(bc.lastBitrateAdjustmentTS) > 500*time.Millisecond {
 				glog.Info("brcontroller: target bitrate changed to ", ThousandSeparator(bw), ", will check and adjust bitrates")
 
@@ -477,7 +484,6 @@ func (bc *bitrateController) MonitorBandwidth(estimator cc.BandwidthEstimator) {
 // if the bandwidth is enough to send the current bitrate, then it will try to increase the bitrate
 // each time adjustment needed, it will only increase or decrese single track.
 func (bc *bitrateController) checkAndAdjustBitrates() {
-	claims := bc.Claims()
 	currentLowestQuality := QualityLevel(QualityHigh)
 	currentHighestQuality := QualityLevel(QualityNone)
 
@@ -486,6 +492,8 @@ func (bc *bitrateController) checkAndAdjustBitrates() {
 	midCount := 0
 	highCount := 0
 	screenCount := 0
+
+	claims := bc.Claims()
 
 	for _, claim := range claims {
 		allActive, quality := bc.checkAllTrackActive(claim)
@@ -606,8 +614,8 @@ func (bc *bitrateController) checkAndAdjustBitrates() {
 }
 
 func (bc *bitrateController) onRemoteViewedSizeChanged(videoSize videoSize) {
-	bc.mu.Lock()
-	defer bc.mu.Unlock()
+	bc.mu.RLock()
+	defer bc.mu.RUnlock()
 
 	claim, ok := bc.claims[videoSize.TrackID]
 	if !ok {
