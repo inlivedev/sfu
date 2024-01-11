@@ -217,6 +217,7 @@ func (t *simulcastClientTrack) onTrackEnded() {
 
 func (t *simulcastClientTrack) SetMaxQuality(quality QualityLevel) {
 	t.maxQuality.Store(uint32(quality))
+	t.remoteTrack.sendPLI(quality)
 }
 
 func (t *simulcastClientTrack) MaxQuality() QualityLevel {

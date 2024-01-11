@@ -472,7 +472,9 @@ func (bc *bitrateController) MonitorBandwidth(estimator cc.BandwidthEstimator) {
 
 				bc.checkAndAdjustBitrates()
 
+				bc.mu.Lock()
 				bc.lastBitrateAdjustmentTS = time.Now()
+				bc.mu.Unlock()
 			}
 		}
 	})

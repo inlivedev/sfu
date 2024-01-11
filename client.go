@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/golang/glog"
+	"github.com/inlivedev/sfu/pkg/interceptors/playoutdelay"
 	"github.com/inlivedev/sfu/pkg/interceptors/voiceactivedetector"
 	"github.com/pion/interceptor"
 	"github.com/pion/interceptor/pkg/cc"
@@ -58,6 +59,19 @@ type ClientOptions struct {
 	IdleTimeout          time.Duration
 	Type                 string
 	EnableVoiceDetection bool
+	EnablePlayoutDelay   bool
+	// Configure the minimum playout delay that will be used by the room
+	// Recommendation:
+	// 0 ms: Certain gaming scenarios (likely without audio) where we will want to play the frame as soon as possible. Also, for remote desktop without audio where rendering a frame asap makes sense
+	// 100/150/200 ms: These could be the max target latency for interactive streaming use cases depending on the actual application (gaming, remoting with audio, interactive scenarios)
+	// 400 ms: Application that want to ensure a network glitch has very little chance of causing a freeze can start with a minimum delay target that is high enough to deal with network issues. Video streaming is one example.
+	MinPlayoutDelay uint16
+	// Configure the minimum playout delay that will be used by the room
+	// Recommendation:
+	// 0 ms: Certain gaming scenarios (likely without audio) where we will want to play the frame as soon as possible. Also, for remote desktop without audio where rendering a frame asap makes sense
+	// 100/150/200 ms: These could be the max target latency for interactive streaming use cases depending on the actual application (gaming, remoting with audio, interactive scenarios)
+	// 400 ms: Application that want to ensure a network glitch has very little chance of causing a freeze can start with a minimum delay target that is high enough to deal with network issues. Video streaming is one example.
+	MaxPlayoutDelay uint16
 }
 
 type internalDataMessage struct {
@@ -158,6 +172,9 @@ func DefaultClientOptions() ClientOptions {
 		IdleTimeout:          30 * time.Second,
 		Type:                 ClientTypePeer,
 		EnableVoiceDetection: false,
+		EnablePlayoutDelay:   true,
+		MinPlayoutDelay:      100,
+		MaxPlayoutDelay:      200,
 	}
 }
 
@@ -234,6 +251,12 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		if err = webrtc.ConfigureTWCCHeaderExtensionSender(m, i); err != nil {
 			panic(err)
 		}
+	}
+
+	if opts.EnablePlayoutDelay {
+		playoutDelayInterceptor := playoutdelay.NewInterceptor(opts.MinPlayoutDelay, opts.MaxPlayoutDelay)
+
+		i.Add(playoutDelayInterceptor)
 	}
 
 	// Use the default set of Interceptors

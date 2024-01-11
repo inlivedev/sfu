@@ -45,6 +45,8 @@ type Options struct {
 	// capabilities unaffected. Also, you cannot give STUN server URL at the same time.
 	// It will result in an error otherwise.
 	NAT1To1IPsCandidateType webrtc.ICECandidateType
+	MinPlayoutDelay         uint16
+	MaxPlayoutDelay         uint16
 }
 
 func DefaultOptions() Options {
@@ -54,6 +56,7 @@ func DefaultOptions() Options {
 		EnableMux:                false,
 		WebRTCPort:               50005,
 		ConnectRemoteRoomTimeout: 30 * time.Second,
+		EnableBandwidthEstimator: true,
 		IceServers: []webrtc.ICEServer{
 			{
 				URLs: []string{"stun:stun.l.google.com:19302"},
@@ -61,6 +64,8 @@ func DefaultOptions() Options {
 		},
 		PublicIP:                "",
 		NAT1To1IPsCandidateType: webrtc.ICECandidateTypeHost,
+		MinPlayoutDelay:         100,
+		MaxPlayoutDelay:         100,
 	}
 }
 
