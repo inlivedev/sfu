@@ -123,7 +123,7 @@ type Client struct {
 	IsSubscribeAllTracks  *atomic.Bool
 	idleTimeoutContext    context.Context
 	idleTimeoutCancel     context.CancelFunc
-	mu                    sync.Mutex
+	mu                    sync.RWMutex
 	peerConnection        *PeerConnection
 	// pending received tracks are the remote tracks from other clients that waiting to add when the client is connected
 	pendingReceivedTracks []SubscribeTrackRequest
@@ -300,7 +300,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		isInRemoteNegotiation:          &atomic.Bool{},
 		IsSubscribeAllTracks:           &atomic.Bool{},
 		dataChannels:                   NewDataChannelList(),
-		mu:                             sync.Mutex{},
+		mu:                             sync.RWMutex{},
 		negotiationNeeded:              &atomic.Bool{},
 		peerConnection:                 newPeerConnection(peerConnection),
 		state:                          &stateNew,
@@ -947,12 +947,18 @@ func (c *Client) OnConnectionStateChanged(callback func(webrtc.PeerConnectionSta
 }
 
 func (c *Client) onConnectionStateChanged(state webrtc.PeerConnectionState) {
-	for _, callback := range c.onConnectionStateChangedCallbacks {
+	c.mu.RLock()
+	callbacks := c.onConnectionStateChangedCallbacks
+	c.mu.RUnlock()
+	for _, callback := range callbacks {
 		callback(webrtc.PeerConnectionState(state))
 	}
 }
 
 func (c *Client) onJoined() {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
 	for _, callback := range c.onJoinedCallbacks {
 		callback()
 	}
@@ -962,16 +968,25 @@ func (c *Client) onJoined() {
 // This doesn't mean that the client's tracks are already published to the room.
 // This event can be use to track number of clients in the room.
 func (c *Client) OnJoined(callback func()) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	c.onJoinedCallbacks = append(c.onJoinedCallbacks, callback)
 }
 
 // OnLeft event is called when the client is left from the room.
 // This event can be use to track number of clients in the room.
 func (c *Client) OnLeft(callback func()) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	c.onLeftCallbacks = append(c.onLeftCallbacks, callback)
 }
 
 func (c *Client) onLeft() {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
 	for _, callback := range c.onLeftCallbacks {
 		callback()
 	}

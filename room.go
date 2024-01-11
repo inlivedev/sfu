@@ -85,7 +85,7 @@ type Room struct {
 	token                   string
 	RenegotiationChan       map[string]chan bool
 	name                    string
-	mutex                   *sync.Mutex
+	mu                      *sync.RWMutex
 	meta                    *Metadata
 	sfu                     *SFU
 	state                   string
@@ -135,7 +135,7 @@ func newRoom(id, name string, sfu *SFU, kind string, opts RoomOptions) *Room {
 		stats:      make(map[string]*ClientStats),
 		state:      StateRoomOpen,
 		name:       name,
-		mutex:      &sync.Mutex{},
+		mu:         &sync.RWMutex{},
 		meta:       NewMetadata(),
 		extensions: make([]IExtension, 0),
 		kind:       kind,
@@ -177,6 +177,8 @@ func (r *Room) Close() error {
 
 	r.sfu.Stop()
 
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	for _, callback := range r.onRoomClosedCallbacks {
 		callback(r.id)
 	}
@@ -189,8 +191,8 @@ func (r *Room) Close() error {
 // Stopping client is async, it will just stop the client and return immediately
 // You should use OnClientLeft to get notified when the client is actually stopped
 func (r *Room) StopClient(id string) error {
-	r.mutex.Lock()
-	defer r.mutex.Unlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
 	var client *Client
 
@@ -204,8 +206,8 @@ func (r *Room) StopClient(id string) error {
 }
 
 func (r *Room) AddClient(id, name string, opts ClientOptions) (*Client, error) {
-	r.mutex.Lock()
-	defer r.mutex.Unlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
 	if r.state == StateRoomClosed {
 		return nil, ErrRoomIsClosed
@@ -272,23 +274,31 @@ func (r *Room) OnClientLeft(callback func(client *Client)) {
 }
 
 func (r *Room) onClientLeft(client *Client) {
-	for _, callback := range r.onClientLeftCallbacks {
+	r.mu.RLock()
+	callbacks := r.onClientLeftCallbacks
+	exts := r.extensions
+	r.mu.RUnlock()
+	for _, callback := range callbacks {
 		callback(client)
 	}
 
-	for _, ext := range r.extensions {
+	for _, ext := range exts {
 		ext.OnClientRemoved(r, client)
 	}
 
 	// update the latest stats from client before they left
-	r.mutex.Lock()
-	defer r.mutex.Unlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
 	r.stats[client.ID()] = client.Stats()
 }
 
 func (r *Room) onClientJoined(client *Client) {
-	for _, callback := range r.onClientJoinedCallbacks {
+	r.mu.RLock()
+	callbacks := r.onClientJoinedCallbacks
+	r.mu.RUnlock()
+
+	for _, callback := range callbacks {
 		callback(client)
 	}
 
@@ -298,6 +308,9 @@ func (r *Room) onClientJoined(client *Client) {
 }
 
 func (r *Room) OnClientJoined(callback func(client *Client)) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
 	r.onClientJoinedCallbacks = append(r.onClientJoinedCallbacks, callback)
 }
 
@@ -320,9 +333,9 @@ func (r *Room) Stats() RoomStats {
 
 	clientStats := make(map[string]*ClientTrackStats)
 
-	r.mutex.Lock()
+	r.mu.RLock()
 
-	defer r.mutex.Unlock()
+	defer r.mu.RUnlock()
 
 	for id, cstats := range r.stats {
 		if cstats.Client != nil {
@@ -360,8 +373,8 @@ func (r *Room) Stats() RoomStats {
 }
 
 func (r *Room) updateStats() {
-	r.mutex.Lock()
-	defer r.mutex.Unlock()
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
 	for _, client := range r.sfu.clients.GetClients() {
 		r.stats[client.ID()] = client.Stats()

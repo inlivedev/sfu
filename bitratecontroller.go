@@ -26,7 +26,7 @@ const (
 type bitrateAdjustment int
 
 type bitrateClaim struct {
-	mu               sync.Mutex
+	mu               sync.RWMutex
 	track            iClientTrack
 	bitrate          uint32
 	quality          QualityLevel
@@ -37,15 +37,15 @@ type bitrateClaim struct {
 }
 
 func (c *bitrateClaim) Quality() QualityLevel {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 
 	return c.quality
 }
 
 func (c *bitrateClaim) isAllowToIncrease() bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 
 	if c.delayCounter > 0 && time.Since(c.lastIncreaseTime) < time.Duration(c.delayCounter)*10*time.Second {
 		glog.Info("clienttrack: delay increase,  delay counter ", c.delayCounter)
@@ -317,7 +317,7 @@ func (bc *bitrateController) addClaim(clientTrack iClientTrack, quality QualityL
 	defer bc.mu.Unlock()
 
 	bc.claims[clientTrack.ID()] = &bitrateClaim{
-		mu:        sync.Mutex{},
+		mu:        sync.RWMutex{},
 		track:     clientTrack,
 		quality:   quality,
 		simulcast: clientTrack.IsSimulcast(),
@@ -449,7 +449,7 @@ func (bc *bitrateController) needIncreaseBitrate(availableBw uint32) bool {
 	claims := bc.Claims()
 
 	for _, claim := range claims {
-		if claim.quality < QualityHigh {
+		if claim.Quality() < QualityHigh {
 			if bc.isEnoughBandwidthToIncrase(availableBw, claim) {
 				return true
 			}

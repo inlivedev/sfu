@@ -56,7 +56,7 @@ func DefaultConfig() Config {
 
 type Interceptor struct {
 	context context.Context
-	mu      sync.Mutex
+	mu      sync.RWMutex
 	vads    map[string]*VoiceDetector
 	config  Config
 }
@@ -64,13 +64,16 @@ type Interceptor struct {
 func new(ctx context.Context) *Interceptor {
 	return &Interceptor{
 		context: ctx,
-		mu:      sync.Mutex{},
+		mu:      sync.RWMutex{},
 		config:  DefaultConfig(),
 		vads:    make(map[string]*VoiceDetector),
 	}
 }
 
 func (v *Interceptor) SetConfig(config Config) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
 	v.config = config
 }
 
@@ -107,7 +110,11 @@ func (v *Interceptor) UnbindLocalStream(info *interceptor.StreamInfo) {
 		vad.Stop()
 	}
 
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
 	delete(v.vads, info.ID)
+
 }
 
 // BindRemoteStream lets you modify any incoming RTP packets. It is called once for per RemoteStream. The returned method
@@ -138,8 +145,8 @@ func (v *Interceptor) BindRTCPWriter(writer interceptor.RTCPWriter) interceptor.
 }
 
 func (v *Interceptor) getVadByID(id string) *VoiceDetector {
-	v.mu.Lock()
-	defer v.mu.Unlock()
+	v.mu.RLock()
+	defer v.mu.RUnlock()
 
 	vad, ok := v.vads[id]
 	if ok {
@@ -167,8 +174,8 @@ func (v *Interceptor) processPacket(id string, header *rtp.Header) rtp.AudioLeve
 }
 
 func (v *Interceptor) getConfig() Config {
-	v.mu.Lock()
-	defer v.mu.Unlock()
+	v.mu.RLock()
+	defer v.mu.RUnlock()
 
 	return v.config
 }
@@ -191,11 +198,8 @@ func RegisterAudioLevelHeaderExtension(m *webrtc.MediaEngine) {
 }
 
 func (v *Interceptor) getAudioLevelExtensionID(id string) uint8 {
-	v.mu.Lock()
-	defer v.mu.Unlock()
-
-	vad, ok := v.vads[id]
-	if ok {
+	vad := v.getVadByID(id)
+	if vad != nil {
 		for _, extension := range vad.streamInfo.RTPHeaderExtensions {
 			if extension.URI == sdp.AudioLevelURI {
 				return uint8(extension.ID)
@@ -215,8 +219,8 @@ func (v *Interceptor) AddAudioTrack(t webrtc.TrackLocal) *VoiceDetector {
 
 	vad := v.getVadByID(t.ID())
 	if vad == nil {
-		v.mu.Lock()
 		vad = newVAD(v.context, v, nil)
+		v.mu.Lock()
 		v.vads[t.ID()] = vad
 		v.mu.Unlock()
 	}

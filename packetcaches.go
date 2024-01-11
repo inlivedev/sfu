@@ -4,7 +4,7 @@ import "sync"
 
 // buffer ring for cached packets
 type packetCaches struct {
-	mu     sync.Mutex
+	mu     sync.RWMutex
 	head   uint16
 	tail   uint16
 	caches []cachedPacket
@@ -18,7 +18,7 @@ type cachedPacket struct {
 
 func newPacketCaches(size int) *packetCaches {
 	return &packetCaches{
-		mu:     sync.Mutex{},
+		mu:     sync.RWMutex{},
 		head:   0,
 		tail:   0,
 		caches: make([]cachedPacket, size),
@@ -51,8 +51,8 @@ func (p *packetCaches) push(sequence uint16, timestamp uint32, dropCounter uint1
 }
 
 func (p *packetCaches) getPacket(sequence uint16) (cachedPacket, bool) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	p.mu.RLock()
+	defer p.mu.RUnlock()
 
 	if p.tail == p.head {
 		return cachedPacket{}, false
@@ -71,8 +71,8 @@ func (p *packetCaches) getPacket(sequence uint16) (cachedPacket, bool) {
 }
 
 func (p *packetCaches) getPacketOrBefore(sequence uint16) (cachedPacket, bool) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
+	p.mu.RLock()
+	defer p.mu.RUnlock()
 
 	if p.tail == p.head {
 		return cachedPacket{}, false

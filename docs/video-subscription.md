@@ -1,0 +1,2 @@
+# Subscribe and playing media tracks
+To play published media in the room, the client need to subscribe to the media tracks. The easiest one is just to subcribe all availables video in the room. This can be done by call `client.SubscribeAllTracks()` method. If you like to develop a custom use case
