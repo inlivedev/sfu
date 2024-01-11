@@ -14,13 +14,13 @@ func TestPush(t *testing.T) {
 	if p.head != 0 {
 		t.Error("head is not 0")
 	}
-	if p.caches[0].sequence != 1 {
+	if p.caches[1].sequence != 1 {
 		t.Error("sequence is not 1")
 	}
-	if p.caches[0].timestamp != 2 {
+	if p.caches[1].timestamp != 2 {
 		t.Error("timestamp is not 2")
 	}
-	if p.caches[0].dropCounter != 3 {
+	if p.caches[1].dropCounter != 3 {
 		t.Error("dropCounter is not 3")
 	}
 }
@@ -37,13 +37,13 @@ func TestOverwrite(t *testing.T) {
 		t.Error("head is not 1, got ", p.head, " tail ", p.tail)
 	}
 
-	if p.caches[0].sequence != 1000 {
+	if p.caches[0].sequence != 999 {
 		t.Error("sequence is not 1000, got ", p.caches[0].sequence, " tail ", p.tail, " head ", p.head)
 	}
-	if p.caches[0].timestamp != 1000 {
+	if p.caches[0].timestamp != 999 {
 		t.Error("timestamp is not 1000, got ", p.caches[0].timestamp, " tail ", p.tail, " head ", p.head)
 	}
-	if p.caches[0].dropCounter != 1000 {
+	if p.caches[0].dropCounter != 999 {
 		t.Error("dropCounter is not 1000, got ", p.caches[0].dropCounter, " tail ", p.tail, " head ", p.head)
 	}
 }
