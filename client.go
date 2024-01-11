@@ -254,6 +254,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 	}
 
 	if opts.EnablePlayoutDelay {
+		playoutdelay.RegisterPlayoutDelayHeaderExtension(m)
 		playoutDelayInterceptor := playoutdelay.NewInterceptor(opts.MinPlayoutDelay, opts.MaxPlayoutDelay)
 
 		i.Add(playoutDelayInterceptor)

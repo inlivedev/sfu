@@ -106,7 +106,7 @@ func (v *Interceptor) addPlayoutDelay(info *interceptor.StreamInfo, header *rtp.
 	return header
 }
 
-func (v *Interceptor) RegisterPlayoutDelayHeaderExtension(pc *webrtc.PeerConnection, m *webrtc.MediaEngine) {
+func RegisterPlayoutDelayHeaderExtension(m *webrtc.MediaEngine) {
 	if err := m.RegisterHeaderExtension(webrtc.RTPHeaderExtensionCapability{URI: PlayoutDelayURI}, webrtc.RTPCodecTypeAudio); err != nil {
 		panic(err)
 	}
