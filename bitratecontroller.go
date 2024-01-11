@@ -103,8 +103,8 @@ func (bc *bitrateController) Claims() map[string]*bitrateClaim {
 }
 
 func (bc *bitrateController) Exist(id string) bool {
-	bc.mu.Lock()
-	defer bc.mu.Unlock()
+	bc.mu.RLock()
+	defer bc.mu.RUnlock()
 
 	if _, ok := bc.claims[id]; ok {
 		return true
@@ -114,8 +114,8 @@ func (bc *bitrateController) Exist(id string) bool {
 }
 
 func (bc *bitrateController) GetClaim(id string) *bitrateClaim {
-	bc.mu.Lock()
-	defer bc.mu.Unlock()
+	bc.mu.RLock()
+	defer bc.mu.RUnlock()
 
 	if claim, ok := bc.claims[id]; ok && claim != nil {
 		return claim
@@ -126,15 +126,12 @@ func (bc *bitrateController) GetClaim(id string) *bitrateClaim {
 
 // if all is false, only active claims will be counted
 func (bc *bitrateController) TotalBitrates() uint32 {
-	bc.mu.Lock()
-	defer bc.mu.Unlock()
-
 	return bc.totalBitrates()
 }
 
 func (bc *bitrateController) totalBitrates() uint32 {
 	total := uint32(0)
-	for _, claim := range bc.claims {
+	for _, claim := range bc.Claims() {
 		total += claim.bitrate
 	}
 
@@ -161,8 +158,8 @@ func (bc *bitrateController) setQuality(clientTrackID string, quality QualityLev
 }
 
 func (bc *bitrateController) setSimulcastClaim(clientTrackID string, simulcast bool) {
-	bc.mu.RLock()
-	defer bc.mu.RUnlock()
+	bc.mu.Lock()
+	defer bc.mu.Unlock()
 
 	if claim, ok := bc.claims[clientTrackID]; ok {
 		claim.simulcast = simulcast
@@ -214,9 +211,6 @@ func (bc *bitrateController) checkAllTrackActive(claim *bitrateClaim) (bool, Qua
 }
 
 func (bc *bitrateController) addAudioClaims(clientTracks []iClientTrack) (leftTracks []iClientTrack, err error) {
-	bc.mu.Lock()
-	defer bc.mu.Unlock()
-
 	errors := make([]error, 0)
 
 	leftTracks = make([]iClientTrack, 0)
@@ -275,19 +269,19 @@ func (bc *bitrateController) addClaims(clientTracks []iClientTrack) error {
 		return err
 	}
 
-	bc.mu.Lock()
-	defer bc.mu.Unlock()
-
 	errors := make([]error, 0)
 	claimed := 0
 
 	for _, clientTrack := range leftTracks {
 		if clientTrack.Kind() == webrtc.RTPCodecTypeVideo {
 			trackQuality := bc.getDistributedQuality(len(leftTracks) - claimed)
+			bc.mu.RLock()
 			if _, ok := bc.claims[clientTrack.ID()]; ok {
 				errors = append(errors, ErrAlreadyClaimed)
+				bc.mu.RUnlock()
 				continue
 			}
+			bc.mu.RUnlock()
 
 			if !clientTrack.IsSimulcast() && !clientTrack.IsScaleable() {
 				trackQuality = QualityHigh
@@ -318,10 +312,8 @@ func (bc *bitrateController) addClaims(clientTracks []iClientTrack) error {
 func (bc *bitrateController) addClaim(clientTrack iClientTrack, quality QualityLevel, locked bool) (*bitrateClaim, error) {
 	bitrate := bc.client.sfu.QualityLevelToBitrate(quality)
 
-	if !locked {
-		bc.mu.RLock()
-		defer bc.mu.RUnlock()
-	}
+	bc.mu.Lock()
+	defer bc.mu.Unlock()
 
 	bc.claims[clientTrack.ID()] = &bitrateClaim{
 		mu:        sync.Mutex{},
@@ -358,8 +350,8 @@ func (bc *bitrateController) removeClaim(id string) {
 }
 
 func (bc *bitrateController) exists(id string) bool {
-	bc.mu.Lock()
-	defer bc.mu.Unlock()
+	bc.mu.RLock()
+	defer bc.mu.RUnlock()
 
 	if _, ok := bc.claims[id]; ok {
 		return true
