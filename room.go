@@ -233,18 +233,19 @@ func (r *Room) AddClient(id, name string, opts ClientOptions) (*Client, error) {
 
 		connectingChan := make(chan bool)
 
+		timeoutReached := false
+
 		client.OnConnectionStateChanged(func(state webrtc.PeerConnectionState) {
-			if state == webrtc.PeerConnectionStateConnected {
+			if state == webrtc.PeerConnectionStateConnected && !timeoutReached {
 				connectingChan <- true
 			}
 		})
 
 		select {
 		case <-timeout.Done():
-			if timeout.Err() == context.DeadlineExceeded {
-				glog.Warning("room: client is not connected after added, stopping client...")
-				_ = r.StopClient(client.ID())
-			}
+			glog.Warning("room: client is not connected after added, stopping client...")
+			_ = r.StopClient(client.ID())
+			timeoutReached = true
 
 		case <-connectingChan:
 			return
