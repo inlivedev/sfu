@@ -61,7 +61,10 @@ func (p *packetCaches) getPacket(sequence uint16) (cachedPacket, bool) {
 	for i := p.tail; i != p.head; i-- {
 		if p.caches[i].sequence == sequence {
 			return p.caches[i], true
+		} else if p.caches[i].sequence < sequence {
+			return cachedPacket{}, false
 		}
+
 		if i == 0 {
 			i = uint16(len(p.caches) - 1)
 		}

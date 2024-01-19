@@ -149,11 +149,17 @@ func (t *scaleableClientTrack) push(p rtp.Packet, _ QualityLevel) {
 	// 65531,x,65533,65534,65535
 	// 0,1,2,3,4
 	// packet sequence reset
+
 	// 65535,0,1,2,3
 	if t.sequenceNumber > p.SequenceNumber && t.sequenceNumber-p.SequenceNumber < 1000 {
 		// late packet or retransmission
-		glog.Info("scalabletrack: late packet ", p.SequenceNumber, " previously ", t.sequenceNumber)
+		glog.Info("scalabletrack: client ", t.client.id, " late packet ", p.SequenceNumber, " previously ", t.sequenceNumber)
 		isLate = true
+		_, hasSent := t.packetCaches.getPacket(p.SequenceNumber)
+		if hasSent {
+			glog.Info("scalabletrack: packet ", p.SequenceNumber, " has been sent")
+			return
+		}
 	} else {
 		t.sequenceNumber = p.SequenceNumber
 	}

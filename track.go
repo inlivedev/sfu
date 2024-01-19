@@ -228,7 +228,7 @@ func (t *Track) subscribe(c *Client) iClientTrack {
 			qualityPreset:         c.SFU().QualityPreset(),
 			maxQuality:            QualityHigh,
 			lastQuality:           QualityHigh,
-			packetCaches:          newPacketCaches(500),
+			packetCaches:          newPacketCaches(1024),
 		}
 	} else if t.Kind() == webrtc.RTPCodecTypeAudio && t.PayloadType() == 63 {
 		glog.Info("track: red enabled", c.receiveRED)
