@@ -3,6 +3,7 @@ module github.com/inlivedev/sfu
 go 1.21
 
 // replace github.com/pion/transport => ../../pion/pion-transport
+// replace github.com/pion/interceptor => ../../pion/pion-interceptor
 
 require (
 	github.com/pion/ice/v2 v2.3.11
@@ -20,7 +21,12 @@ require (
 	golang.org/x/text v0.14.0
 )
 
-require gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
+require (
+	github.com/felixge/fgprof v0.9.3 // indirect
+	github.com/google/pprof v0.0.0-20211214055906-6f57359322fd // indirect
+	github.com/pkg/profile v1.7.0 // indirect
+	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
+)
 
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect

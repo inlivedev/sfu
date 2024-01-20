@@ -3,6 +3,7 @@ package sfu
 import (
 	"context"
 	"sync"
+	"time"
 
 	"github.com/golang/glog"
 	"github.com/pion/rtp"
@@ -101,6 +102,63 @@ type scaleableClientTrack struct {
 	dropCounter           uint16
 	qualityPreset         QualityPreset
 	packetCaches          *packetCaches
+	packetChan            chan rtp.Packet
+	lastProcessTime       time.Time
+}
+
+func newScaleableClientTrack(
+	c *Client,
+	t *Track,
+	qualityPreset QualityPreset,
+) *scaleableClientTrack {
+	ctx, cancel := context.WithCancel(t.Context())
+
+	sct := &scaleableClientTrack{
+		context:               ctx,
+		cancel:                cancel,
+		mu:                    sync.RWMutex{},
+		id:                    t.base.id,
+		kind:                  t.base.kind,
+		mimeType:              t.base.codec.MimeType,
+		client:                c,
+		localTrack:            t.createLocalTrack(),
+		remoteTrack:           t,
+		isScreen:              t.IsScreen(),
+		onTrackEndedCallbacks: make([]func(), 0),
+		qualityPreset:         c.SFU().QualityPreset(),
+		maxQuality:            QualityHigh,
+		lastQuality:           QualityHigh,
+		packetCaches:          newPacketCaches(1024),
+		packetChan:            make(chan rtp.Packet, 1),
+	}
+
+	sct.startWorker()
+
+	return sct
+}
+
+func (t *scaleableClientTrack) startWorker() {
+	go func() {
+		defer t.cancel()
+		for {
+			select {
+			case <-t.context.Done():
+				close(t.packetChan)
+				return
+			case p := <-t.packetChan:
+				t.processPacket(p)
+			}
+		}
+	}()
+}
+
+func (t *scaleableClientTrack) push(p rtp.Packet, _ QualityLevel) {
+	if t.client.peerConnection.PC().ConnectionState() != webrtc.PeerConnectionStateConnected {
+		return
+	}
+
+	t.packetChan <- p
+	// t.processPacket(p)
 }
 
 func (t *scaleableClientTrack) Client() *Client {
@@ -143,7 +201,10 @@ func (t *scaleableClientTrack) isKeyframe(vp9 *codecs.VP9Packet) bool {
 
 // this where the temporal and spatial layers are will be decided to be sent to the client or not
 // compare it with the claimed quality to decide if the packet should be sent or not
-func (t *scaleableClientTrack) push(p rtp.Packet, _ QualityLevel) {
+func (t *scaleableClientTrack) processPacket(p rtp.Packet) {
+	// glog.Info("process interval: ", time.Since(t.lastProcessTime))
+	// t.lastProcessTime = time.Now()
+
 	var isLate bool
 
 	// 65531,x,65533,65534,65535
@@ -155,7 +216,7 @@ func (t *scaleableClientTrack) push(p rtp.Packet, _ QualityLevel) {
 		// late packet or retransmission
 		glog.Info("scalabletrack: client ", t.client.id, " late packet ", p.SequenceNumber, " previously ", t.sequenceNumber)
 		isLate = true
-		_, hasSent := t.packetCaches.getPacket(p.SequenceNumber)
+		_, hasSent := t.packetCaches.GetPacket(p.SequenceNumber)
 		if hasSent {
 			glog.Info("scalabletrack: packet ", p.SequenceNumber, " has been sent")
 			return
@@ -195,7 +256,7 @@ func (t *scaleableClientTrack) push(p rtp.Packet, _ QualityLevel) {
 
 	isKeyframe := t.isKeyframe(vp9Packet)
 	if isKeyframe {
-		t.remoteTrack.KeyFrameReceived()
+		go t.remoteTrack.KeyFrameReceived()
 	}
 
 	// check if possible to scale up spatial layer
@@ -251,7 +312,7 @@ func (t *scaleableClientTrack) push(p rtp.Packet, _ QualityLevel) {
 func (t *scaleableClientTrack) getSequenceNumber(sequenceNumber uint16, isLate bool) uint16 {
 	if isLate {
 		// find the previous packet in the cache before the sequenceNumber
-		pkt, ok := t.packetCaches.getPacketOrBefore(sequenceNumber)
+		pkt, ok := t.packetCaches.GetPacketOrBefore(sequenceNumber)
 		if ok {
 			return normalizeSequenceNumber(sequenceNumber, pkt.dropCounter)
 		}
@@ -270,9 +331,9 @@ func normalizeSequenceNumber(sequence, drop uint16) uint16 {
 }
 
 func (t *scaleableClientTrack) send(p rtp.Packet, isLate bool) {
-	// TODO: need to check if p is RTX packet and correct the sequence number
 	p.SequenceNumber = t.getSequenceNumber(p.SequenceNumber, isLate)
-	t.packetCaches.push(p.SequenceNumber, p.Timestamp, t.dropCounter)
+
+	t.packetCaches.Push(p.SequenceNumber, p.Timestamp, t.dropCounter)
 	t.writeRTP(p, isLate)
 }
 

@@ -97,11 +97,12 @@ func newTrack(ctx context.Context, clientID string, trackRemote IRemoteTrack, pl
 	onRead := func(p rtp.Packet) {
 		// do
 		tracks := t.base.clientTracks.GetTracks()
+
 		for _, track := range tracks {
-			track.push(p, QualityHigh) // quality doesn't matter on non simulcast track
+			track.push(p, QualityHigh)
 		}
 
-		t.onRead(p, QualityHigh)
+		go t.onRead(p, QualityHigh)
 	}
 
 	t.remoteTrack = newRemoteTrack(ctx, trackRemote, pliInterval, onPLI, stats, onStatsUpdated, onRead)
@@ -210,65 +211,14 @@ func (t *Track) TotalTracks() int {
 func (t *Track) subscribe(c *Client) iClientTrack {
 	var ct iClientTrack
 
-	ctx, cancel := context.WithCancel(t.Context())
-
 	if t.MimeType() == webrtc.MimeTypeVP9 {
-		ct = &scaleableClientTrack{
-			context:               ctx,
-			cancel:                cancel,
-			mu:                    sync.RWMutex{},
-			id:                    t.base.id,
-			kind:                  t.base.kind,
-			mimeType:              t.base.codec.MimeType,
-			client:                c,
-			localTrack:            t.createLocalTrack(),
-			remoteTrack:           t,
-			isScreen:              t.IsScreen(),
-			onTrackEndedCallbacks: make([]func(), 0),
-			qualityPreset:         c.SFU().QualityPreset(),
-			maxQuality:            QualityHigh,
-			lastQuality:           QualityHigh,
-			packetCaches:          newPacketCaches(1024),
-		}
+		ct = newScaleableClientTrack(c, t, c.SFU().QualityPreset())
 	} else if t.Kind() == webrtc.RTPCodecTypeAudio && t.PayloadType() == 63 {
 		glog.Info("track: red enabled", c.receiveRED)
 
-		mimeType := t.remoteTrack.track.Codec().MimeType
-		localTrack := t.createLocalTrack()
-
-		if !c.receiveRED {
-			mimeType = webrtc.MimeTypeOpus
-			localTrack = t.createOpusLocalTrack()
-		}
-
-		ct = &clientTrackRed{
-			id:           t.base.id,
-			context:      ctx,
-			cancel:       cancel,
-			mu:           sync.RWMutex{},
-			client:       c,
-			kind:         t.base.kind,
-			mimeType:     mimeType,
-			localTrack:   localTrack,
-			remoteTrack:  t.remoteTrack,
-			isReceiveRed: c.receiveRED,
-		}
+		ct = newClientTrackRed(c, t)
 	} else {
-		isScreen := &atomic.Bool{}
-		isScreen.Store(t.IsScreen())
-
-		ct = &clientTrack{
-			id:          t.base.id,
-			context:     ctx,
-			cancel:      cancel,
-			mu:          sync.RWMutex{},
-			client:      c,
-			kind:        t.base.kind,
-			mimeType:    t.remoteTrack.track.Codec().MimeType,
-			localTrack:  t.createLocalTrack(),
-			remoteTrack: t.remoteTrack,
-			isScreen:    isScreen,
-		}
+		ct = newClientTrack(c, t, t.IsScreen())
 
 	}
 
@@ -284,11 +234,6 @@ func (t *Track) subscribe(c *Client) iClientTrack {
 	} else if t.Kind() == webrtc.RTPCodecTypeVideo {
 		t.remoteTrack.sendPLI()
 	}
-
-	go func() {
-		defer cancel()
-		<-ctx.Done()
-	}()
 
 	t.base.clientTracks.Add(ct)
 
@@ -517,7 +462,8 @@ func (t *SimulcastTrack) AddRemoteTrack(ctx context.Context, track IRemoteTrack,
 			track.push(p, quality)
 		}
 
-		t.onRead(p, quality)
+		go t.onRead(p, quality)
+
 	}
 
 	remoteTrack = newRemoteTrack(ctx, track, t.pliInterval, t.onPLI, stats, onStatsUpdated, onRead)
@@ -600,53 +546,8 @@ func (t *SimulcastTrack) getRemoteTrack(q QualityLevel) *remoteTrack {
 
 func (t *SimulcastTrack) subscribe(client *Client) iClientTrack {
 	// Create a local track, all our SFU clients will be fed via this track
-	track, newTrackErr := webrtc.NewTrackLocalStaticRTP(t.base.codec.RTPCodecCapability, t.base.id, t.base.streamid)
-	if newTrackErr != nil {
-		panic(newTrackErr)
-	}
 
-	isScreen := &atomic.Bool{}
-	isScreen.Store(t.IsScreen())
-
-	lastQuality := &atomic.Uint32{}
-
-	sequenceNumber := &atomic.Uint32{}
-
-	lastTimestamp := &atomic.Uint32{}
-
-	ctx, cancel := context.WithCancel(t.Context())
-
-	ct := &simulcastClientTrack{
-		mu:                      sync.RWMutex{},
-		id:                      t.base.id,
-		context:                 ctx,
-		cancel:                  cancel,
-		kind:                    t.base.kind,
-		mimeType:                t.base.codec.MimeType,
-		client:                  client,
-		localTrack:              track,
-		remoteTrack:             t,
-		sequenceNumber:          sequenceNumber,
-		lastQuality:             lastQuality,
-		paddingTS:               &atomic.Uint32{},
-		maxQuality:              &atomic.Uint32{},
-		lastBlankSequenceNumber: &atomic.Uint32{},
-		lastTimestamp:           lastTimestamp,
-		isScreen:                isScreen,
-		isEnded:                 &atomic.Bool{},
-		onTrackEndedCallbacks:   make([]func(), 0),
-	}
-
-	ct.SetMaxQuality(QualityHigh)
-
-	ct.remoteTrack.sendPLI(QualityHigh)
-	ct.remoteTrack.sendPLI(QualityMid)
-	ct.remoteTrack.sendPLI(QualityLow)
-
-	go func() {
-		defer cancel()
-		<-ctx.Done()
-	}()
+	ct := newSimulcastClientTrack(client, t)
 
 	t.base.clientTracks.Add(ct)
 

@@ -3,7 +3,6 @@ package sfu
 import (
 	"context"
 	"sync"
-	"sync/atomic"
 
 	"github.com/golang/glog"
 	"github.com/pion/rtp"
@@ -36,7 +35,51 @@ type clientTrack struct {
 	mimeType    string
 	localTrack  *webrtc.TrackLocalStaticRTP
 	remoteTrack *remoteTrack
-	isScreen    *atomic.Bool
+	isScreen    bool
+	packetChan  chan rtp.Packet
+}
+
+func newClientTrack(c *Client, t *Track, isScreen bool) *clientTrack {
+	ctx, cancel := context.WithCancel(t.Context())
+	ct := &clientTrack{
+		id:          t.base.id,
+		context:     ctx,
+		cancel:      cancel,
+		mu:          sync.RWMutex{},
+		client:      c,
+		kind:        t.base.kind,
+		mimeType:    t.remoteTrack.track.Codec().MimeType,
+		localTrack:  t.createLocalTrack(),
+		remoteTrack: t.remoteTrack,
+		isScreen:    isScreen,
+		packetChan:  make(chan rtp.Packet, 1024),
+	}
+
+	ct.startWorker()
+
+	return ct
+}
+
+func (t *clientTrack) startWorker() {
+	go func() {
+		for {
+			select {
+			case <-t.context.Done():
+				close(t.packetChan)
+				return
+			case p := <-t.packetChan:
+				t.processPacket(p)
+			}
+		}
+	}()
+}
+
+func (t *clientTrack) push(p rtp.Packet, _ QualityLevel) {
+	if t.client.peerConnection.PC().ConnectionState() != webrtc.PeerConnectionStateConnected {
+		return
+	}
+
+	t.packetChan <- p
 }
 
 func (t *clientTrack) ID() string {
@@ -55,7 +98,7 @@ func (t *clientTrack) Kind() webrtc.RTPCodecType {
 	return t.remoteTrack.track.Kind()
 }
 
-func (t *clientTrack) push(rtp rtp.Packet, quality QualityLevel) {
+func (t *clientTrack) processPacket(rtp rtp.Packet) {
 	if t.client.peerConnection.PC().ConnectionState() != webrtc.PeerConnectionStateConnected {
 		return
 	}
@@ -74,11 +117,14 @@ func (t *clientTrack) LocalTrack() *webrtc.TrackLocalStaticRTP {
 }
 
 func (t *clientTrack) IsScreen() bool {
-	return t.isScreen.Load()
+	return t.isScreen
 }
 
 func (t *clientTrack) SetSourceType(sourceType TrackType) {
-	t.isScreen.Store(sourceType == TrackTypeScreen)
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	t.isScreen = sourceType == TrackTypeScreen
 }
 
 func (t *clientTrack) IsSimulcast() bool {

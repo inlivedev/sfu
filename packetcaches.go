@@ -1,13 +1,15 @@
 package sfu
 
-import "sync"
+import (
+	"container/list"
+	"sync"
+)
 
 // buffer ring for cached packets
 type packetCaches struct {
+	size   int
 	mu     sync.RWMutex
-	head   uint16
-	tail   uint16
-	caches []cachedPacket
+	caches *list.List
 }
 
 type cachedPacket struct {
@@ -18,94 +20,54 @@ type cachedPacket struct {
 
 func newPacketCaches(size int) *packetCaches {
 	return &packetCaches{
+		size:   size,
 		mu:     sync.RWMutex{},
-		head:   0,
-		tail:   0,
-		caches: make([]cachedPacket, size),
+		caches: list.New(),
 	}
 }
 
-func (p *packetCaches) push(sequence uint16, timestamp uint32, dropCounter uint16) {
+func (p *packetCaches) Push(sequence uint16, timestamp uint32, dropCounter uint16) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	p.tail++
-
-	if p.tail == uint16(len(p.caches)) {
-		p.tail = 0
-	}
-
-	p.caches[p.tail] = cachedPacket{
+	p.caches.PushBack(cachedPacket{
 		sequence:    sequence,
 		timestamp:   timestamp,
 		dropCounter: dropCounter,
-	}
+	})
 
-	if p.head == uint16(len(p.caches)) {
-		p.head = 0
-	}
-
-	if p.tail == p.head {
-		p.head++
+	if p.caches.Len() > p.size {
+		p.caches.Remove(p.caches.Front())
 	}
 }
 
-func (p *packetCaches) getPacket(sequence uint16) (cachedPacket, bool) {
+func (p *packetCaches) GetPacket(sequence uint16) (cachedPacket, bool) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
-	if p.tail == p.head {
-		return cachedPacket{}, false
-	}
-
-	for i := p.tail; i != p.head; i-- {
-		if p.caches[i].sequence == sequence {
-			return p.caches[i], true
-		} else if p.caches[i].sequence < sequence {
-			return cachedPacket{}, false
-		}
-
-		if i == 0 {
-			i = uint16(len(p.caches) - 1)
+Loop:
+	for e := p.caches.Back(); e != nil; e = e.Prev() {
+		packet := e.Value.(cachedPacket)
+		if packet.sequence == sequence {
+			return packet, true
+		} else if packet.sequence > sequence {
+			break Loop
 		}
 	}
 
 	return cachedPacket{}, false
 }
 
-func (p *packetCaches) getPacketOrBefore(sequence uint16) (cachedPacket, bool) {
+func (p *packetCaches) GetPacketOrBefore(sequence uint16) (cachedPacket, bool) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
-	if p.tail == p.head {
-		return cachedPacket{}, false
-	}
-
-	for i := p.tail; i != p.head; i-- {
-		currentSeq := p.caches[i].sequence
-		if currentSeq == sequence {
-			return p.caches[i], true
-		} else if currentSeq < sequence {
-			if i == p.head {
-				return cachedPacket{}, false
-			} else {
-				nextPacket := p.caches[i]
-				return nextPacket, true
-			}
-		}
-
-		if i == 0 {
-			i = uint16(len(p.caches) - 1)
+	for e := p.caches.Back(); e != nil; e = e.Prev() {
+		packet := e.Value.(cachedPacket)
+		if packet.sequence == sequence || packet.sequence > sequence {
+			return packet, true
 		}
 	}
 
 	return cachedPacket{}, false
-}
-
-func (p *packetCaches) reset() {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	p.head = 0
-	p.tail = 0
 }
