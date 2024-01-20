@@ -75,6 +75,8 @@ func newSimulcastClientTrack(c *Client, t *SimulcastTrack) *simulcastClientTrack
 		onTrackEndedCallbacks:   make([]func(), 0),
 	}
 
+	ct.startWorker()
+
 	ct.SetMaxQuality(QualityHigh)
 
 	ct.remoteTrack.sendPLI(QualityHigh)
