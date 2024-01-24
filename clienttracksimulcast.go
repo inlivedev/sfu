@@ -35,7 +35,6 @@ type simulcastClientTrack struct {
 	isScreen                *atomic.Bool
 	isEnded                 *atomic.Bool
 	onTrackEndedCallbacks   []func()
-	packetChan              chan simulcastPacket
 }
 
 func newSimulcastClientTrack(c *Client, t *SimulcastTrack) *simulcastClientTrack {
@@ -73,10 +72,7 @@ func newSimulcastClientTrack(c *Client, t *SimulcastTrack) *simulcastClientTrack
 		isScreen:                isScreen,
 		isEnded:                 &atomic.Bool{},
 		onTrackEndedCallbacks:   make([]func(), 0),
-		packetChan:              make(chan simulcastPacket, 1),
 	}
-
-	ct.startWorker()
 
 	ct.SetMaxQuality(QualityHigh)
 
@@ -85,32 +81,6 @@ func newSimulcastClientTrack(c *Client, t *SimulcastTrack) *simulcastClientTrack
 	ct.remoteTrack.sendPLI(QualityLow)
 
 	return ct
-}
-
-func (t *simulcastClientTrack) startWorker() {
-	go func() {
-		defer t.cancel()
-		for {
-			select {
-			case <-t.context.Done():
-				return
-			case p := <-t.packetChan:
-
-				t.processPacket(p.packet, p.quality)
-			}
-		}
-	}()
-}
-
-func (t *simulcastClientTrack) push(p rtp.Packet, quality QualityLevel) {
-	if t.client.peerConnection.PC().ConnectionState() != webrtc.PeerConnectionStateConnected {
-		return
-	}
-
-	t.packetChan <- simulcastPacket{
-		packet:  p,
-		quality: quality,
-	}
 }
 
 func (t *simulcastClientTrack) Client() *Client {
@@ -146,7 +116,7 @@ func (t *simulcastClientTrack) writeRTP(p rtp.Packet) {
 	}
 }
 
-func (t *simulcastClientTrack) processPacket(p rtp.Packet, quality QualityLevel) {
+func (t *simulcastClientTrack) push(p rtp.Packet, quality QualityLevel) {
 	var trackQuality QualityLevel
 
 	lastQuality := t.LastQuality()

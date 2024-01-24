@@ -132,32 +132,7 @@ func newScaleableClientTrack(
 		packetChan:            make(chan rtp.Packet, 1),
 	}
 
-	sct.startWorker()
-
 	return sct
-}
-
-func (t *scaleableClientTrack) startWorker() {
-	go func() {
-		defer t.cancel()
-		for {
-			select {
-			case <-t.context.Done():
-				return
-			case p := <-t.packetChan:
-				t.processPacket(p)
-			}
-		}
-	}()
-}
-
-func (t *scaleableClientTrack) push(p rtp.Packet, _ QualityLevel) {
-	if t.client.peerConnection.PC().ConnectionState() != webrtc.PeerConnectionStateConnected {
-		return
-	}
-
-	t.packetChan <- p
-	// t.processPacket(p)
 }
 
 func (t *scaleableClientTrack) Client() *Client {
@@ -200,7 +175,7 @@ func (t *scaleableClientTrack) isKeyframe(vp9 *codecs.VP9Packet) bool {
 
 // this where the temporal and spatial layers are will be decided to be sent to the client or not
 // compare it with the claimed quality to decide if the packet should be sent or not
-func (t *scaleableClientTrack) processPacket(p rtp.Packet) {
+func (t *scaleableClientTrack) push(p rtp.Packet, _ QualityLevel) {
 	// glog.Info("process interval: ", time.Since(t.lastProcessTime))
 	// t.lastProcessTime = time.Now()
 

@@ -36,7 +36,6 @@ type clientTrack struct {
 	localTrack  *webrtc.TrackLocalStaticRTP
 	remoteTrack *remoteTrack
 	isScreen    bool
-	packetChan  chan rtp.Packet
 }
 
 func newClientTrack(c *Client, t *Track, isScreen bool) *clientTrack {
@@ -52,33 +51,9 @@ func newClientTrack(c *Client, t *Track, isScreen bool) *clientTrack {
 		localTrack:  t.createLocalTrack(),
 		remoteTrack: t.remoteTrack,
 		isScreen:    isScreen,
-		packetChan:  make(chan rtp.Packet, 1),
 	}
-
-	ct.startWorker()
 
 	return ct
-}
-
-func (t *clientTrack) startWorker() {
-	go func() {
-		for {
-			select {
-			case <-t.context.Done():
-				return
-			case p := <-t.packetChan:
-				t.processPacket(p)
-			}
-		}
-	}()
-}
-
-func (t *clientTrack) push(p rtp.Packet, _ QualityLevel) {
-	if t.client.peerConnection.PC().ConnectionState() != webrtc.PeerConnectionStateConnected {
-		return
-	}
-
-	t.packetChan <- p
 }
 
 func (t *clientTrack) ID() string {
@@ -97,7 +72,7 @@ func (t *clientTrack) Kind() webrtc.RTPCodecType {
 	return t.remoteTrack.track.Kind()
 }
 
-func (t *clientTrack) processPacket(rtp rtp.Packet) {
+func (t *clientTrack) push(rtp rtp.Packet, _ QualityLevel) {
 	if t.client.peerConnection.PC().ConnectionState() != webrtc.PeerConnectionStateConnected {
 		return
 	}
