@@ -52,7 +52,7 @@ func newClientTrack(c *Client, t *Track, isScreen bool) *clientTrack {
 		localTrack:  t.createLocalTrack(),
 		remoteTrack: t.remoteTrack,
 		isScreen:    isScreen,
-		packetChan:  make(chan rtp.Packet, 1024),
+		packetChan:  make(chan rtp.Packet, 1),
 	}
 
 	ct.startWorker()
@@ -65,7 +65,6 @@ func (t *clientTrack) startWorker() {
 		for {
 			select {
 			case <-t.context.Done():
-				close(t.packetChan)
 				return
 			case p := <-t.packetChan:
 				t.processPacket(p)

@@ -66,7 +66,6 @@ func (t *remoteTrack) Context() context.Context {
 func (t *remoteTrack) readRTP() {
 	go func() {
 		defer t.cancel()
-
 		for {
 			select {
 			case <-t.context.Done():
@@ -74,7 +73,7 @@ func (t *remoteTrack) readRTP() {
 			default:
 				if err := t.track.SetReadDeadline(time.Now().Add(100 * time.Millisecond)); err != nil {
 					glog.Error("error setting read deadline: ", err.Error())
-					return
+					continue
 				}
 
 				rtp, _, readErr := t.track.ReadRTP()
@@ -89,7 +88,6 @@ func (t *remoteTrack) readRTP() {
 						go t.updateStats()
 					}
 				}
-
 			}
 		}
 	}()

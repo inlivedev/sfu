@@ -65,7 +65,6 @@ func (t *clientTrackRed) startWorker() {
 		for {
 			select {
 			case <-t.context.Done():
-				close(t.packetChan)
 				return
 			case p := <-t.packetChan:
 				t.processPacket(p)

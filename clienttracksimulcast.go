@@ -73,6 +73,7 @@ func newSimulcastClientTrack(c *Client, t *SimulcastTrack) *simulcastClientTrack
 		isScreen:                isScreen,
 		isEnded:                 &atomic.Bool{},
 		onTrackEndedCallbacks:   make([]func(), 0),
+		packetChan:              make(chan simulcastPacket, 1),
 	}
 
 	ct.startWorker()
@@ -92,7 +93,6 @@ func (t *simulcastClientTrack) startWorker() {
 		for {
 			select {
 			case <-t.context.Done():
-				close(t.packetChan)
 				return
 			case p := <-t.packetChan:
 
