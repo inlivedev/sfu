@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"regexp"
 	"sync"
 	"sync/atomic"
@@ -236,7 +237,10 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		congestionController, err := cc.NewInterceptor(func() (cc.BandwidthEstimator, error) {
 			// if bw below 100_000, somehow the estimator will struggle to probe the bandwidth and will stuck there. So we set the min to 100_000
 			// TODO: we need to use packet loss based bandwidth adjuster when the bandwidth is below 100_000
-			return gcc.NewSendSideBWE(gcc.SendSideBWEInitialBitrate(int(s.bitrateConfigs.InitialBandwidth)))
+			return gcc.NewSendSideBWE(
+				gcc.SendSideBWEInitialBitrate(int(s.bitrateConfigs.InitialBandwidth)),
+				gcc.SendSideBWEPacer(gcc.NewNoOpPacer()),
+			)
 		})
 		if err != nil {
 			panic(err)
@@ -812,7 +816,7 @@ func (c *Client) setClientTrack(t ITrack) iClientTrack {
 
 func (c *Client) enableReportAndStats(rtpSender *webrtc.RTPSender, track iClientTrack) {
 	go func() {
-		localCtx, cancel := context.WithCancel(c.context)
+		localCtx, cancel := context.WithCancel(track.Context())
 
 		defer cancel()
 
@@ -822,7 +826,7 @@ func (c *Client) enableReportAndStats(rtpSender *webrtc.RTPSender, track iClient
 				return
 			default:
 				rtcpPackets, _, err := rtpSender.ReadRTCP()
-				if err != nil {
+				if err != nil && err == io.ErrClosedPipe {
 					return
 				}
 
@@ -839,7 +843,7 @@ func (c *Client) enableReportAndStats(rtpSender *webrtc.RTPSender, track iClient
 	}()
 
 	go func() {
-		localCtx, cancel := context.WithCancel(c.context)
+		localCtx, cancel := context.WithCancel(track.Context())
 		tick := time.NewTicker(1 * time.Second)
 		defer tick.Stop()
 
