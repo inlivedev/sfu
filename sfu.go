@@ -111,7 +111,6 @@ type SFU struct {
 	cancel                    context.CancelFunc
 	codecs                    []string
 	dataChannels              *SFUDataChannelList
-	idleChan                  chan bool
 	iceServers                []webrtc.ICEServer
 	nat1To1IPsCandidateType   webrtc.ICECandidateType
 	mu                        sync.Mutex
@@ -174,23 +173,6 @@ func New(ctx context.Context, opts sfuOptions) *SFU {
 		onClientAddedCallbacks:    make([]func(*Client), 0),
 		nat1To1IPsCandidateType:   opts.NAT1To1IPsCandidateType,
 	}
-
-	go func() {
-	Out:
-		for {
-			select {
-			case isIdle := <-sfu.idleChan:
-				if isIdle {
-					break Out
-				}
-			case <-sfu.context.Done():
-				break Out
-			}
-		}
-
-		cancel()
-		sfu.Stop()
-	}()
 
 	return sfu
 }

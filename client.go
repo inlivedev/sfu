@@ -115,6 +115,7 @@ type Client struct {
 	context               context.Context
 	cancel                context.CancelFunc
 	canAddCandidate       *atomic.Bool
+	clientTracks          map[string]iClientTrack
 	internalDataChannel   *webrtc.DataChannel
 	dataChannels          *DataChannelList
 	estimator             cc.BandwidthEstimator
@@ -299,6 +300,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		name:                           name,
 		context:                        localCtx,
 		cancel:                         cancel,
+		clientTracks:                   make(map[string]iClientTrack, 0),
 		canAddCandidate:                &atomic.Bool{},
 		isInRenegotiation:              &atomic.Bool{},
 		isInRemoteNegotiation:          &atomic.Bool{},
@@ -356,7 +358,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		if client.isDebug {
 			glog.Info("client: connection state changed ", connectionState.String())
 		}
-		client.onConnectionStateChanged(connectionState)
+		go client.onConnectionStateChanged(connectionState)
 	})
 
 	// Set a handler for when a new remote track starts, this just distributes all our packets
@@ -805,13 +807,31 @@ func (c *Client) setClientTrack(t ITrack) iClientTrack {
 			return
 		}
 
+		delete(c.clientTracks, outputTrack.ID())
+
 		c.renegotiate()
 	}()
 
 	// enable RTCP report and stats
 	c.enableReportAndStats(transc.Sender(), outputTrack)
 
+	c.mu.Lock()
+	c.clientTracks[outputTrack.ID()] = outputTrack
+	c.mu.Unlock()
+
 	return outputTrack
+}
+
+func (c *Client) ClientTracks() map[string]iClientTrack {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	clientTracks := make(map[string]iClientTrack, 0)
+	for k, v := range c.clientTracks {
+		clientTracks[k] = v
+	}
+
+	return clientTracks
 }
 
 func (c *Client) enableReportAndStats(rtpSender *webrtc.RTPSender, track iClientTrack) {
@@ -886,7 +906,6 @@ func (c *Client) afterClosed() {
 	c.cancel()
 
 	c.sfu.onAfterClientStopped(c)
-
 }
 
 func (c *Client) stop() error {
@@ -1251,6 +1270,10 @@ func (c *Client) createInternalDataChannel(label string, msgCallback func(msg we
 	c.renegotiate()
 
 	return newDc, nil
+}
+
+func (c *Client) PublishedTracks() []ITrack {
+	return c.publishedTracks.GetTracks()
 }
 
 func (c *Client) onInternalMessage(msg webrtc.DataChannelMessage) {
