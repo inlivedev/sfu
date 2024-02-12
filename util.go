@@ -19,7 +19,6 @@ import (
 	"github.com/pion/sdp/v3"
 	"github.com/pion/turn/v2"
 	"github.com/pion/webrtc/v3"
-	"golang.org/x/sys/unix"
 	"golang.org/x/text/language"
 	"golang.org/x/text/message"
 )
@@ -362,14 +361,7 @@ func StartTurnServer(ctx context.Context, publicIP string) *turn.Server {
 	// will load-balance received packets per the IP 5-tuple
 	listenerConfig := &net.ListenConfig{
 		Control: func(network, address string, conn syscall.RawConn) error {
-			var operr error
-			if err = conn.Control(func(fd uintptr) {
-				operr = syscall.SetsockoptInt(int(fd), syscall.SOL_SOCKET, unix.SO_REUSEPORT, 1)
-			}); err != nil {
-				return err
-			}
-
-			return operr
+			return setSocketOptions(network, address, conn)
 		},
 	}
 
