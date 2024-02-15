@@ -352,17 +352,6 @@ func CreatePeerPair(ctx context.Context, room *Room, iceServers []webrtc.ICEServ
 		tracks      []*webrtc.TrackLocalStaticSample
 	)
 
-	if len(iceServers) == 0 {
-		iceServers = []webrtc.ICEServer{
-			{
-				URLs:           []string{"turn:127.0.0.1:3478", "stun:127.0.0.1:3478"},
-				Username:       "user",
-				Credential:     "pass",
-				CredentialType: webrtc.ICECredentialTypePassword,
-			},
-		}
-	}
-
 	i := &interceptor.Registry{}
 	var simulcastI *simulcast.Interceptor
 
@@ -540,17 +529,6 @@ func CreateDataPair(ctx context.Context, room *Room, iceServers []webrtc.ICEServ
 		client      *Client
 		mediaEngine *webrtc.MediaEngine = GetMediaEngine()
 	)
-
-	if len(iceServers) == 0 {
-		iceServers = []webrtc.ICEServer{
-			{
-				URLs:           []string{"turn:127.0.0.1:3478", "stun:127.0.0.1:3478"},
-				Username:       "user",
-				Credential:     "pass",
-				CredentialType: webrtc.ICECredentialTypePassword,
-			},
-		}
-	}
 
 	i := &interceptor.Registry{}
 

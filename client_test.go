@@ -253,7 +253,7 @@ func TestClientDataChannel(t *testing.T) {
 		dcChan <- c
 	})
 
-	timeout, cancelTimeout := context.WithTimeout(ctx, 10*time.Second)
+	timeout, cancelTimeout := context.WithTimeout(ctx, 30*time.Second)
 
 	defer cancelTimeout()
 

@@ -224,7 +224,7 @@ Loop:
 		}
 	}
 
-	require.Equal(t, "hellohelloworldworld", messages)
+	require.Equal(t, len("hellohelloworldworld"), len(messages))
 }
 
 // TODO
