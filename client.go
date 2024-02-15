@@ -974,7 +974,7 @@ func (c *Client) onConnectionStateChanged(state webrtc.PeerConnectionState) {
 	callbacks := c.onConnectionStateChangedCallbacks
 	c.mu.RUnlock()
 	for _, callback := range callbacks {
-		callback(webrtc.PeerConnectionState(state))
+		go callback(webrtc.PeerConnectionState(state))
 	}
 }
 

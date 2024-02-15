@@ -6,27 +6,26 @@ import (
 	"os"
 	"testing"
 	"time"
+
+	"github.com/pion/webrtc/v3"
 )
 
 var roomManager *Manager
 
 func TestMain(m *testing.M) {
-	flag.Set("logtostderr", "true")
-	flag.Set("stderrthreshold", "INFO")
+	// flag.Set("logtostderr", "true")
+	// flag.Set("stderrthreshold", "INFO")
 
 	flag.Parse()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	turnServer := StartTurnServer(ctx, "127.0.0.1")
-	defer turnServer.Close()
-
 	// create room manager first before create new room
 	roomManager = NewManager(ctx, "test", Options{
 		ConnectRemoteRoomTimeout: 30 * time.Second,
-		EnableMux:                false,
+		EnableMux:                true,
 		EnableBandwidthEstimator: true,
-		IceServers:               DefaultTestIceServers(),
+		IceServers:               []webrtc.ICEServer{},
 	})
 
 	result := m.Run()

@@ -227,6 +227,7 @@ func (r *Room) AddClient(id, name string, opts ClientOptions) (*Client, error) {
 	client = r.sfu.NewClient(id, name, opts)
 
 	// stop client if not connecting for a specific time
+	initConnection := true
 	go func() {
 		timeout, cancel := context.WithTimeout(client.context, r.options.ClientTimeout)
 		defer cancel()
@@ -236,8 +237,11 @@ func (r *Room) AddClient(id, name string, opts ClientOptions) (*Client, error) {
 		timeoutReached := false
 
 		client.OnConnectionStateChanged(func(state webrtc.PeerConnectionState) {
-			if state == webrtc.PeerConnectionStateConnected && !timeoutReached {
+			if initConnection && state == webrtc.PeerConnectionStateConnected && !timeoutReached {
 				connectingChan <- true
+
+				// set to false so we don't send the connectingChan again because no more listener
+				initConnection = false
 			}
 		})
 

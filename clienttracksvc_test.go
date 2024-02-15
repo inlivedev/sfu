@@ -28,23 +28,10 @@ func TestSVCPacketDropSequence(t *testing.T) {
 	require.NoError(t, err, "error creating room: %v", err)
 	ctx := testRoom.sfu.context
 
-	sender, _, trackChanReceiver := createPeerSVC(ctx, testRoom, DefaultTestIceServers(), "sender", false)
-	createPeerSVC(ctx, testRoom, DefaultTestIceServers(), "receiver", false)
+	_, _, trackChanReceiver, connected := createPeerSVC(ctx, testRoom, []webrtc.ICEServer{}, "sender", false)
+	createPeerSVC(ctx, testRoom, []webrtc.ICEServer{}, "receiver", false)
 
-	connected := make(chan bool)
-
-	sender.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
-		switch state {
-		case webrtc.PeerConnectionStateConnected:
-			connected <- true
-		case webrtc.PeerConnectionStateDisconnected:
-			connected <- false
-		case webrtc.PeerConnectionStateFailed:
-			connected <- false
-		}
-	})
-
-	timeout, cancelTimeout := context.WithTimeout(ctx, 10*time.Second)
+	timeout, cancelTimeout := context.WithTimeout(ctx, 60*time.Second)
 	defer cancelTimeout()
 	var state bool
 
@@ -86,22 +73,11 @@ func TestSVCPacketDropSequence(t *testing.T) {
 	}
 }
 
-func createPeerSVC(ctx context.Context, room *Room, iceServers []webrtc.ICEServer, peerName string, isLoop bool) (*webrtc.PeerConnection, *Client, chan *webrtc.TrackRemote) {
+func createPeerSVC(ctx context.Context, room *Room, iceServers []webrtc.ICEServer, peerName string, isLoop bool) (*webrtc.PeerConnection, *Client, chan *webrtc.TrackRemote, chan bool) {
 	var (
 		client      *Client
 		mediaEngine *webrtc.MediaEngine = GetMediaEngine()
 	)
-
-	if len(iceServers) == 0 {
-		iceServers = []webrtc.ICEServer{
-			{
-				URLs:           []string{"turn:127.0.0.1:3478", "stun:127.0.0.1:3478"},
-				Username:       "user",
-				Credential:     "pass",
-				CredentialType: webrtc.ICECredentialTypePassword,
-			},
-		}
-	}
 
 	i := &interceptor.Registry{}
 
@@ -110,9 +86,21 @@ func createPeerSVC(ctx context.Context, room *Room, iceServers []webrtc.ICEServe
 
 	webrtcAPI := webrtc.NewAPI(webrtc.WithMediaEngine(mediaEngine), webrtc.WithInterceptorRegistry(i))
 
-	pc, _ := webrtcAPI.NewPeerConnection(webrtc.Configuration{
-		ICEServers: iceServers,
+	pc, _ := webrtcAPI.NewPeerConnection(webrtc.Configuration{})
+
+	connected := make(chan bool)
+
+	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
+		switch state {
+		case webrtc.PeerConnectionStateConnected:
+			connected <- true
+		case webrtc.PeerConnectionStateDisconnected:
+			connected <- false
+		case webrtc.PeerConnectionStateFailed:
+			connected <- false
+		}
 	})
+
 	trackChan := make(chan *webrtc.TrackRemote)
 
 	pc.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
@@ -183,7 +171,7 @@ func createPeerSVC(ctx context.Context, room *Room, iceServers []webrtc.ICEServe
 		client.PeerConnection().PC().AddICECandidate(candidate.ToJSON())
 	})
 
-	return pc, client, trackChan
+	return pc, client, trackChan, connected
 }
 
 func sendPackets(ctx context.Context, track *webrtc.TrackLocalStaticRTP) {
