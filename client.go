@@ -17,6 +17,7 @@ import (
 	"github.com/pion/interceptor"
 	"github.com/pion/interceptor/pkg/cc"
 	"github.com/pion/interceptor/pkg/gcc"
+	"github.com/pion/interceptor/pkg/nack"
 	"github.com/pion/interceptor/pkg/stats"
 	"github.com/pion/rtcp"
 	"github.com/pion/webrtc/v3"
@@ -266,7 +267,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 	}
 
 	// Use the default set of Interceptors
-	if err := webrtc.RegisterDefaultInterceptors(m, i); err != nil {
+	if err := registerDefaultInterceptors(m, i); err != nil {
 		panic(err)
 	}
 
@@ -1495,4 +1496,28 @@ func (c *Client) Tracks() []ITrack {
 	defer c.mu.Unlock()
 
 	return c.tracks.GetTracks()
+}
+
+func registerDefaultInterceptors(m *webrtc.MediaEngine, interceptorRegistry *interceptor.Registry) error {
+	// ConfigureNack will setup everything necessary for handling generating/responding to nack messages.
+	generator, err := nack.NewGeneratorInterceptor()
+	if err != nil {
+		return err
+	}
+
+	responder, err := nack.NewResponderInterceptor(nack.DisableCopy())
+	if err != nil {
+		return err
+	}
+
+	m.RegisterFeedback(webrtc.RTCPFeedback{Type: "nack"}, webrtc.RTPCodecTypeVideo)
+	m.RegisterFeedback(webrtc.RTCPFeedback{Type: "nack", Parameter: "pli"}, webrtc.RTPCodecTypeVideo)
+	interceptorRegistry.Add(responder)
+	interceptorRegistry.Add(generator)
+
+	if err := webrtc.ConfigureRTCPReports(interceptorRegistry); err != nil {
+		return err
+	}
+
+	return webrtc.ConfigureTWCCSender(m, interceptorRegistry)
 }
