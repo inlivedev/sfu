@@ -26,8 +26,8 @@ func TestRoomDataChannel(t *testing.T) {
 	err = testRoom.CreateDataChannel("chat", DefaultDataChannelOptions())
 	require.NoError(t, err)
 
-	pc1, client1, _ := CreateDataPair(ctx, testRoom, roomManager.options.IceServers, "peer1")
-	pc2, client2, _ := CreateDataPair(ctx, testRoom, roomManager.options.IceServers, "peer2")
+	pc1, client1, _, connChan1 := CreateDataPair(ctx, testRoom, roomManager.options.IceServers, "peer1")
+	pc2, client2, _, connChan2 := CreateDataPair(ctx, testRoom, roomManager.options.IceServers, "peer2")
 
 	defer func() {
 		_ = testRoom.StopClient(client1.id)
@@ -61,18 +61,36 @@ func TestRoomDataChannel(t *testing.T) {
 
 	pc2.OnDataChannel(onDataChannel)
 
-	connected := WaitConnected(ctx, []*webrtc.PeerConnection{pc1, pc2})
-
 	timeoutConnected, cancelTimeoutConnected := context.WithTimeout(ctx, 40*time.Second)
+	defer cancelTimeoutConnected()
 	isConnected := false
 
-	select {
-	case <-timeoutConnected.Done():
-		cancelTimeoutConnected()
-		t.Fatal("timeout waiting for connected")
-	case <-connected:
-		cancelTimeoutConnected()
-		isConnected = true
+	connectedCount := 0
+LoopConnected:
+	for {
+		select {
+		case <-timeoutConnected.Done():
+			cancelTimeoutConnected()
+			t.Fatal("timeout waiting for connected")
+		case state1 := <-connChan1:
+			if state1 == webrtc.PeerConnectionStateConnected {
+				connectedCount++
+			}
+
+			if connectedCount == 2 {
+				isConnected = true
+				break LoopConnected
+			}
+		case state2 := <-connChan2:
+			if state2 == webrtc.PeerConnectionStateConnected {
+				connectedCount++
+			}
+
+			if connectedCount == 2 {
+				isConnected = true
+				break LoopConnected
+			}
+		}
 	}
 
 	require.True(t, isConnected)
@@ -116,9 +134,9 @@ func TestRoomDataChannelWithClientID(t *testing.T) {
 	require.NoError(t, err, "error creating room: %v", err)
 	ctx := testRoom.sfu.context
 
-	pc1, client1, _ := CreateDataPair(ctx, testRoom, roomManager.options.IceServers, "peer1")
-	pc2, client2, _ := CreateDataPair(ctx, testRoom, roomManager.options.IceServers, "peer2")
-	pc3, client3, _ := CreateDataPair(ctx, testRoom, roomManager.options.IceServers, "peer2")
+	pc1, client1, _, connChan1 := CreateDataPair(ctx, testRoom, roomManager.options.IceServers, "peer1")
+	pc2, client2, _, connChan2 := CreateDataPair(ctx, testRoom, roomManager.options.IceServers, "peer2")
+	pc3, client3, _, connChan3 := CreateDataPair(ctx, testRoom, roomManager.options.IceServers, "peer2")
 
 	defer func() {
 		_ = testRoom.StopClient(client1.id)
@@ -177,18 +195,51 @@ func TestRoomDataChannelWithClientID(t *testing.T) {
 
 	pc3.OnDataChannel(onDataChannel)
 
-	connected := WaitConnected(ctx, []*webrtc.PeerConnection{pc1, pc2, pc3})
-
 	timeoutConnected, cancelTimeoutConnected := context.WithTimeout(ctx, 30*time.Second)
+
+	defer cancelTimeoutConnected()
+
 	isConnected := false
 
-	select {
-	case <-timeoutConnected.Done():
-		cancelTimeoutConnected()
-		t.Fatal("timeout waiting for connected")
-	case <-connected:
-		cancelTimeoutConnected()
-		isConnected = true
+	connectedCount := 0
+
+LoopConnected:
+	for {
+		select {
+		case state1 := <-connChan1:
+			if state1 == webrtc.PeerConnectionStateConnected {
+				connectedCount++
+			}
+
+			if connectedCount == 3 {
+				isConnected = true
+				break LoopConnected
+			}
+
+		case state2 := <-connChan2:
+			if state2 == webrtc.PeerConnectionStateConnected {
+				connectedCount++
+			}
+
+			if connectedCount == 3 {
+				isConnected = true
+				break LoopConnected
+			}
+
+		case state3 := <-connChan3:
+			if state3 == webrtc.PeerConnectionStateConnected {
+				connectedCount++
+			}
+
+			if connectedCount == 3 {
+				isConnected = true
+				break LoopConnected
+			}
+
+		case <-timeoutConnected.Done():
+			cancelTimeoutConnected()
+			t.Fatal("timeout waiting for connected")
+		}
 	}
 
 	require.True(t, isConnected)

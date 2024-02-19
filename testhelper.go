@@ -524,7 +524,7 @@ func negotiate(pc *webrtc.PeerConnection, client *Client) {
 	_ = pc.SetRemoteDescription(*answer)
 }
 
-func CreateDataPair(ctx context.Context, room *Room, iceServers []webrtc.ICEServer, peerName string) (*webrtc.PeerConnection, *Client, stats.Getter) {
+func CreateDataPair(ctx context.Context, room *Room, iceServers []webrtc.ICEServer, peerName string) (*webrtc.PeerConnection, *Client, stats.Getter, chan webrtc.PeerConnectionState) {
 	var (
 		client      *Client
 		mediaEngine *webrtc.MediaEngine = GetMediaEngine()
@@ -564,6 +564,8 @@ func CreateDataPair(ctx context.Context, room *Room, iceServers []webrtc.ICEServ
 		panic(err)
 	}
 
+	connChan := make(chan webrtc.PeerConnectionState)
+
 	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
 		if state == webrtc.PeerConnectionStateClosed || state == webrtc.PeerConnectionStateFailed {
 			glog.Info("test: peer connection closed ", peerName)
@@ -571,6 +573,8 @@ func CreateDataPair(ctx context.Context, room *Room, iceServers []webrtc.ICEServ
 				_ = room.StopClient(client.ID())
 			}
 		}
+
+		connChan <- state
 
 	})
 
@@ -615,50 +619,7 @@ func CreateDataPair(ctx context.Context, room *Room, iceServers []webrtc.ICEServ
 		err = client.PeerConnection().PC().AddICECandidate(candidate.ToJSON())
 	})
 
-	return pc, client, statsGetter
-}
-
-func WaitConnected(ctx context.Context, peers []*webrtc.PeerConnection) chan bool {
-	connected := make(chan bool)
-	waitChan := make(chan bool)
-	connectedCount := 0
-	ctxx, cancel := context.WithCancel(ctx)
-
-	go func() {
-		defer cancel()
-
-		for {
-			select {
-			case <-ctxx.Done():
-				waitChan <- false
-				return
-			case <-connected:
-				connectedCount++
-				if connectedCount == len(peers) {
-					waitChan <- true
-					return
-				}
-			}
-		}
-	}()
-
-	for _, pc := range peers {
-		if pc.ConnectionState() == webrtc.PeerConnectionStateConnected {
-			connected <- true
-		} else {
-			pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
-				if state == webrtc.PeerConnectionStateConnected {
-					connected <- true
-				} else if state == webrtc.PeerConnectionStateFailed || state == webrtc.PeerConnectionStateClosed {
-					waitChan <- false
-					cancel()
-				}
-			})
-		}
-
-	}
-
-	return waitChan
+	return pc, client, statsGetter, connChan
 }
 
 func LoadVp9Track(ctx context.Context, pc *webrtc.PeerConnection, videoFileName string, loop bool) *webrtc.RTPSender {
