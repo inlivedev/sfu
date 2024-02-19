@@ -87,6 +87,14 @@ var (
 			RTPCodecCapability: webrtc.RTPCodecCapability{"video/rtx", 90000, 0, "apt=127", nil},
 			PayloadType:        125,
 		},
+		{
+			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypeVP8, 90000, 0, "", videoRTCPFeedback},
+			PayloadType:        96,
+		},
+		{
+			RTPCodecCapability: webrtc.RTPCodecCapability{"video/rtx", 90000, 0, "apt=96", nil},
+			PayloadType:        97,
+		},
 	}
 
 	audioCodecs = []webrtc.RTPCodecParameters{

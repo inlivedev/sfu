@@ -18,7 +18,7 @@ type remoteTrack struct {
 	cancel                context.CancelFunc
 	pliContext            context.Context
 	pliCancel             context.CancelFunc
-	mu                    sync.Mutex
+	mu                    sync.RWMutex
 	track                 IRemoteTrack
 	onRead                func(rtp.Packet)
 	onPLI                 func()
@@ -37,7 +37,7 @@ func newRemoteTrack(ctx context.Context, track IRemoteTrack, pliInterval time.Du
 	rt := &remoteTrack{
 		context:               localctx,
 		cancel:                cancel,
-		mu:                    sync.Mutex{},
+		mu:                    sync.RWMutex{},
 		track:                 track,
 		bitrate:               &atomic.Uint32{},
 		previousBytesReceived: &atomic.Uint64{},

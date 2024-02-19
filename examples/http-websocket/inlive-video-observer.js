@@ -77,6 +77,16 @@ export class InliveVideoObserver {
         this.#videoElements.push(videoElement)
     }
 
+	/**
+     * Unobserve video element for any visibility or resize changes.
+     * @param {HTMLVideoElement} videoElement - Video element to unwatch
+     * @returns {void}
+     */
+	unobserve(videoElement) {
+		this.#intersectionObserver.unobserve(videoElement);
+		this.#resizeObserver.unobserve(videoElement);
+	}
+
     /**
      * Watch video element events.
      * @param {HTMLVideoElement} videoElement - Video element to watch

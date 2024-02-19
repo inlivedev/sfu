@@ -3,6 +3,7 @@ package sfu
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -76,11 +77,15 @@ type Track struct {
 func newTrack(ctx context.Context, clientID string, trackRemote IRemoteTrack, pliInterval time.Duration, onPLI func(), stats stats.Getter, onStatsUpdated func(*stats.Stats)) ITrack {
 	ctList := newClientTrackList()
 
+	remoteTrackID := strings.ReplaceAll(strings.ReplaceAll(trackRemote.ID(), "{", ""), "}", "")
+	streamID := strings.ReplaceAll(strings.ReplaceAll(trackRemote.StreamID(), "{", ""), "}", "")
+	msid := strings.ReplaceAll(strings.ReplaceAll(trackRemote.Msid(), "{", ""), "}", "")
+
 	baseTrack := baseTrack{
-		id:           trackRemote.ID(),
+		id:           remoteTrackID,
 		isScreen:     &atomic.Bool{},
-		msid:         trackRemote.Msid(),
-		streamid:     trackRemote.StreamID(),
+		msid:         msid,
+		streamid:     streamID,
 		clientid:     clientID,
 		kind:         trackRemote.Kind(),
 		codec:        trackRemote.Codec(),
@@ -288,7 +293,7 @@ func (t *Track) KeyFrameReceived() {
 type SimulcastTrack struct {
 	context                     context.Context
 	cancel                      context.CancelFunc
-	mu                          sync.Mutex
+	mu                          sync.RWMutex
 	base                        *baseTrack
 	baseTS                      uint32
 	onTrackCompleteCallbacks    []func()
@@ -318,7 +323,7 @@ type SimulcastTrack struct {
 
 func newSimulcastTrack(ctx context.Context, clientid string, track IRemoteTrack, pliInterval time.Duration, onPLI func(), stats stats.Getter, onStatsUpdated func(*stats.Stats)) ITrack {
 	t := &SimulcastTrack{
-		mu: sync.Mutex{},
+		mu: sync.RWMutex{},
 		base: &baseTrack{
 			id:           track.ID(),
 			isScreen:     &atomic.Bool{},
@@ -427,6 +432,8 @@ func (t *SimulcastTrack) AddRemoteTrack(ctx context.Context, track IRemoteTrack,
 	quality := RIDToQuality(track.RID())
 
 	onRead := func(p rtp.Packet) {
+		t.mu.RLock()
+
 		// set the base timestamp for the track if it is not set yet
 		if t.baseTS == 0 {
 			t.baseTS = p.Timestamp
@@ -456,6 +463,8 @@ func (t *SimulcastTrack) AddRemoteTrack(ctx context.Context, track IRemoteTrack,
 			t.lastLowSequence = t.lowSequence
 			t.lowSequence = p.SequenceNumber
 		}
+
+		t.mu.RUnlock()
 
 		tracks := t.base.clientTracks.GetTracks()
 		for _, track := range tracks {
@@ -611,7 +620,7 @@ func (t *SimulcastTrack) isTrackActive(quality QualityLevel) bool {
 		delta := time.Since(time.Unix(0, t.lastReadHighTS.Load()))
 
 		if delta > threshold {
-			glog.Warningf("track: remote track %s high is not active, last read was %d ms ago", delta.Milliseconds())
+			glog.Warningf("track: remote track %s high is not active, last read was %d ms ago", t.base.id, delta.Milliseconds())
 			return false
 		}
 
@@ -648,6 +657,9 @@ func (t *SimulcastTrack) isTrackActive(quality QualityLevel) bool {
 }
 
 func (t *SimulcastTrack) sendPLI(quality QualityLevel) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
 	switch quality {
 	case QualityHigh:
 		if t.remoteTrackHigh != nil {
@@ -682,6 +694,9 @@ func (t *SimulcastTrack) onRead(p rtp.Packet, quality QualityLevel) {
 }
 
 func (t *SimulcastTrack) SSRCHigh() webrtc.SSRC {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
 	if t.remoteTrackHigh == nil {
 		return 0
 	}
@@ -690,6 +705,9 @@ func (t *SimulcastTrack) SSRCHigh() webrtc.SSRC {
 }
 
 func (t *SimulcastTrack) SSRCMid() webrtc.SSRC {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
 	if t.remoteTrackMid == nil {
 		return 0
 	}
@@ -698,6 +716,9 @@ func (t *SimulcastTrack) SSRCMid() webrtc.SSRC {
 }
 
 func (t *SimulcastTrack) SSRCLow() webrtc.SSRC {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
 	if t.remoteTrackLow == nil {
 		return 0
 	}
@@ -706,6 +727,9 @@ func (t *SimulcastTrack) SSRCLow() webrtc.SSRC {
 }
 
 func (t *SimulcastTrack) RIDHigh() string {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
 	if t.remoteTrackHigh == nil {
 		return ""
 	}
@@ -714,6 +738,9 @@ func (t *SimulcastTrack) RIDHigh() string {
 }
 
 func (t *SimulcastTrack) RIDMid() string {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
 	if t.remoteTrackMid == nil {
 		return ""
 	}
@@ -722,6 +749,9 @@ func (t *SimulcastTrack) RIDMid() string {
 }
 
 func (t *SimulcastTrack) RIDLow() string {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
 	if t.remoteTrackLow == nil {
 		return ""
 	}
@@ -747,6 +777,9 @@ func (t *SimulcastTrack) PayloadType() webrtc.PayloadType {
 }
 
 func (t *SimulcastTrack) IsRelay() bool {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
 	if t.remoteTrackHigh != nil {
 		return t.remoteTrackHigh.IsRelay()
 	} else if t.remoteTrackMid != nil {
@@ -759,6 +792,9 @@ func (t *SimulcastTrack) IsRelay() bool {
 }
 
 func (t *SimulcastTrack) KeyFrameReceived() {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
 	if t.remoteTrackHigh != nil {
 		t.remoteTrackHigh.KeyFrameReceived()
 	}
@@ -813,8 +849,8 @@ func (t *trackList) Add(track ITrack) error {
 }
 
 func (t *trackList) Get(ID string) (ITrack, error) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
+	t.mu.RLock()
+	defer t.mu.RUnlock()
 
 	if track, ok := t.tracks[ID]; ok {
 		return track, nil

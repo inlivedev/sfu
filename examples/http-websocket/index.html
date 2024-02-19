@@ -280,18 +280,19 @@
             };
             
             const stream = await navigator.mediaDevices.getUserMedia(constraints)
-            let container = document.getElementById("container-"+stream.id);
+			const streamid = stream.id.replace('{','').replace('}','');
+            let container = document.getElementById("container-"+streamid);
             if (!container) {
                 container = document.createElement("div");
                 container.className = "container";
-                container.id = "container-"+stream.id;
+                container.id = "container-"+streamid;
                 document.querySelector('main').appendChild(container);
             }
 
-            let localVideo = document.getElementById("video-"+stream.id);
+            let localVideo = document.getElementById("video-"+streamid);
             if (!localVideo) {
                 localVideo = document.createElement("video");
-                localVideo.id = "video-"+stream.id;
+                localVideo.id = "video-"+streamid;
                 localVideo.autoplay = true;
                 localVideo.muted = true;
                 container.appendChild(localVideo);
@@ -303,21 +304,21 @@
             peerConnection.ontrack = function(e) {
                 e.receiver.playoutDelayHint = 0.1;
                 e.streams.forEach((stream) => {
-                    console.log("ontrack");
-                    console.log(e.track.getCapabilities());
+                    console.log("ontrack", stream, e.track);
+					const streamid = stream.id.replace('{','').replace('}','');
                     
-                    let container = document.getElementById("container-"+stream.id);
+                    let container = document.getElementById("container-"+streamid);
                     if (!container) {
                         container = document.createElement("div");
                         container.className = "container";
-                        container.id = "container-"+stream.id;
+                        container.id = "container-"+streamid;
                         document.querySelector('main').appendChild(container);
                     }
 
-                    let remoteVideo = document.getElementById("video-"+stream.id);
+                    let remoteVideo = document.getElementById("video-"+streamid);
                     if (!remoteVideo) {
                         remoteVideo = document.createElement("video");
-                        remoteVideo.id = "video-"+stream.id;
+                        remoteVideo.id = "video-"+streamid;
                         remoteVideo.autoplay = true;
                         container.appendChild(remoteVideo);
                         if (videoObserver!=null){
@@ -327,7 +328,9 @@
                     }
 
                     if (e.track.kind == 'video'){
-                        let stats = document.getElementById("stats-"+e.track.id)
+						console.log("ontrack video", e.track);
+						const trackid = e.track.id.replace('{','').replace('}','');
+                        let stats = document.getElementById("stats-"+trackid)
                         if (!stats){
                             const videoStats = document.createElement("div");
                             videoStats.className = "video-stats";
@@ -335,7 +338,7 @@
                             stats = document.createElement("div");
                             stats.appendChild(videoStats);
                             stats.className = "stats";
-                            stats.id = "stats-"+e.track.id;
+                            stats.id = "stats-"+trackid;
                             container.append(stats);
                             
                         }
@@ -346,11 +349,14 @@
 
                     remoteVideo.srcObject =stream;
 
-                   stream.onremovetrack = function() {
-                        console.log("onremovetrack");
+                   stream.onremovetrack = function(e) {
+                        console.log("onremovetrack",stream,e.track);
                         remoteVideo.srcObject = null;
                         remoteVideo.remove();
                         container.remove();
+						if (videoObserver!=null){
+							videoObserver.unobserve(remoteVideo)
+						}
                     };
                 });
                 
@@ -368,7 +374,7 @@
 
             
 
-            if(audioTcvr.setCodecPreferences != undefined){
+            if(audioTcvr.setCodecPreferences != undefined && RTCRtpReceiver.getCapabilities != undefined){
                 const audioCodecs = RTCRtpReceiver.getCapabilities('audio').codecs;
                 
                 let audioCodecsPref = [];
@@ -390,8 +396,9 @@
                 audioTcvr.setCodecPreferences(audioCodecsPref);
             }
             
-
-            if (codec ==='vp9'){
+			const isFirefox =navigator.userAgent.includes("Firefox")
+			console.log("isFirefox",isFirefox)
+            if (codec ==='vp9' && !isFirefox){
                 const videoTcvr = peerConnection.addTransceiver(stream.getVideoTracks()[0], {
                 direction: 'sendonly',
                 streams: [stream],
@@ -425,7 +432,7 @@
                     videoTcvr.setCodecPreferences(vp9_codecs);
                 }
             } else {
-                peerConnection.addTransceiver(stream.getVideoTracks()[0], {
+                const videoTcvr = peerConnection.addTransceiver(stream.getVideoTracks()[0], {
                 direction: 'sendonly',
                 streams: [stream],
                 sendEncodings: [
@@ -448,14 +455,35 @@
                         }
                     ]
                 })
+
+				const codecs = RTCRtpReceiver.getCapabilities('video').codecs;
+				let h264Codecs = [];
+                // iterate over supported codecs and pull out the codecs we want
+                for(let i = 0; i < codecs.length; i++){
+                    if(codecs[i].mimeType == "video/H264"){
+                        h264Codecs.push(codecs[i]);
+                    }
+                }
+
+                // push the rest of the codecs
+                for(let i = 0; i < codecs.length; i++){
+                    if(codecs[i].mimeType != "video/H264"){
+                        h264Codecs.push(codecs[i]);
+                    }
+                }
+
+                // currently not all browsers support setCodecPreferences
+                if(videoTcvr.setCodecPreferences != undefined){
+                    videoTcvr.setCodecPreferences(h264Codecs);
+                } else {
+					console.log("setCodecPreferences not supported")
+				}
             }
 
-            
-            
-  
             const offer=await peerConnection.createOffer()
           
             await peerConnection.setLocalDescription(offer)
+
             ws.send(JSON.stringify({type:'offer',data:offer.sdp}));
 
             peerConnection.onicecandidate = function(e) {
@@ -540,7 +568,8 @@
 
                 stats.forEach(report => {
                     if (report.type === 'inbound-rtp' && report.kind === 'video') {
-                        const statsEl = document.querySelector(`#stats-${report.trackIdentifier} .video-stats`)
+						const trackid = report.trackIdentifier.replace('{','').replace('}','');
+                        const statsEl = document.querySelector(`#stats-${trackid} .video-stats`)
                         if (!statsEl){
                             return
                         }
@@ -603,18 +632,18 @@
                                 highStatsEl.id = "stats-local-high"
                                 statsEl.append(highStatsEl)
                             }
-
+							
                             const deltaBytes = report.bytesSent - prevHighBytesSent
                             prevHighBytesSent = report.bytesSent
                             const bitrate = deltaBytes*8
                             bwController.high = bitrate
-
+							const qualityLimitation = `<p>Quality Limitation Reason: ${report.qualityLimitationReason}</p>`
                             highStatsEl.innerHTML = `
                                 <h3>High</h3>
                                 <p>FrameRate: ${report.framesPerSecond}</p>
                                 <p>Bitrate: ${bitrate/1000} kbps</p>
                                 <p>Resolution: ${report.frameWidth}x${report.frameHeight}</p>
-                                <p>Quality Limitation Reason: ${report.qualityLimitationReason}</p>
+                                ${report.qualityLimitationReason?qualityLimitation:''}
                             `
 
                             if (report.qualityLimitationReason == "cpu"){
@@ -755,11 +784,6 @@
             ws.send(JSON.stringify({type:'set_bandwidth_limit',data:limit}));
         }
 
-        const setPacketLossPercentage = () =>{
-            const percentage = document.getElementById("selectPacketLossPercentage").value
-            ws.send(JSON.stringify({type:'set_packet_loss_percentage',data:percentage}));
-        }
-
         const shareScreen = async () =>{
             const stream = await navigator.mediaDevices.getDisplayMedia({
                 video: true,
@@ -774,31 +798,45 @@
                 streams: [stream],
                 sendEncodings: [{priority: 'high'}],
             })
+			let tscv = null;
 
-            const tscv=peerConnection.addTransceiver(videoTrack, {
-                direction: 'sendonly',
-                streams: [stream],
-                sendEncodings: [
-                    {
-                        rid: 'high',
-                        maxBitrate: 1200*1000,
-                        maxFramerate: 30,
-                        scalabilityMode: 'L1T2'
-                    },
-                    {
-                        rid: 'mid',
-                        maxFramerate: 20,
-                        maxBitrate: 400*1000,
-                        scalabilityMode: 'L1T2'
-                    },
-                    {
-                        rid: 'low',
-                        maxBitrate: 150*1000,
-                        maxFramerate:15,
-                        scalabilityMode: 'L1T2'
-                    }
-                ]
-            })
+			if (!document.querySelector("#simulcast").checked){
+				tscv=peerConnection.addTransceiver(videoTrack, {
+					direction: 'sendonly',
+					streams: [stream],
+					sendEncodings: [
+						{
+							maxBitrate: 1200*1000,
+							maxFramerate: 30,
+						},
+					]
+				})
+			} else {
+				tscv=peerConnection.addTransceiver(videoTrack, {
+					direction: 'sendonly',
+					streams: [stream],
+					sendEncodings: [
+						{
+							rid: 'high',
+							maxBitrate: 1200*1000,
+							maxFramerate: 30,
+							scalabilityMode: 'L1T2'
+						},
+						{
+							rid: 'mid',
+							maxFramerate: 20,
+							maxBitrate: 400*1000,
+							scalabilityMode: 'L1T2'
+						},
+						{
+							rid: 'low',
+							maxBitrate: 150*1000,
+							maxFramerate:15,
+							scalabilityMode: 'L1T2'
+						}
+					]
+				})
+			}
 
             const container = document.createElement("div");
             container.className = "container";
@@ -815,6 +853,7 @@
             videoTrack.addEventListener('ended', () => {
                 console.log('Video track ended, stopping screen sharing');
                 document.querySelector('main').removeChild(container);
+
             });
 
             isAllowRenegotiation()
@@ -838,7 +877,6 @@
             document.getElementById("btnStats").onclick = toggleStats;
             document.getElementById("selectQuality").onchange = switchQuality;
             document.getElementById("selectBandwidth").onchange = setBandwidthLimit;
-            document.getElementById("selectPacketLossPercentage").onchange = setPacketLossPercentage;
         });
         </script>
 </head>
@@ -856,6 +894,7 @@
     <footer>
         <button id="btnStart">Start</button>
         <button id="btnStartVP9">Start with VP9</button>
+		<span><input id="simulcast" type="checkbox" value="simulcast" checked>Simulcast</span>
         <button id="btnShareScreen">Share Screen</button>
         <button id="btnStats">Toggle Stats</button>
         <span><label>Quality</label> <select id="selectQuality">
@@ -876,12 +915,6 @@
             <option value="5000000">5Mbps</option>
             <option value="7000000">7Mbps</option>
             <option value="10000000">10Mbps</option>
-        </select></span>
-        <span><label>Simulate packet loss percentage(0-100)</label> <select id="selectPacketLossPercentage">
-            <option selected value="0">0%</option>
-            <option value="2">2%</option>
-            <option value="5">5%</option>
-            <option value="15">15%</option>
         </select></span>
     </footer>
 </body>

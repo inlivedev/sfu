@@ -52,7 +52,6 @@ const (
 	TypeUpdateBandwidth      = "update_bandwidth"
 	TypeSetBandwidthLimit    = "set_bandwidth_limit"
 	TypeBitrateAdjusted      = "bitrate_adjusted"
-	TypePacketLossPercentage = "set_packet_loss_percentage"
 	TypeTrackStats           = "track_stats"
 	TypeVoiceDetected        = "voice_detected"
 )
@@ -432,9 +431,6 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 
 				conn.Write(respBytes)
 
-			} else if req.Type == TypePacketLossPercentage {
-				// bandwidth, _ := strconv.ParseUint(req.Data.(string), 10, 32)
-				// client.SimulatePacketLossPercentage(uint8(bandwidth))
 			} else {
 				glog.Error("unknown message type", req)
 			}
