@@ -1035,7 +1035,11 @@ func (c *Client) startIdleTimeout() {
 	go func() {
 		<-c.idleTimeoutContext.Done()
 		glog.Info("client: idle timeout reached ", c.ID)
-		c.afterClosed()
+		if err := c.stop(); err != nil {
+			glog.Error("client: error stop client after idle timeout ", err)
+		}
+		// TODO: remove this comment below if go routine leak is fixed
+		// go c.afterClosed()
 	}()
 }
 
