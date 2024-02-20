@@ -16,6 +16,8 @@ type cachedPacket struct {
 	sequence    uint16
 	timestamp   uint32
 	dropCounter uint16
+	tid         uint8
+	sid         uint8
 }
 
 func newPacketCaches(size int) *packetCaches {
@@ -26,7 +28,7 @@ func newPacketCaches(size int) *packetCaches {
 	}
 }
 
-func (p *packetCaches) Push(sequence uint16, timestamp uint32, dropCounter uint16) {
+func (p *packetCaches) Push(sequence uint16, timestamp uint32, dropCounter uint16, tid, sid uint8) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -34,6 +36,8 @@ func (p *packetCaches) Push(sequence uint16, timestamp uint32, dropCounter uint1
 		sequence:    sequence,
 		timestamp:   timestamp,
 		dropCounter: dropCounter,
+		tid:         tid,
+		sid:         sid,
 	})
 
 	if p.caches.Len() > p.size {

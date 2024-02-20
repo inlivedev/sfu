@@ -91,8 +91,6 @@ type scaleableClientTrack struct {
 	sequenceNumber        uint16
 	lastQuality           QualityLevel
 	maxQuality            QualityLevel
-	temporalCount         uint8
-	spatsialCount         uint8
 	tid                   uint8
 	sid                   uint8
 	lastTimestamp         uint32
@@ -179,7 +177,17 @@ func (t *scaleableClientTrack) push(p rtp.Packet, _ QualityLevel) {
 	// glog.Info("process interval: ", time.Since(t.lastProcessTime))
 	// t.lastProcessTime = time.Now()
 
-	var isLate bool
+	var isLate, hasSent bool
+
+	var closestPacket cachedPacket
+
+	var qualityPreset IQualityPreset
+
+	vp9Packet := &codecs.VP9Packet{}
+	if _, err := vp9Packet.Unmarshal(p.Payload); err != nil {
+		t.send(p, isLate, t.tid, t.sid)
+		return
+	}
 
 	// 65531,x,65533,65534,65535
 	// 0,1,2,3,4
@@ -190,26 +198,19 @@ func (t *scaleableClientTrack) push(p rtp.Packet, _ QualityLevel) {
 		// late packet or retransmission
 		glog.Info("scalabletrack: client ", t.client.id, " late packet ", p.SequenceNumber, " previously ", t.sequenceNumber)
 		isLate = true
-		_, hasSent := t.packetCaches.GetPacket(p.SequenceNumber)
+		closestPacket, hasSent = t.packetCaches.GetPacket(p.SequenceNumber)
 		if hasSent {
 			glog.Info("scalabletrack: packet ", p.SequenceNumber, " has been sent")
+			return
+		} else if closestPacket.tid < vp9Packet.TID || closestPacket.sid < vp9Packet.SID || (closestPacket.sid > vp9Packet.SID && vp9Packet.Z) {
+			t.dropCounter++
+			return
+		} else {
+			t.send(p, isLate, t.tid, t.sid)
 			return
 		}
 	} else {
 		t.sequenceNumber = p.SequenceNumber
-	}
-
-	var qualityPreset IQualityPreset
-
-	vp9Packet := &codecs.VP9Packet{}
-	if _, err := vp9Packet.Unmarshal(p.Payload); err != nil {
-		t.send(p, isLate)
-		return
-	}
-
-	if t.spatsialCount == 0 || t.temporalCount == 0 {
-		t.temporalCount = vp9Packet.NG + 1
-		t.spatsialCount = vp9Packet.NS + 1
 	}
 
 	quality := t.getQuality()
@@ -249,7 +250,7 @@ func (t *scaleableClientTrack) push(p rtp.Packet, _ QualityLevel) {
 		}
 	}
 
-	if t.tid == targetTID && t.sid == targetSID {
+	if vp9Packet.E && t.tid == targetTID && t.sid == targetSID {
 		t.SetLastQuality(quality)
 	}
 
@@ -260,7 +261,7 @@ func (t *scaleableClientTrack) push(p rtp.Packet, _ QualityLevel) {
 
 	// base layer
 	if vp9Packet.TID == 0 && vp9Packet.SID == 0 {
-		t.send(p, isLate)
+		t.send(p, isLate, t.tid, t.sid)
 		return
 	}
 
@@ -280,7 +281,7 @@ func (t *scaleableClientTrack) push(p rtp.Packet, _ QualityLevel) {
 	// 	glog.Info("scalabletrack: marker is set, sid: ", vp9Packet.SID)
 	// }
 
-	t.send(p, isLate)
+	t.send(p, isLate, t.tid, t.sid)
 }
 
 func (t *scaleableClientTrack) getSequenceNumber(sequenceNumber uint16, isLate bool) uint16 {
@@ -304,10 +305,10 @@ func normalizeSequenceNumber(sequence, drop uint16) uint16 {
 	}
 }
 
-func (t *scaleableClientTrack) send(p rtp.Packet, isLate bool) {
+func (t *scaleableClientTrack) send(p rtp.Packet, isLate bool, tid, sid uint8) {
 	p.SequenceNumber = t.getSequenceNumber(p.SequenceNumber, isLate)
 
-	t.packetCaches.Push(p.SequenceNumber, p.Timestamp, t.dropCounter)
+	t.packetCaches.Push(p.SequenceNumber, p.Timestamp, t.dropCounter, tid, sid)
 	t.writeRTP(p, isLate)
 }
 
