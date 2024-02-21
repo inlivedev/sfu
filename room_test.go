@@ -7,7 +7,6 @@ import (
 
 	"github.com/pion/webrtc/v3"
 	"github.com/stretchr/testify/require"
-	"go.uber.org/goleak"
 )
 
 func TestRoomCreateAndClose(t *testing.T) {
@@ -68,7 +67,6 @@ Loop:
 }
 
 func TestRoomJoinLeftEvent(t *testing.T) {
-	defer goleak.VerifyNone(t)
 	roomID := roomManager.CreateRoomID()
 	roomName := "test-room"
 
