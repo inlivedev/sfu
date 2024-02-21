@@ -336,6 +336,71 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		}
 
 		client.onConnectionStateChanged(connectionState)
+
+		switch connectionState {
+		case webrtc.PeerConnectionStateConnected:
+			if client.state.Load() == ClientStateNew {
+				client.state.Store(ClientStateActive)
+				client.onJoined()
+
+				// trigger available tracks from other clients
+
+				availableTracks := make([]ITrack, 0)
+
+				for _, c := range s.clients.GetClients() {
+					for _, track := range c.tracks.GetTracks() {
+						if track.ClientID() != client.ID() {
+							availableTracks = append(availableTracks, track)
+						}
+					}
+				}
+
+				// add relay tracks
+				for _, track := range s.relayTracks {
+					availableTracks = append(availableTracks, track)
+				}
+
+				if len(availableTracks) > 0 {
+					client.onTracksAvailable(availableTracks)
+				}
+
+				// make sure the exisiting data channels is created on new clients
+				s.createExistingDataChannels(client)
+				var internalDataChannel *webrtc.DataChannel
+				var err error
+
+				if internalDataChannel, err = client.createInternalDataChannel("internal", client.onInternalMessage); err != nil {
+					glog.Error("client: error create internal data channel ", err)
+				}
+
+				client.internalDataChannel = internalDataChannel
+
+				client.renegotiate()
+			}
+
+			if len(client.pendingReceivedTracks) > 0 {
+				isNeedNegotiation := client.processPendingTracks()
+
+				if isNeedNegotiation {
+					client.renegotiate()
+				}
+			}
+
+		case webrtc.PeerConnectionStateClosed:
+			client.afterClosed()
+		case webrtc.PeerConnectionStateFailed:
+			client.startIdleTimeout(5 * time.Second)
+		case webrtc.PeerConnectionStateConnecting:
+			client.cancelIdleTimeout()
+		case webrtc.PeerConnectionStateDisconnected:
+			// do nothing it will idle failed or connected after a while
+		case webrtc.PeerConnectionStateNew:
+			// do nothing
+			client.startIdleTimeout(opts.IdleTimeout)
+		case webrtc.PeerConnectionState(webrtc.Unknown):
+			// clean up
+			client.afterClosed()
+		}
 	})
 
 	// setup internal data channel
