@@ -1033,7 +1033,7 @@ func (c *Client) onLeft() {
 	defer c.mu.RUnlock()
 
 	for _, callback := range c.onLeftCallbacks {
-		callback()
+		go callback()
 	}
 }
 

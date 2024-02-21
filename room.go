@@ -244,7 +244,7 @@ func (r *Room) AddClient(id, name string, opts ClientOptions) (*Client, error) {
 		select {
 		case <-timeout.Done():
 			glog.Warning("room: client is not connected after added, stopping client...")
-			_ = r.StopClient(client.ID())
+			_ = client.stop()
 			timeoutReached = true
 
 		case <-connectingChan:
