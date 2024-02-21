@@ -102,9 +102,6 @@ type RoomOptions struct {
 	Bitrates BitrateConfigs
 	// Configures the codecs that will be used by the room
 	Codecs []string
-	// Configures the timeout for client to join the room after register
-	// The client will automatically kicked out from the room if not joined within the time after registered
-	ClientTimeout time.Duration
 	// Configures the interval between sending PLIs to clients that will generate keyframe
 	// More often means more bandwidth usage but more stability on video quality
 	PLIInterval time.Duration
@@ -118,7 +115,6 @@ func DefaultRoomOptions() RoomOptions {
 		Bitrates:      DefaultBitrates(),
 		QualityPreset: DefaultQualityPreset(),
 		Codecs:        []string{webrtc.MimeTypeVP9, webrtc.MimeTypeH264, webrtc.MimeTypeVP8, "audio/red", webrtc.MimeTypeOpus},
-		ClientTimeout: 10 * time.Minute,
 		PLIInterval:   0,
 	}
 }
@@ -229,7 +225,7 @@ func (r *Room) AddClient(id, name string, opts ClientOptions) (*Client, error) {
 	// stop client if not connecting for a specific time
 	initConnection := true
 	go func() {
-		timeout, cancel := context.WithTimeout(client.context, r.options.ClientTimeout)
+		timeout, cancel := context.WithTimeout(client.context, opts.IdleTimeout)
 		defer cancel()
 
 		connectingChan := make(chan bool)

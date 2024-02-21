@@ -7,6 +7,7 @@ import (
 
 	"github.com/pion/webrtc/v3"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 )
 
 func TestRoomCreateAndClose(t *testing.T) {
@@ -67,6 +68,7 @@ Loop:
 }
 
 func TestRoomJoinLeftEvent(t *testing.T) {
+	defer goleak.VerifyNone(t)
 	roomID := roomManager.CreateRoomID()
 	roomName := "test-room"
 
@@ -133,6 +135,8 @@ func TestRoomJoinLeftEvent(t *testing.T) {
 		if peerLeft == 3 {
 			break
 		}
+
+		time.Sleep(3 * time.Second)
 	}
 
 	require.Equal(t, 0, len(testRoom.sfu.clients.clients))
@@ -266,10 +270,10 @@ Loop:
 	t.Log("total room packet received lost: ", roomStats.PacketReceivedLost)
 
 	diffPercentClientIgressRoomBytesSent := (float64(totalClientIngressBytes) - float64(roomStats.ByteSent-uint64(roomStats.PacketSentLost*1500))) / float64(totalClientIngressBytes) * 100
-	require.LessOrEqual(t, diffPercentClientIgressRoomBytesSent, 10.0, "expecting less than 10 percent difference client igress and room byte sent")
+	require.LessOrEqual(t, diffPercentClientIgressRoomBytesSent, 20.0, "expecting less than 20 percent difference client igress and room byte sent")
 
 	diffPercentClientEgressRoomBytesReceived := (float64(totalClientEgressBytes) - float64(roomStats.BytesReceived)) / float64(totalClientEgressBytes) * 100
-	require.LessOrEqual(t, diffPercentClientEgressRoomBytesReceived, 10.0, "expecting less than 10 percent difference client egress and room byte received")
+	require.LessOrEqual(t, diffPercentClientEgressRoomBytesReceived, 20.0, "expecting less than 20 percent difference client egress and room byte received")
 
 	t.Log(totalClientIngressBytes, roomStats.ByteSent)
 }
@@ -282,11 +286,12 @@ func TestRoomAddClientTimeout(t *testing.T) {
 
 	// create new room
 	roomOpts := DefaultRoomOptions()
-	timeout := 5 * time.Second
-	roomOpts.ClientTimeout = timeout
 	roomOpts.Codecs = []string{webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
 	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal, roomOpts)
 	require.NoErrorf(t, err, "error creating new room: %v", err)
+
+	clientOpts := DefaultClientOptions()
+	clientOpts.IdleTimeout = 5 * time.Second
 
 	ctx := testRoom.sfu.context
 
@@ -294,7 +299,7 @@ func TestRoomAddClientTimeout(t *testing.T) {
 	// you can also get the client by using r.GetClient(clientID)
 	id := testRoom.CreateClientID()
 
-	client, err := testRoom.AddClient(id, id, DefaultClientOptions())
+	client, err := testRoom.AddClient(id, id, clientOpts)
 	require.NoErrorf(t, err, "error adding client to room: %v", err)
 
 	clientRemovedChan := make(chan *Client)

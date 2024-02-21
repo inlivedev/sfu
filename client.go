@@ -330,6 +330,14 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		vad:                            vad,
 	}
 
+	peerConnection.OnConnectionStateChange(func(connectionState webrtc.PeerConnectionState) {
+		if client.isDebug {
+			glog.Info("client: connection state changed ", connectionState.String())
+		}
+
+		client.onConnectionStateChanged(connectionState)
+	})
+
 	// setup internal data channel
 	if opts.EnableVoiceDetection {
 		client.enableSendVADToInternalDataChannel()
@@ -355,13 +363,6 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 			client.bitrateController.MonitorBandwidth(estimator)
 		}()
 	}
-
-	peerConnection.OnConnectionStateChange(func(connectionState webrtc.PeerConnectionState) {
-		if client.isDebug {
-			glog.Info("client: connection state changed ", connectionState.String())
-		}
-		go client.onConnectionStateChanged(connectionState)
-	})
 
 	// Set a handler for when a new remote track starts, this just distributes all our packets
 	// to connected peers
@@ -776,7 +777,7 @@ func (c *Client) setClientTrack(t ITrack) iClientTrack {
 
 	localTrack := outputTrack.LocalTrack()
 
-	transc, err := c.peerConnection.PC().AddTransceiverFromTrack(localTrack, webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionSendonly})
+	senderTcv, err := c.peerConnection.PC().AddTransceiverFromTrack(localTrack, webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionSendonly})
 	if err != nil {
 		glog.Error("client: error on adding track ", err)
 		return nil
@@ -795,7 +796,7 @@ func (c *Client) setClientTrack(t ITrack) iClientTrack {
 		c.mu.Lock()
 		defer c.mu.Unlock()
 
-		sender := transc.Sender()
+		sender := senderTcv.Sender()
 		if sender == nil {
 			return
 		}
@@ -817,7 +818,7 @@ func (c *Client) setClientTrack(t ITrack) iClientTrack {
 	}()
 
 	// enable RTCP report and stats
-	c.enableReportAndStats(transc.Sender(), outputTrack)
+	c.enableReportAndStats(senderTcv.Sender(), outputTrack)
 
 	c.mu.Lock()
 	c.clientTracks[outputTrack.ID()] = outputTrack
@@ -899,6 +900,7 @@ func (c *Client) processPendingTracks() (isNeedNegotiation bool) {
 	return isNeedNegotiation
 }
 
+// make sure to call this when client's done to clean everything
 func (c *Client) afterClosed() {
 	state := c.state.Load()
 	if state != ClientStateEnded {
@@ -922,6 +924,22 @@ func (c *Client) stop() error {
 	}
 
 	return nil
+}
+
+// End will wait until the client is completely stopped
+func (c *Client) End() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	removed := make(chan bool)
+
+	c.sfu.OnClientRemoved(func(removedClient *Client) {
+		if removedClient.ID() == c.ID() {
+			removed <- true
+		}
+	})
+
+	<-removed
 }
 
 func (c *Client) AddICECandidate(candidate webrtc.ICECandidateInit) error {
@@ -1029,21 +1047,32 @@ func (c *Client) IsBridge() bool {
 	return c.Type() == ClientTypeUpBridge || c.Type() == ClientTypeDownBridge
 }
 
-func (c *Client) startIdleTimeout() {
-	c.idleTimeoutContext, c.idleTimeoutCancel = context.WithTimeout(c.context, 5*time.Second)
+func (c *Client) startIdleTimeout(timeout time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// cancel previous timeout and start a new one
+	if c.idleTimeoutContext != nil && c.idleTimeoutContext.Err() == nil {
+		c.idleTimeoutCancel()
+	}
+
+	c.idleTimeoutContext, c.idleTimeoutCancel = context.WithTimeout(c.context, timeout)
 
 	go func() {
 		<-c.idleTimeoutContext.Done()
-		glog.Info("client: idle timeout reached ", c.ID)
-		if err := c.stop(); err != nil {
-			glog.Error("client: error stop client after idle timeout ", err)
+
+		err := c.idleTimeoutContext.Err()
+		if err != nil && err == context.DeadlineExceeded {
+			glog.Info("client: idle timeout reached ", c.ID)
+			c.afterClosed()
 		}
-		// TODO: remove this comment below if go routine leak is fixed
-		// go c.afterClosed()
 	}()
 }
 
 func (c *Client) cancelIdleTimeout() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	if c.idleTimeoutCancel != nil {
 		c.idleTimeoutCancel()
 		c.idleTimeoutContext = nil

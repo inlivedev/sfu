@@ -257,9 +257,17 @@ func (s *SFU) NewClient(id, name string, opts ClientOptions) *Client {
 		case webrtc.PeerConnectionStateClosed:
 			client.afterClosed()
 		case webrtc.PeerConnectionStateFailed:
-			client.startIdleTimeout()
+			client.startIdleTimeout(5 * time.Second)
 		case webrtc.PeerConnectionStateConnecting:
 			client.cancelIdleTimeout()
+		case webrtc.PeerConnectionStateDisconnected:
+			// do nothing it will idle failed or connected after a while
+		case webrtc.PeerConnectionStateNew:
+			// do nothing
+			client.startIdleTimeout(opts.IdleTimeout)
+		case webrtc.PeerConnectionState(webrtc.Unknown):
+			// clean up
+			client.afterClosed()
 		}
 	})
 
