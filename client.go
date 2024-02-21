@@ -173,7 +173,7 @@ type Client struct {
 func DefaultClientOptions() ClientOptions {
 	return ClientOptions{
 		Direction:            webrtc.RTPTransceiverDirectionSendrecv,
-		IdleTimeout:          30 * time.Second,
+		IdleTimeout:          5 * time.Minute,
 		Type:                 ClientTypePeer,
 		EnableVoiceDetection: false,
 		EnablePlayoutDelay:   true,
