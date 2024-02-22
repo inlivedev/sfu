@@ -331,9 +331,8 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 	}
 
 	peerConnection.OnConnectionStateChange(func(connectionState webrtc.PeerConnectionState) {
-		if client.isDebug {
-			glog.Info("client: connection state changed ", connectionState.String())
-		}
+
+		glog.Info("client: connection state changed ", connectionState.String())
 
 		client.onConnectionStateChanged(connectionState)
 

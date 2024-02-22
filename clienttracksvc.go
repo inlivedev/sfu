@@ -179,8 +179,6 @@ func (t *scaleableClientTrack) push(p rtp.Packet, _ QualityLevel) {
 
 	var isLate, hasSent bool
 
-	var closestPacket cachedPacket
-
 	var qualityPreset IQualityPreset
 
 	vp9Packet := &codecs.VP9Packet{}
@@ -198,15 +196,9 @@ func (t *scaleableClientTrack) push(p rtp.Packet, _ QualityLevel) {
 		// late packet or retransmission
 		glog.Info("scalabletrack: client ", t.client.id, " late packet ", p.SequenceNumber, " previously ", t.sequenceNumber)
 		isLate = true
-		closestPacket, hasSent = t.packetCaches.GetPacket(p.SequenceNumber)
+		_, hasSent = t.packetCaches.GetPacket(p.SequenceNumber)
 		if hasSent {
 			glog.Info("scalabletrack: packet ", p.SequenceNumber, " has been sent")
-			return
-		} else if closestPacket.tid < vp9Packet.TID || closestPacket.sid < vp9Packet.SID || (closestPacket.sid > vp9Packet.SID && vp9Packet.Z) {
-			t.dropCounter++
-			return
-		} else {
-			t.send(p, isLate, t.tid, t.sid)
 			return
 		}
 	} else {
