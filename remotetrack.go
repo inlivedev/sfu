@@ -16,7 +16,6 @@ import (
 type remoteTrack struct {
 	context               context.Context
 	cancel                context.CancelFunc
-	pliContext            context.Context
 	pliCancel             context.CancelFunc
 	mu                    sync.RWMutex
 	track                 IRemoteTrack

@@ -264,9 +264,6 @@ func (t *Track) OnRead(callback func(rtp.Packet, QualityLevel)) {
 }
 
 func (t *Track) onRead(p rtp.Packet, quality QualityLevel) {
-	// t.mu.Lock()
-	// defer t.mu.Unlock()
-
 	for _, callback := range t.onReadCallbacks {
 		callback(p, quality)
 	}
@@ -432,7 +429,6 @@ func (t *SimulcastTrack) AddRemoteTrack(ctx context.Context, track IRemoteTrack,
 	quality := RIDToQuality(track.RID())
 
 	onRead := func(p rtp.Packet) {
-		t.mu.RLock()
 
 		// set the base timestamp for the track if it is not set yet
 		if t.baseTS == 0 {
@@ -463,8 +459,6 @@ func (t *SimulcastTrack) AddRemoteTrack(ctx context.Context, track IRemoteTrack,
 			t.lastLowSequence = t.lowSequence
 			t.lowSequence = p.SequenceNumber
 		}
-
-		t.mu.RUnlock()
 
 		tracks := t.base.clientTracks.GetTracks()
 		for _, track := range tracks {
@@ -604,8 +598,8 @@ func (t *SimulcastTrack) TotalTracks() int {
 
 // track is considered active if the track is not nil and the latest read operation was 500ms ago
 func (t *SimulcastTrack) isTrackActive(quality QualityLevel) bool {
-	t.mu.Lock()
-	defer t.mu.Unlock()
+	t.mu.RLock()
+	defer t.mu.RUnlock()
 
 	// set max active track threshold to 500ms
 	threshold := time.Duration(500) * time.Millisecond
