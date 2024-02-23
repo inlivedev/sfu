@@ -1605,7 +1605,7 @@ func registerDefaultInterceptors(m *webrtc.MediaEngine, interceptorRegistry *int
 		return err
 	}
 
-	responder, err := nack.NewResponderInterceptor(nack.DisableCopy())
+	responder, err := nack.NewResponderInterceptor()
 	if err != nil {
 		return err
 	}
