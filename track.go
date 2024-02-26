@@ -51,6 +51,7 @@ type ITrack interface {
 	IsScaleable() bool
 	IsProcessed() bool
 	SetSourceType(TrackType)
+	SourceType() TrackType
 	SetAsProcessed()
 	OnRead(func(rtp.Packet, QualityLevel))
 	IsScreen() bool
@@ -247,6 +248,14 @@ func (t *Track) subscribe(c *Client) iClientTrack {
 
 func (t *Track) SetSourceType(sourceType TrackType) {
 	t.base.isScreen.Store(sourceType == TrackTypeScreen)
+}
+
+func (t *Track) SourceType() TrackType {
+	if t.base.isScreen.Load() {
+		return TrackTypeScreen
+	}
+
+	return TrackTypeMedia
 }
 
 func (t *Track) SetAsProcessed() {
@@ -561,6 +570,14 @@ func (t *SimulcastTrack) SetSourceType(sourceType TrackType) {
 	t.base.isScreen.Store(sourceType == TrackTypeScreen)
 }
 
+func (t *SimulcastTrack) SourceType() TrackType {
+	if t.base.isScreen.Load() {
+		return TrackTypeScreen
+	}
+
+	return TrackTypeMedia
+}
+
 func (t *SimulcastTrack) SetAsProcessed() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -804,9 +821,7 @@ func (t *SimulcastTrack) KeyFrameReceived() {
 
 type SubscribeTrackRequest struct {
 	ClientID string `json:"client_id"`
-	StreamID string `json:"stream_id"`
 	TrackID  string `json:"track_id"`
-	RID      string `json:"rid"`
 }
 
 type trackList struct {

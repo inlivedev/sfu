@@ -252,7 +252,7 @@ func (s *SFU) AvailableTracks() []ITrack {
 
 // Syncs track from connected client to other clients
 // returns true if need renegotiation
-func (s *SFU) syncTrack(client *Client) bool {
+func (s *SFU) syncTrack(client *Client) {
 	publishedTrackIDs := make([]string, 0)
 	for _, track := range client.publishedTracks.GetTracks() {
 		publishedTrackIDs = append(publishedTrackIDs, track.ID())
@@ -278,11 +278,7 @@ func (s *SFU) syncTrack(client *Client) bool {
 		if err != nil {
 			glog.Error("client: failed to subscribe tracks ", err)
 		}
-
-		return true
 	}
-
-	return false
 }
 
 func (s *SFU) Stop() {

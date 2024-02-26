@@ -39,6 +39,14 @@ type VAD struct {
 	Packets  []voiceactivedetector.VoicePacketData `json:"packets"`
 }
 
+type AvailableTrack struct {
+	ClientID   string `json:"client_id"`
+	ClientName string `json:"client_name"`
+	TrackID    string `json:"track_id"`
+	StreamID   string `json:"stream_id"`
+	Source     string `json:"source"`
+}
+
 const (
 	TypeOffer                = "offer"
 	TypeAnswer               = "answer"
@@ -47,7 +55,8 @@ const (
 	TypeAllowRenegotiation   = "allow_renegotiation"
 	TypeIsAllowRenegotiation = "is_allow_renegotiation"
 	TypeTrackAdded           = "tracks_added"
-	TypeTrackAvailable       = "tracks_available"
+	TypeTracksAvailable      = "tracks_available"
+	TypeSubscribeTracks      = "subscribe_tracks"
 	TypeSwitchQuality        = "switch_quality"
 	TypeUpdateBandwidth      = "update_bandwidth"
 	TypeSetBandwidthLimit    = "set_bandwidth_limit"
@@ -210,7 +219,7 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 
 	answerChan := make(chan webrtc.SessionDescription)
 
-	client.SubscribeAllTracks()
+	//client.SubscribeAllTracks()
 
 	client.OnTracksAdded(func(tracks []sfu.ITrack) {
 		tracksAdded := map[string]map[string]string{}
@@ -228,28 +237,28 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 		_, _ = conn.Write(trackAddedResp)
 	})
 
-	// client.OnTracksAvailable = func(tracks []sfu.ITrack) {
-	// 	tracksAvailable := map[string]map[string]interface{}{}
-	// 	for _, track := range tracks {
+	client.OnTracksAvailable(func(tracks []sfu.ITrack) {
+		tracksAvailable := map[string]map[string]interface{}{}
+		for _, track := range tracks {
 
-	// 		tracksAvailable[track.ID()] = map[string]interface{}{
-	// 			"id":           track.ID(),
-	// 			"client_id":    track.ClientID(),
-	// 			"source_type":  track.SourceType().String(),
-	// 			"kind":         track.Kind().String(),
-	// 			"is_simulcast": track.IsSimulcast(),
-	// 		}
-	// 	}
-	// 	resp := Respose{
-	// 		Status: true,
-	// 		Type:   TypeTrackAdded,
-	// 		Data:   tracksAvailable,
-	// 	}
+			tracksAvailable[track.ID()] = map[string]interface{}{
+				"id":           track.ID(),
+				"client_id":    track.ClientID(),
+				"source_type":  track.SourceType().String(),
+				"kind":         track.Kind().String(),
+				"is_simulcast": track.IsSimulcast(),
+			}
+		}
+		resp := Respose{
+			Status: true,
+			Type:   TypeTracksAvailable,
+			Data:   tracksAvailable,
+		}
 
-	// 	trackAddedResp, _ := json.Marshal(resp)
+		trackAddedResp, _ := json.Marshal(resp)
 
-	// 	_, _ = conn.Write(trackAddedResp)
-	// }
+		_, _ = conn.Write(trackAddedResp)
+	})
 
 	client.OnRenegotiation(func(ctx context.Context, offer webrtc.SessionDescription) (webrtc.SessionDescription, error) {
 		// SFU request a renegotiation, send the offer to client
@@ -390,10 +399,25 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 					}
 				}
 				client.SetTracksSourceType(setTracks)
-			} else if req.Type == TypeTrackAvailable {
-				subTracks, ok := req.Data.([]sfu.SubscribeTrackRequest)
+			} else if req.Type == TypeSubscribeTracks {
+				subTracks := make([]sfu.SubscribeTrackRequest, 0)
+				tracks, ok := req.Data.([]interface{})
 				if ok {
-					client.SubscribeTracks(subTracks)
+					for _, track := range tracks {
+						trackData, ok := track.(map[string]interface{})
+						if ok {
+							subTrack := sfu.SubscribeTrackRequest{
+								ClientID: trackData["client_id"].(string),
+								TrackID:  trackData["track_id"].(string),
+							}
+
+							subTracks = append(subTracks, subTrack)
+						}
+					}
+
+					if err := client.SubscribeTracks(subTracks); err != nil {
+						glog.Error("error on subscribe tracks", err)
+					}
 				} else {
 					glog.Error("error on subscribe tracks wrong data format ", req.Data)
 				}

@@ -182,9 +182,7 @@
                         await peerConnection.setRemoteDescription(msg.data);
                     } else if (msg.type == 'candidate') {
                         await peerConnection.addIceCandidate(msg.data);
-                    } else if (msg.type == 'allow_renegotiation') {
-                        // use this event to retry renegotation when doing renegotation was not allowed
-                    } else if (msg.type == 'tracks_added') {
+					} else if (msg.type == 'tracks_added') {
                         const trackType = {}
                         const tracksAdded = msg.data
                         Object.keys(tracksAdded).forEach(uid => {
@@ -196,7 +194,7 @@
                     } else if (msg.type == 'tracks_available') {
                         const subTracks = []
                         const availableTracks = msg.data
-                        Object.keys(availaleTracks).forEach(uid => {
+                        Object.keys(availableTracks).forEach(uid => {
                             // we suppose to check tracksAdded[key].id and compare it with current track id from  navigator.mediaDevices.getUserMedia() to know the source is media 
                             // ClientID string `json:"client_id"`
                             // StreamID string `json:"stream_id"`
@@ -209,8 +207,8 @@
                             })
                         });
 
-                        ws.send(JSON.stringify({type:'tracks_available',data:trackType}));
-                    } else if(msg.type =='is_allow_renegotiation'){
+                        ws.send(JSON.stringify({type:'subscribe_tracks',data:subTracks}));
+                    } else if(msg.type =='allow_renegotiation'){
                         const isAllowRenegotiation = msg.data
                         if (isAllowRenegotiation){
                             negotiate()
@@ -399,17 +397,50 @@
 			const isFirefox =navigator.userAgent.includes("Firefox")
 			console.log("isFirefox",isFirefox)
             if (codec ==='vp9' && !isFirefox){
-                const videoTcvr = peerConnection.addTransceiver(stream.getVideoTracks()[0], {
-                direction: 'sendonly',
-                streams: [stream],
-                sendEncodings: [
-                        {
-                            maxBitrate: 1200*1000,
-                            scalabilityMode: 'L3T1'
-                        },
-                       
-                    ]
-                })
+				let videoTcvr = null
+				const isSimulcast = document.querySelector("#simulcast").checked
+				console.log("simulcast: ",isSimulcast)
+
+				if (!isSimulcast){
+					videoTcvr = peerConnection.addTransceiver(stream.getVideoTracks()[0], {
+					direction: 'sendonly',
+					streams: [stream],
+					sendEncodings: [
+							{
+								maxBitrate: 1200*1000,
+								scalabilityMode: 'L3T3'
+							},
+						
+						]
+					})
+				} else {
+					videoTcvr = peerConnection.addTransceiver(stream.getVideoTracks()[0], {
+					direction: 'sendonly',
+					streams: [stream],
+					sendEncodings: [
+							{
+								rid: 'high',
+								maxBitrate: 1200*1000,
+								maxFramerate: 30,
+								scalabilityMode:'L1T2'
+							},
+							{
+								rid: 'mid',
+								scaleResolutionDownBy: 2.0,
+								maxFramerate: 30,
+								maxBitrate: 500*1000,
+								scalabilityMode:'L1T2'
+							},
+							{
+								rid: 'low',
+								scaleResolutionDownBy: 4.0,
+								maxBitrate: 150*1000,
+								maxFramerate:30,
+								scalabilityMode:'L1T2'
+							}
+						]
+					})
+				}
 
                 const codecs = RTCRtpReceiver.getCapabilities('video').codecs;
                 let vp9_codecs = [];
@@ -792,13 +823,15 @@
 
             const videoTrack = stream.getVideoTracks()[0]
             const audioTrack = stream.getAudioTracks()[0]
-
-            peerConnection.addTransceiver(audioTrack, {
-                direction: 'sendonly',
-                streams: [stream],
-                sendEncodings: [{priority: 'high'}],
-            })
 			let tscv = null;
+
+			if (typeof audioTrack != "undefined"){
+				tscv=peerConnection.addTransceiver(audioTrack, {
+					direction: 'sendonly',
+					streams: [stream],
+					sendEncodings: [{priority: 'high'}],
+				})
+			}
 
 			if (!document.querySelector("#simulcast").checked){
 				tscv=peerConnection.addTransceiver(videoTrack, {
@@ -892,9 +925,9 @@
         <div id="stats-local"></div>
     </aside>
     <footer>
-        <button id="btnStart">Start</button>
+        <button id="btnStart">Start H264</button>
         <button id="btnStartVP9">Start with VP9</button>
-		<span><input id="simulcast" type="checkbox" value="simulcast" checked>Simulcast</span>
+		<span><input id="simulcast" type="checkbox" value="simulcast">Simulcast</span>
         <button id="btnShareScreen">Share Screen</button>
         <button id="btnStats">Toggle Stats</button>
         <span><label>Quality</label> <select id="selectQuality">

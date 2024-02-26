@@ -848,7 +848,7 @@ func (c *Client) setClientTrack(t ITrack) iClientTrack {
 	}
 
 	go func() {
-		ctx, cancel := context.WithCancel(outputTrack.Context())
+		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
 
 		<-ctx.Done()
@@ -856,9 +856,6 @@ func (c *Client) setClientTrack(t ITrack) iClientTrack {
 		if c == nil {
 			return
 		}
-
-		c.mu.Lock()
-		defer c.mu.Unlock()
 
 		sender := senderTcv.Sender()
 		if sender == nil {
@@ -876,7 +873,9 @@ func (c *Client) setClientTrack(t ITrack) iClientTrack {
 			return
 		}
 
+		c.mu.Lock()
 		delete(c.clientTracks, outputTrack.ID())
+		c.mu.Unlock()
 
 		c.renegotiate()
 	}()
@@ -1258,12 +1257,12 @@ func (c *Client) SubscribeTracks(req []SubscribeTrackRequest) error {
 	}
 
 	if len(clientTracks) > 0 {
-		c.renegotiate()
-
 		// claim bitrates
 		if err := c.bitrateController.addClaims(clientTracks); err != nil {
 			glog.Error("sfu: failed to add claims ", err)
 		}
+
+		c.renegotiate()
 
 		// request keyframe
 		for _, track := range clientTracks {
@@ -1277,11 +1276,7 @@ func (c *Client) SubscribeTracks(req []SubscribeTrackRequest) error {
 func (c *Client) SubscribeAllTracks() {
 	c.IsSubscribeAllTracks.Store(true)
 
-	negotiateNeeded := c.sfu.syncTrack(c)
-
-	if negotiateNeeded {
-		c.renegotiate()
-	}
+	c.sfu.syncTrack(c)
 }
 
 // SetQuality method is to set the maximum quality of the video that will be sent to the client.

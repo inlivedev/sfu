@@ -123,11 +123,13 @@ func newScaleableClientTrack(
 		remoteTrack:           t,
 		isScreen:              t.IsScreen(),
 		onTrackEndedCallbacks: make([]func(), 0),
-		qualityPreset:         c.SFU().QualityPreset(),
+		qualityPreset:         qualityPreset,
 		maxQuality:            QualityHigh,
 		lastQuality:           QualityHigh,
 		packetCaches:          newPacketCaches(1024),
 		packetChan:            make(chan rtp.Packet, 1),
+		tid:                   qualityPreset.High.TID,
+		sid:                   qualityPreset.High.SID,
 	}
 
 	return sct
@@ -210,9 +212,9 @@ func (t *scaleableClientTrack) push(p rtp.Packet, _ QualityLevel) {
 		// targeting a higher spatial layer to know that it can safely
 		// discard this packet's frame without processing it, without having
 		// to wait for the "D" bit in the higher-layer frame
-		if cachedPacket.tid < vp9Packet.TID || cachedPacket.sid < vp9Packet.SID || (cachedPacket.sid > vp9Packet.SID && vp9Packet.Z) {
+		if cachedPacket.tid < vp9Packet.TID || cachedPacket.sid < vp9Packet.SID {
 			t.dropCounter++
-
+			glog.Info("scalabletrack: late packet ", p.SequenceNumber, " is dropped")
 			return
 		}
 
@@ -225,6 +227,7 @@ func (t *scaleableClientTrack) push(p rtp.Packet, _ QualityLevel) {
 
 	if quality == QualityNone {
 		t.dropCounter++
+		glog.Info("scalabletrack: packet ", p.SequenceNumber, " is dropped because of quality none")
 		return
 	}
 
@@ -273,13 +276,7 @@ func (t *scaleableClientTrack) push(p rtp.Packet, _ QualityLevel) {
 		t.SetLastQuality(quality)
 	}
 
-	// Can we drop the packet
-	// vp9Packet.Z && vp9Packet.SID < t.sid
-	// This enables a decoder which is
-	// targeting a higher spatial layer to know that it can safely
-	// discard this packet's frame without processing it, without having
-	// to wait for the "D" bit in the higher-layer frame
-	if t.tid < vp9Packet.TID || t.sid < vp9Packet.SID || (t.sid > vp9Packet.SID && vp9Packet.Z) {
+	if t.tid < vp9Packet.TID || t.sid < vp9Packet.SID {
 		t.dropCounter++
 
 		return
