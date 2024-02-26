@@ -187,20 +187,36 @@ func (t *scaleableClientTrack) push(p rtp.Packet, _ QualityLevel) {
 		return
 	}
 
-	// 65531,x,65533,65534,65535
-	// 0,1,2,3,4
-	// packet sequence reset
+	var cachedPacket cachedPacket
 
-	// 65535,0,1,2,3
+	// late packer handler
 	if t.sequenceNumber > p.SequenceNumber && t.sequenceNumber-p.SequenceNumber < 1000 {
 		// late packet or retransmission
 		glog.Info("scalabletrack: client ", t.client.id, " late packet ", p.SequenceNumber, " previously ", t.sequenceNumber)
 		isLate = true
-		_, hasSent = t.packetCaches.GetPacket(p.SequenceNumber)
+		cachedPacket, hasSent = t.packetCaches.GetPacket(p.SequenceNumber)
 		if hasSent {
 			glog.Info("scalabletrack: packet ", p.SequenceNumber, " has been sent")
 			return
 		}
+
+		if vp9Packet.E && cachedPacket.sid == vp9Packet.SID {
+			p.Marker = true
+		}
+
+		// Can we drop the packet
+		// vp9Packet.Z && vp9Packet.SID < t.sid
+		// This enables a decoder which is
+		// targeting a higher spatial layer to know that it can safely
+		// discard this packet's frame without processing it, without having
+		// to wait for the "D" bit in the higher-layer frame
+		if cachedPacket.tid < vp9Packet.TID || cachedPacket.sid < vp9Packet.SID || (cachedPacket.sid > vp9Packet.SID && vp9Packet.Z) {
+			t.dropCounter++
+
+			return
+		}
+
+		t.send(p, isLate, cachedPacket.tid, cachedPacket.sid)
 	} else {
 		t.sequenceNumber = p.SequenceNumber
 	}
@@ -228,22 +244,13 @@ func (t *scaleableClientTrack) push(p rtp.Packet, _ QualityLevel) {
 
 	// check if possible to scale up spatial layer
 	targetSID := qualityPreset.GetSID()
-	if vp9Packet.B && t.sid != targetSID {
-		if vp9Packet.SID == targetSID && !vp9Packet.P {
-			t.sid = targetSID
-		}
-	}
 
-	// check if possible to scale up temporal layer
-	targetTID := qualityPreset.GetTID()
-	if vp9Packet.B && t.tid != targetTID {
-		if isKeyframe || t.tid > targetTID || vp9Packet.U {
-			t.tid = targetTID
-		}
-	}
-
-	if vp9Packet.E && t.tid == targetTID && t.sid == targetSID {
-		t.SetLastQuality(quality)
+	if t.sid < targetSID && !vp9Packet.P && vp9Packet.B {
+		// scale spatial up
+		t.sid = targetSID
+	} else if t.sid > targetSID && vp9Packet.E {
+		// scale spatsial down
+		t.sid = targetSID
 	}
 
 	// mark packet as a last spatial layer packet
@@ -251,10 +258,19 @@ func (t *scaleableClientTrack) push(p rtp.Packet, _ QualityLevel) {
 		p.Marker = true
 	}
 
-	// base layer
-	if vp9Packet.TID == 0 && vp9Packet.SID == 0 {
-		t.send(p, isLate, t.tid, t.sid)
-		return
+	// check if possible to scale up/down temporal layer
+	targetTID := qualityPreset.GetTID()
+
+	if t.tid < targetTID && vp9Packet.U && vp9Packet.B {
+		// scale temporal up
+		t.tid = targetTID
+	} else if t.tid > targetTID && vp9Packet.E {
+		// scale temporal down
+		t.tid = targetTID
+	}
+
+	if vp9Packet.E && t.tid == targetTID && t.sid == targetSID {
+		t.SetLastQuality(quality)
 	}
 
 	// Can we drop the packet
@@ -268,10 +284,6 @@ func (t *scaleableClientTrack) push(p rtp.Packet, _ QualityLevel) {
 
 		return
 	}
-
-	// if p.Marker && t.client.isDebug {
-	// 	glog.Info("scalabletrack: marker is set, sid: ", vp9Packet.SID)
-	// }
 
 	t.send(p, isLate, t.tid, t.sid)
 }
