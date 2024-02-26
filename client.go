@@ -378,11 +378,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 			}
 
 			if len(client.pendingReceivedTracks) > 0 {
-				isNeedNegotiation := client.processPendingTracks()
-
-				if isNeedNegotiation {
-					client.renegotiate()
-				}
+				client.processPendingTracks()
 			}
 
 		case webrtc.PeerConnectionStateClosed:
@@ -626,6 +622,10 @@ func (c *Client) Negotiate(offer webrtc.SessionDescription) (*webrtc.SessionDesc
 func (c *Client) negotiateQueuOp(offer webrtc.SessionDescription) (*webrtc.SessionDescription, error) {
 	c.isInRemoteNegotiation.Store(true)
 
+	defer func() {
+		c.isInRemoteNegotiation.Store(false)
+	}()
+
 	currentTransceiverCount := len(c.peerConnection.PC().GetTransceivers())
 
 	if !c.receiveRED {
@@ -639,18 +639,21 @@ func (c *Client) negotiateQueuOp(offer webrtc.SessionDescription) (*webrtc.Sessi
 	// Set the remote SessionDescription
 	err := c.peerConnection.PC().SetRemoteDescription(offer)
 	if err != nil {
+		glog.Error("client: error set remote description ", err)
 		return nil, err
 	}
 
 	// Create answer
 	answer, err := c.peerConnection.PC().CreateAnswer(nil)
 	if err != nil {
+		glog.Error("client: error create answer ", err)
 		return nil, err
 	}
 
 	// Sets the LocalDescription, and starts our UDP listeners
 	err = c.peerConnection.PC().SetLocalDescription(answer)
 	if err != nil {
+		glog.Error("client: error set local description ", err)
 		return nil, err
 	}
 
@@ -661,7 +664,8 @@ func (c *Client) negotiateQueuOp(offer webrtc.SessionDescription) (*webrtc.Sessi
 	for _, iceCandidate := range c.pendingRemoteCandidates {
 		err = c.peerConnection.PC().AddICECandidate(iceCandidate)
 		if err != nil {
-			panic(err)
+			glog.Error("client: error add ice candidate ", err)
+			return nil, err
 		}
 	}
 
@@ -672,10 +676,6 @@ func (c *Client) negotiateQueuOp(offer webrtc.SessionDescription) (*webrtc.Sessi
 	c.sendPendingLocalCandidates()
 
 	c.pendingRemoteCandidates = nil
-
-	c.isInRemoteNegotiation.Store(false)
-
-	// call renegotiation that might delay because the remote client is doing renegotiation
 
 	return c.peerConnection.PC().LocalDescription(), nil
 }
@@ -947,20 +947,15 @@ func (c *Client) enableReportAndStats(rtpSender *webrtc.RTPSender, track iClient
 	}()
 }
 
-func (c *Client) processPendingTracks() (isNeedNegotiation bool) {
+func (c *Client) processPendingTracks() {
 	if len(c.pendingReceivedTracks) > 0 {
 		err := c.SubscribeTracks(c.pendingReceivedTracks)
 		if err != nil {
 			glog.Error("client: error subscribe tracks ", err)
-			return false
 		}
 
 		c.pendingReceivedTracks = make([]SubscribeTrackRequest, 0)
-
-		isNeedNegotiation = true
 	}
-
-	return isNeedNegotiation
 }
 
 // make sure to call this when client's done to clean everything
