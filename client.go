@@ -330,13 +330,21 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		vad:                            vad,
 	}
 
+	// make sure the exisiting data channels is created on new clients
+	s.createExistingDataChannels(client)
+	var internalDataChannel *webrtc.DataChannel
+
+	if internalDataChannel, err = client.createInternalDataChannel("internal", client.onInternalMessage); err != nil {
+		glog.Error("client: error create internal data channel ", err)
+	}
+
+	client.internalDataChannel = internalDataChannel
+
 	peerConnection.OnConnectionStateChange(func(connectionState webrtc.PeerConnectionState) {
 
 		glog.Info("client: connection state changed ", connectionState.String())
 
 		client.onConnectionStateChanged(connectionState)
-
-		needNegotiation := false
 
 		switch connectionState {
 		case webrtc.PeerConnectionStateConnected:
@@ -364,30 +372,11 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 				if len(availableTracks) > 0 {
 					client.onTracksAvailable(availableTracks)
 				}
-
-				// make sure the exisiting data channels is created on new clients
-				s.createExistingDataChannels(client)
-				var internalDataChannel *webrtc.DataChannel
-				var err error
-
-				if internalDataChannel, err = client.createInternalDataChannel("internal", client.onInternalMessage); err != nil {
-					glog.Error("client: error create internal data channel ", err)
-				}
-
-				client.internalDataChannel = internalDataChannel
-
-				needNegotiation = true
 			}
 
 			if len(client.pendingReceivedTracks) > 0 {
 				client.processPendingTracks()
 				// set needNegotiation false because processPendingTracks will trigger negotiation
-				needNegotiation = false
-			}
-
-			if needNegotiation {
-				glog.Info("client: renegotiation after creating data channel")
-				client.renegotiate()
 			}
 
 		case webrtc.PeerConnectionStateClosed:
@@ -682,7 +671,7 @@ func (c *Client) negotiateQueuOp(offer webrtc.SessionDescription) (*webrtc.Sessi
 	c.initialTracksCount.Store(uint32(initialTrackCount))
 
 	// send pending local candidates if any
-	c.sendPendingLocalCandidates()
+	go c.sendPendingLocalCandidates()
 
 	c.pendingRemoteCandidates = nil
 
