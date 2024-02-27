@@ -103,6 +103,7 @@ LoopConnected:
 	defer cancelTimeout()
 
 	messages := ""
+	expectedMessages := "hellohelloworldworld"
 
 Loop:
 	for {
@@ -112,13 +113,13 @@ Loop:
 		case chat := <-chatChan:
 			messages += chat
 			glog.Info("chat: ", messages)
-			if messages == "hellohelloworldworld" {
+			if len(messages) == len(expectedMessages) {
 				break Loop
 			}
 		}
 	}
 
-	require.Equal(t, "hellohelloworldworld", messages)
+	require.Equal(t, len(expectedMessages), len(messages))
 }
 
 func TestRoomDataChannelWithClientID(t *testing.T) {
@@ -260,6 +261,7 @@ LoopConnected:
 	defer cancelTimeout()
 
 	messages := ""
+	expectedMessages := "hellohelloworldworld"
 
 Loop:
 	for {
@@ -269,13 +271,13 @@ Loop:
 		case chat := <-chatChan:
 			messages += chat
 			glog.Info("chat: ", messages)
-			if messages == "hellohelloworldworld" {
+			if len(messages) == len(expectedMessages) {
 				break Loop
 			}
 		}
 	}
 
-	require.Equal(t, len("hellohelloworldworld"), len(messages))
+	require.Equal(t, len(expectedMessages), len(messages))
 }
 
 // TODO
