@@ -332,6 +332,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 
 	// make sure the exisiting data channels is created on new clients
 	s.createExistingDataChannels(client)
+
 	var internalDataChannel *webrtc.DataChannel
 
 	if internalDataChannel, err = client.createInternalDataChannel("internal", client.onInternalMessage); err != nil {
@@ -358,8 +359,13 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 
 				for _, c := range s.clients.GetClients() {
 					for _, track := range c.tracks.GetTracks() {
+						_, err := client.publishedTracks.Get(track.ID())
 						if track.ClientID() != client.ID() {
-							availableTracks = append(availableTracks, track)
+							if err == ErrTrackIsNotExists {
+								availableTracks = append(availableTracks, track)
+							} else {
+								glog.Error("client: track already exists")
+							}
 						}
 					}
 				}
@@ -370,13 +376,13 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 				}
 
 				if len(availableTracks) > 0 {
+					glog.Info("client: ", client.ID(), " available tracks ", len(availableTracks))
 					client.onTracksAvailable(availableTracks)
 				}
 			}
 
 			if len(client.pendingReceivedTracks) > 0 {
 				client.processPendingTracks()
-				// set needNegotiation false because processPendingTracks will trigger negotiation
 			}
 
 		case webrtc.PeerConnectionStateClosed:
@@ -429,7 +435,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 
 		remoteTrackID := strings.ReplaceAll(strings.ReplaceAll(remoteTrack.ID(), "{", ""), "}", "")
 
-		defer glog.Info("client: new track ", remoteTrackID, " Kind:", remoteTrack.Kind(), " Codec: ", remoteTrack.Codec().MimeType, " RID: ", remoteTrack.RID())
+		defer glog.Info("client: ", client.ID(), " new track ", remoteTrackID, " Kind:", remoteTrack.Kind(), " Codec: ", remoteTrack.Codec().MimeType, " RID: ", remoteTrack.RID(), " Direction: ", receiver.RTPTransceiver().Direction())
 
 		onPLI := func() {
 			if client.peerConnection == nil || client.peerConnection.PC() == nil || client.peerConnection.PC().ConnectionState() != webrtc.PeerConnectionStateConnected {
@@ -838,14 +844,14 @@ func (c *Client) setClientTrack(t ITrack) iClientTrack {
 
 	localTrack := outputTrack.LocalTrack()
 
-	senderTcv, err := c.peerConnection.PC().AddTransceiverFromTrack(localTrack, webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionSendonly})
+	senderTcv, err := c.peerConnection.PC().AddTransceiverFromTrack(localTrack, webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionSendrecv})
 	if err != nil {
 		glog.Error("client: error on adding track ", err)
 		return nil
 	}
 
 	go func() {
-		ctx, cancel := context.WithCancel(t.Context())
+		ctx, cancel := context.WithCancel(outputTrack.Context())
 		defer cancel()
 
 		<-ctx.Done()
@@ -1192,7 +1198,7 @@ func (c *Client) SetTracksSourceType(trackTypes map[string]TrackType) {
 	c.pendingPublishedTracks.remove(removeTrackIDs)
 
 	if len(availableTracks) > 0 {
-		c.sfu.onTracksAvailable(availableTracks)
+		c.sfu.onTracksAvailable(c.ID(), availableTracks)
 	}
 }
 
@@ -1356,8 +1362,6 @@ func (c *Client) createInternalDataChannel(label string, msgCallback func(msg we
 	}
 
 	newDc.OnMessage(msgCallback)
-
-	c.renegotiate()
 
 	return newDc, nil
 }

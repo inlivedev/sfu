@@ -460,19 +460,6 @@ func CreatePeerPair(ctx context.Context, room *Room, iceServers []webrtc.ICEServ
 	id := room.CreateClientID()
 	client, _ = room.AddClient(id, id, DefaultClientOptions())
 
-	client.OnAllowedRemoteRenegotiation(func() {
-		glog.Info("allowed remote renegotiation")
-		negotiate(pc, client)
-	})
-
-	client.OnIceCandidate(func(ctx context.Context, candidate *webrtc.ICECandidate) {
-		if candidate == nil {
-			return
-		}
-
-		_ = pc.AddICECandidate(candidate.ToJSON())
-	})
-
 	client.OnRenegotiation(func(ctx context.Context, offer webrtc.SessionDescription) (answer webrtc.SessionDescription, e error) {
 		if client.state.Load() == ClientStateEnded {
 			glog.Info("test: renegotiation canceled because client has ended")
@@ -499,6 +486,19 @@ func CreatePeerPair(ctx context.Context, room *Room, iceServers []webrtc.ICEServ
 		return *pc.LocalDescription(), nil
 	})
 
+	client.OnAllowedRemoteRenegotiation(func() {
+		glog.Info("allowed remote renegotiation")
+		negotiate(pc, client)
+	})
+
+	client.OnIceCandidate(func(ctx context.Context, candidate *webrtc.ICECandidate) {
+		if candidate == nil {
+			return
+		}
+
+		_ = pc.AddICECandidate(candidate.ToJSON())
+	})
+
 	negotiate(pc, client)
 
 	pc.OnICECandidate(func(candidate *webrtc.ICECandidate) {
@@ -514,6 +514,11 @@ func CreatePeerPair(ctx context.Context, room *Room, iceServers []webrtc.ICEServ
 func negotiate(pc *webrtc.PeerConnection, client *Client) {
 	if pc.SignalingState() != webrtc.SignalingStateStable {
 		glog.Info("test: signaling state is not stable, skip renegotiation")
+		return
+	}
+
+	if !client.IsAllowNegotiation() {
+		glog.Info("test: client is not allowed to renegotiate")
 		return
 	}
 

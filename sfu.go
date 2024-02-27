@@ -336,24 +336,13 @@ func (s *SFU) onClientRemoved(client *Client) {
 	}
 }
 
-func (s *SFU) onTracksAvailable(tracks []ITrack) {
+func (s *SFU) onTracksAvailable(clientId string, tracks []ITrack) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	for _, client := range s.clients.GetClients() {
-		if !client.IsSubscribeAllTracks.Load() {
-			// filter out tracks from the same client
-			filteredTracks := make([]ITrack, 0)
-			for _, track := range tracks {
-				_, err := client.publishedTracks.Get(track.ID())
-				if track.ClientID() != client.ID() && err == ErrTrackIsNotExists {
-					filteredTracks = append(filteredTracks, track)
-				}
-			}
-
-			if len(filteredTracks) > 0 {
-				client.onTracksAvailable(tracks)
-			}
+		if client.ID() != clientId && !client.IsSubscribeAllTracks.Load() {
+			client.onTracksAvailable(tracks)
 		}
 	}
 
@@ -566,7 +555,7 @@ func (s *SFU) AddRelayTrack(ctx context.Context, id, streamid, rid, clientid str
 	s.broadcastTracksToAutoSubscribeClients(clientid, []ITrack{track})
 
 	// notify the local clients that a relay track is available
-	s.onTracksAvailable([]ITrack{track})
+	s.onTracksAvailable(clientid, []ITrack{track})
 
 	return nil
 }

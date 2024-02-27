@@ -113,6 +113,7 @@
     </style>
     <script type="module">
         import {InliveVideoObserver} from './inlive-video-observer.js'
+		  let clientid = null
           const peerConnection = new RTCPeerConnection({
                     iceServers: [
                         {
@@ -130,7 +131,7 @@
         let red = true
 
         peerConnection.ondatachannel = function(e) {
-            console.log("ondatachannel");
+            console.log("ondatachannel: ",e.channel.label);
             if (e.channel.label == "internal") {
                 internalChannel = e.channel;
                 videoObserver = new InliveVideoObserver(e.channel)
@@ -173,7 +174,10 @@
             ws.onmessage = async function(e) {
                 const msg = JSON.parse(e.data);
                 try {
-                    if (msg.type == 'offer') {
+					if (msg.type == 'clientid'){
+						clientid = msg.data
+						document.getElementById("clientid").innerText = "ClientID: "+clientid
+					} else if (msg.type == 'offer') {
 						console.log("client received offer: ",msg.data)
                         await peerConnection.setRemoteDescription(msg.data);
                         var answer = await peerConnection.createAnswer();
@@ -208,6 +212,8 @@
                                 track_id: track.id,
                             })
                         });
+
+						console.log("subTracks: ",subTracks)
 
                         ws.send(JSON.stringify({type:'subscribe_tracks',data:subTracks}));
                     } else if(msg.type =='allow_renegotiation'){
@@ -328,7 +334,6 @@
                     }
 
                     if (e.track.kind == 'video'){
-						console.log("ontrack video", e.track);
 						const trackid = e.track.id.replace('{','').replace('}','');
                         let stats = document.getElementById("stats-"+trackid)
                         if (!stats){
@@ -925,6 +930,7 @@
     </main>
     <aside>
         <h3>Outbound Video</h3>
+		<p id="clientid"></p>
         <div id="stats-local"></div>
     </aside>
     <footer>

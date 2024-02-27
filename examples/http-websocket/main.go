@@ -217,6 +217,8 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 
 	defer r.StopClient(client.ID())
 
+	_, _ = conn.Write([]byte("{\"type\":\"clientid\",\"data\":\"" + clientID + "\"}"))
+
 	answerChan := make(chan webrtc.SessionDescription)
 
 	//client.SubscribeAllTracks()
@@ -238,6 +240,9 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 	})
 
 	client.OnTracksAvailable(func(tracks []sfu.ITrack) {
+		if client.IsDebugEnabled() {
+			glog.Info("tracks available", tracks)
+		}
 		tracksAvailable := map[string]map[string]interface{}{}
 		for _, track := range tracks {
 

@@ -76,6 +76,7 @@ func (t *remoteTrack) readRTP() {
 
 				rtp, _, readErr := t.track.ReadRTP()
 				if readErr == io.EOF {
+					glog.Info("remotetrack: track ended: ", t.track.ID())
 					return
 				}
 

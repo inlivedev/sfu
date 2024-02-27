@@ -865,8 +865,8 @@ func (t *trackList) Reset() {
 }
 
 func (t *trackList) GetTracks() []ITrack {
-	t.mu.Lock()
-	defer t.mu.Unlock()
+	t.mu.RLock()
+	defer t.mu.RUnlock()
 
 	tracks := make([]ITrack, 0)
 	for _, track := range t.tracks {
@@ -877,8 +877,8 @@ func (t *trackList) GetTracks() []ITrack {
 }
 
 func (t *trackList) Length() int {
-	t.mu.Lock()
-	defer t.mu.Unlock()
+	t.mu.RLock()
+	defer t.mu.RUnlock()
 
 	return len(t.tracks)
 }
