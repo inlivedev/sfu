@@ -345,7 +345,8 @@ func (s *SFU) onTracksAvailable(tracks []ITrack) {
 			// filter out tracks from the same client
 			filteredTracks := make([]ITrack, 0)
 			for _, track := range tracks {
-				if track.ClientID() != client.ID() {
+				_, err := client.publishedTracks.Get(track.ID())
+				if track.ClientID() != client.ID() && err == ErrTrackIsNotExists {
 					filteredTracks = append(filteredTracks, track)
 				}
 			}

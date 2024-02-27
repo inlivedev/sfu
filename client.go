@@ -336,6 +336,8 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 
 		client.onConnectionStateChanged(connectionState)
 
+		needNegotiation := false
+
 		switch connectionState {
 		case webrtc.PeerConnectionStateConnected:
 			if client.state.Load() == ClientStateNew {
@@ -374,14 +376,18 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 
 				client.internalDataChannel = internalDataChannel
 
-				glog.Info("client: renegotiation after creating data channel")
-
-				client.renegotiate()
-
+				needNegotiation = true
 			}
 
 			if len(client.pendingReceivedTracks) > 0 {
 				client.processPendingTracks()
+				// set needNegotiation false because processPendingTracks will trigger negotiation
+				needNegotiation = false
+			}
+
+			if needNegotiation {
+				glog.Info("client: renegotiation after creating data channel")
+				client.renegotiate()
 			}
 
 		case webrtc.PeerConnectionStateClosed:
@@ -709,8 +715,6 @@ func (c *Client) OnRenegotiation(callback func(context.Context, webrtc.SessionDe
 	c.onRenegotiation = callback
 }
 
-// TODO:
-// delay negotiation using timeout and make sure only one negotiation is running when a client left and joined again
 func (c *Client) renegotiateQueuOp() {
 	c.mu.Lock()
 	if c.onRenegotiation == nil {
@@ -732,6 +736,7 @@ func (c *Client) renegotiateQueuOp() {
 
 	// no need to run another negotiation if it's already in progress, it will rerun because we mark the negotiationneeded to true
 	if c.isInRenegotiation.Load() {
+		glog.Info("sfu: renegotiation is delayed because the client is doing negotiation ", c.ID)
 		return
 	}
 
@@ -1229,6 +1234,8 @@ func (c *Client) SubscribeTracks(req []SubscribeTrackRequest) error {
 					if clientTrack := c.setClientTrack(track); clientTrack != nil {
 						clientTracks = append(clientTracks, clientTrack)
 					}
+
+					glog.Info("client: subscribe track ", r.TrackID, " from ", r.ClientID, " to ", c.ID())
 
 					trackFound = true
 
