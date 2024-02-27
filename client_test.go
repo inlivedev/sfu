@@ -245,11 +245,8 @@ func TestClientDataChannel(t *testing.T) {
 	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal, roomOpts)
 	require.NoError(t, err, "error creating room: %v", err)
 	ctx := testRoom.sfu.context
-
-	pc1, _, _, _ := CreateDataPair(ctx, testRoom, roomManager.options.IceServers, "peer1")
-
 	dcChan := make(chan *webrtc.DataChannel)
-	pc1.OnDataChannel(func(c *webrtc.DataChannel) {
+	_, _, _, _ = CreateDataPair(ctx, testRoom, roomManager.options.IceServers, "peer1", func(c *webrtc.DataChannel) {
 		dcChan <- c
 	})
 

@@ -330,17 +330,6 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		vad:                            vad,
 	}
 
-	// make sure the exisiting data channels is created on new clients
-	s.createExistingDataChannels(client)
-
-	var internalDataChannel *webrtc.DataChannel
-
-	if internalDataChannel, err = client.createInternalDataChannel("internal", client.onInternalMessage); err != nil {
-		glog.Error("client: error create internal data channel ", err)
-	}
-
-	client.internalDataChannel = internalDataChannel
-
 	peerConnection.OnConnectionStateChange(func(connectionState webrtc.PeerConnectionState) {
 
 		glog.Info("client: connection state changed ", connectionState.String())
@@ -352,6 +341,17 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 			if client.state.Load() == ClientStateNew {
 				client.state.Store(ClientStateActive)
 				client.onJoined()
+
+				// make sure the exisiting data channels is created on new clients
+				s.createExistingDataChannels(client)
+
+				var internalDataChannel *webrtc.DataChannel
+
+				if internalDataChannel, err = client.createInternalDataChannel("internal", client.onInternalMessage); err != nil {
+					glog.Error("client: error create internal data channel ", err)
+				}
+
+				client.internalDataChannel = internalDataChannel
 
 				// trigger available tracks from other clients
 
@@ -381,8 +381,15 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 				}
 			}
 
+			var negotiated bool
+
 			if len(client.pendingReceivedTracks) > 0 {
 				client.processPendingTracks()
+				negotiated = true
+			}
+
+			if !negotiated {
+				client.renegotiate()
 			}
 
 		case webrtc.PeerConnectionStateClosed:

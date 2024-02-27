@@ -26,14 +26,6 @@ func TestRoomDataChannel(t *testing.T) {
 	err = testRoom.CreateDataChannel("chat", DefaultDataChannelOptions())
 	require.NoError(t, err)
 
-	pc1, client1, _, connChan1 := CreateDataPair(ctx, testRoom, roomManager.options.IceServers, "peer1")
-	pc2, client2, _, connChan2 := CreateDataPair(ctx, testRoom, roomManager.options.IceServers, "peer2")
-
-	defer func() {
-		_ = testRoom.StopClient(client1.id)
-		_ = testRoom.StopClient(client2.id)
-	}()
-
 	chatChan := make(chan string)
 
 	var onDataChannel = func(d *webrtc.DataChannel) {
@@ -57,9 +49,13 @@ func TestRoomDataChannel(t *testing.T) {
 		}
 	}
 
-	pc1.OnDataChannel(onDataChannel)
+	_, client1, _, connChan1 := CreateDataPair(ctx, testRoom, roomManager.options.IceServers, "peer1", onDataChannel)
+	_, client2, _, connChan2 := CreateDataPair(ctx, testRoom, roomManager.options.IceServers, "peer2", onDataChannel)
 
-	pc2.OnDataChannel(onDataChannel)
+	defer func() {
+		_ = testRoom.StopClient(client1.id)
+		_ = testRoom.StopClient(client2.id)
+	}()
 
 	timeoutConnected, cancelTimeoutConnected := context.WithTimeout(ctx, 40*time.Second)
 	defer cancelTimeoutConnected()
@@ -135,15 +131,6 @@ func TestRoomDataChannelWithClientID(t *testing.T) {
 	require.NoError(t, err, "error creating room: %v", err)
 	ctx := testRoom.sfu.context
 
-	pc1, client1, _, connChan1 := CreateDataPair(ctx, testRoom, roomManager.options.IceServers, "peer1")
-	pc2, client2, _, connChan2 := CreateDataPair(ctx, testRoom, roomManager.options.IceServers, "peer2")
-	pc3, client3, _, connChan3 := CreateDataPair(ctx, testRoom, roomManager.options.IceServers, "peer2")
-
-	defer func() {
-		_ = testRoom.StopClient(client1.id)
-		_ = testRoom.StopClient(client2.id)
-	}()
-
 	chatChan := make(chan string)
 
 	var onDataChannel = func(d *webrtc.DataChannel) {
@@ -169,9 +156,7 @@ func TestRoomDataChannelWithClientID(t *testing.T) {
 		}
 	}
 
-	pc1.OnDataChannel(onDataChannel)
-
-	pc2.OnDataChannel(func(d *webrtc.DataChannel) {
+	onDataChannel2 := func(d *webrtc.DataChannel) {
 		if d.Label() != "chat" {
 			return
 		}
@@ -192,9 +177,17 @@ func TestRoomDataChannelWithClientID(t *testing.T) {
 				d.Send([]byte("noworld"))
 			})
 		}
-	})
+	}
 
-	pc3.OnDataChannel(onDataChannel)
+	_, client1, _, connChan1 := CreateDataPair(ctx, testRoom, roomManager.options.IceServers, "peer1", onDataChannel)
+	_, client2, _, connChan2 := CreateDataPair(ctx, testRoom, roomManager.options.IceServers, "peer2", onDataChannel2)
+	_, client3, _, connChan3 := CreateDataPair(ctx, testRoom, roomManager.options.IceServers, "peer2", onDataChannel)
+
+	defer func() {
+		_ = testRoom.StopClient(client1.id)
+		_ = testRoom.StopClient(client2.id)
+		_ = testRoom.StopClient(client3.id)
+	}()
 
 	timeoutConnected, cancelTimeoutConnected := context.WithTimeout(ctx, 30*time.Second)
 

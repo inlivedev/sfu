@@ -529,7 +529,7 @@ func negotiate(pc *webrtc.PeerConnection, client *Client) {
 	_ = pc.SetRemoteDescription(*answer)
 }
 
-func CreateDataPair(ctx context.Context, room *Room, iceServers []webrtc.ICEServer, peerName string) (*webrtc.PeerConnection, *Client, stats.Getter, chan webrtc.PeerConnectionState) {
+func CreateDataPair(ctx context.Context, room *Room, iceServers []webrtc.ICEServer, peerName string, onDataChannel func(d *webrtc.DataChannel)) (*webrtc.PeerConnection, *Client, stats.Getter, chan webrtc.PeerConnectionState) {
 	var (
 		client      *Client
 		mediaEngine *webrtc.MediaEngine = GetMediaEngine()
@@ -560,6 +560,8 @@ func CreateDataPair(ctx context.Context, room *Room, iceServers []webrtc.ICEServ
 	pc, err := webrtcAPI.NewPeerConnection(webrtc.Configuration{
 		ICEServers: iceServers,
 	})
+
+	pc.OnDataChannel(onDataChannel)
 
 	if _, err := pc.AddTransceiverFromKind(webrtc.RTPCodecTypeVideo, webrtc.RtpTransceiverInit{Direction: webrtc.RTPTransceiverDirectionRecvonly}); err != nil {
 		panic(err)
