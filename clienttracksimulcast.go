@@ -91,32 +91,32 @@ func (t *simulcastClientTrack) Context() context.Context {
 	return t.context
 }
 
-func (t *simulcastClientTrack) isFirstKeyframePacket(p rtp.Packet) bool {
+func (t *simulcastClientTrack) isFirstKeyframePacket(p *rtp.Packet) bool {
 	isKeyframe := IsKeyframe(t.mimeType, p)
 
 	return isKeyframe && t.lastTimestamp.Load() != p.Timestamp
 }
 
-func (t *simulcastClientTrack) send(p rtp.Packet, quality QualityLevel, lastQuality QualityLevel) {
+func (t *simulcastClientTrack) send(p *rtp.Packet, quality QualityLevel, lastQuality QualityLevel) {
 	t.lastTimestamp.Store(p.Timestamp)
 
 	if lastQuality != quality {
 		t.lastQuality.Store(uint32(quality))
 	}
 
-	p = t.rewritePacket(p, quality)
+	t.rewritePacket(p, quality)
 
 	t.writeRTP(p)
 
 }
 
-func (t *simulcastClientTrack) writeRTP(p rtp.Packet) {
-	if err := t.localTrack.WriteRTP(&p); err != nil {
+func (t *simulcastClientTrack) writeRTP(p *rtp.Packet) {
+	if err := t.localTrack.WriteRTP(p); err != nil {
 		glog.Error("track: error on write rtp", err)
 	}
 }
 
-func (t *simulcastClientTrack) push(p rtp.Packet, quality QualityLevel) {
+func (t *simulcastClientTrack) push(p *rtp.Packet, quality QualityLevel) {
 	var trackQuality QualityLevel
 
 	lastQuality := t.LastQuality()
@@ -127,9 +127,6 @@ func (t *simulcastClientTrack) push(p rtp.Packet, quality QualityLevel) {
 	}
 
 	isFirstKeyframePacket := t.isFirstKeyframePacket(p)
-	if isFirstKeyframePacket {
-		t.remoteTrack.KeyFrameReceived()
-	}
 
 	// check if it's a first packet to send
 	if lastQuality == QualityNone && t.sequenceNumber.Load() == 0 {
@@ -283,9 +280,9 @@ func (t *simulcastClientTrack) IsScaleable() bool {
 	return false
 }
 
-func (t *simulcastClientTrack) rewritePacket(p rtp.Packet, quality QualityLevel) rtp.Packet {
-	t.remoteTrack.mu.Lock()
-	defer t.remoteTrack.mu.Unlock()
+func (t *simulcastClientTrack) rewritePacket(p *rtp.Packet, quality QualityLevel) {
+	t.remoteTrack.mu.RLock()
+	defer t.remoteTrack.mu.RUnlock()
 	// make sure the timestamp and sequence number is consistent from the previous packet even it is not the same track
 	sequenceDelta := uint16(0)
 	// credit to https://github.com/k0nserv for helping me with this on Pion Slack channel
@@ -303,8 +300,6 @@ func (t *simulcastClientTrack) rewritePacket(p rtp.Packet, quality QualityLevel)
 
 	t.sequenceNumber.Add(uint32(sequenceDelta))
 	p.SequenceNumber = uint16(t.sequenceNumber.Load())
-
-	return p
 }
 
 func (t *simulcastClientTrack) RequestPLI() {

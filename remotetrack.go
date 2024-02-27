@@ -16,10 +16,9 @@ import (
 type remoteTrack struct {
 	context               context.Context
 	cancel                context.CancelFunc
-	pliCancel             context.CancelFunc
 	mu                    sync.RWMutex
 	track                 IRemoteTrack
-	onRead                func(rtp.Packet)
+	onRead                func(*rtp.Packet)
 	onPLI                 func()
 	bitrate               *atomic.Uint32
 	previousBytesReceived *atomic.Uint64
@@ -31,7 +30,7 @@ type remoteTrack struct {
 	onStatsUpdated        func(*stats.Stats)
 }
 
-func newRemoteTrack(ctx context.Context, track IRemoteTrack, pliInterval time.Duration, onPLI func(), statsGetter stats.Getter, onStatsUpdated func(*stats.Stats), onRead func(rtp.Packet)) *remoteTrack {
+func newRemoteTrack(ctx context.Context, track IRemoteTrack, pliInterval time.Duration, onPLI func(), statsGetter stats.Getter, onStatsUpdated func(*stats.Stats), onRead func(*rtp.Packet)) *remoteTrack {
 	localctx, cancel := context.WithCancel(ctx)
 	rt := &remoteTrack{
 		context:               localctx,
@@ -81,7 +80,7 @@ func (t *remoteTrack) readRTP() {
 				}
 
 				if rtp != nil {
-					t.onRead(*rtp)
+					t.onRead(rtp)
 
 					if !t.IsRelay() {
 						go t.updateStats()
@@ -90,16 +89,6 @@ func (t *remoteTrack) readRTP() {
 			}
 		}
 	}()
-}
-
-func (t *remoteTrack) KeyFrameReceived() {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	if t.pliCancel != nil {
-		glog.Info("remotetrack: keyframe received ", t.track.ID())
-		t.pliCancel()
-	}
 }
 
 func (t *remoteTrack) updateStats() {
@@ -145,16 +134,17 @@ func (t *remoteTrack) GetCurrentBitrate() uint32 {
 func (t *remoteTrack) sendPLI() {
 	// return if there is a pending PLI request
 	t.mu.Lock()
-	defer t.mu.Unlock()
 
 	maxGapSeconds := 250 * time.Millisecond
 	requestGap := time.Since(t.lastPLIRequestTime)
 
 	if requestGap < maxGapSeconds {
+		t.mu.Unlock()
 		return // ignore PLI request
 	}
 
 	t.lastPLIRequestTime = time.Now()
+	t.mu.Unlock()
 
 	t.onPLI()
 }

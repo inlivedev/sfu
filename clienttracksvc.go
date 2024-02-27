@@ -100,7 +100,7 @@ type scaleableClientTrack struct {
 	dropCounter           uint16
 	qualityPreset         QualityPreset
 	packetCaches          *packetCaches
-	packetChan            chan rtp.Packet
+	packetChan            chan *rtp.Packet
 	lastProcessTime       time.Time
 }
 
@@ -127,7 +127,7 @@ func newScaleableClientTrack(
 		maxQuality:            QualityHigh,
 		lastQuality:           QualityHigh,
 		packetCaches:          newPacketCaches(1024),
-		packetChan:            make(chan rtp.Packet, 1),
+		packetChan:            make(chan *rtp.Packet, 1),
 		tid:                   qualityPreset.High.TID,
 		sid:                   qualityPreset.High.SID,
 	}
@@ -136,8 +136,8 @@ func newScaleableClientTrack(
 }
 
 func (t *scaleableClientTrack) Client() *Client {
-	t.mu.Lock()
-	defer t.mu.Unlock()
+	t.mu.RLock()
+	defer t.mu.RUnlock()
 
 	return t.client
 }
@@ -146,10 +146,10 @@ func (t *scaleableClientTrack) Context() context.Context {
 	return t.context
 }
 
-func (t *scaleableClientTrack) writeRTP(p rtp.Packet, isLate bool) {
+func (t *scaleableClientTrack) writeRTP(p *rtp.Packet, isLate bool) {
 	t.lastTimestamp = p.Timestamp
 
-	if err := t.localTrack.WriteRTP(&p); err != nil {
+	if err := t.localTrack.WriteRTP(p); err != nil {
 		glog.Error("track: error on write rtp", err)
 	}
 }
@@ -175,7 +175,7 @@ func (t *scaleableClientTrack) isKeyframe(vp9 *codecs.VP9Packet) bool {
 
 // this where the temporal and spatial layers are will be decided to be sent to the client or not
 // compare it with the claimed quality to decide if the packet should be sent or not
-func (t *scaleableClientTrack) push(p rtp.Packet, _ QualityLevel) {
+func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 	// glog.Info("process interval: ", time.Since(t.lastProcessTime))
 	// t.lastProcessTime = time.Now()
 
@@ -242,7 +242,7 @@ func (t *scaleableClientTrack) push(p rtp.Packet, _ QualityLevel) {
 
 	isKeyframe := t.isKeyframe(vp9Packet)
 	if isKeyframe {
-		go t.remoteTrack.KeyFrameReceived()
+		glog.Info("scalabletrack: keyframe ", p.SequenceNumber, " is detected")
 	}
 
 	// check if possible to scale up spatial layer
@@ -306,7 +306,7 @@ func normalizeSequenceNumber(sequence, drop uint16) uint16 {
 	}
 }
 
-func (t *scaleableClientTrack) send(p rtp.Packet, isLate bool, tid, sid uint8) {
+func (t *scaleableClientTrack) send(p *rtp.Packet, isLate bool, tid, sid uint8) {
 	p.SequenceNumber = t.getSequenceNumber(p.SequenceNumber, isLate)
 
 	t.packetCaches.Push(p.SequenceNumber, p.Timestamp, t.dropCounter, tid, sid)
@@ -354,8 +354,8 @@ func (t *scaleableClientTrack) SetLastQuality(quality QualityLevel) {
 }
 
 func (t *scaleableClientTrack) LastQuality() QualityLevel {
-	t.mu.Lock()
-	defer t.mu.Unlock()
+	t.mu.RLock()
+	defer t.mu.RUnlock()
 	return QualityLevel(t.lastQuality)
 }
 
@@ -380,15 +380,15 @@ func (t *scaleableClientTrack) onTrackEnded() {
 
 func (t *scaleableClientTrack) SetMaxQuality(quality QualityLevel) {
 	t.mu.Lock()
-	defer t.mu.Unlock()
-
 	t.maxQuality = quality
+	t.mu.Unlock()
+
 	t.RemoteTrack().sendPLI()
 }
 
 func (t *scaleableClientTrack) MaxQuality() QualityLevel {
-	t.mu.Lock()
-	defer t.mu.Unlock()
+	t.mu.RLock()
+	defer t.mu.RUnlock()
 
 	return t.maxQuality
 }

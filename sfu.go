@@ -216,7 +216,7 @@ func (s *SFU) NewClient(id, name string, opts ClientOptions) *Client {
 			return
 		}
 
-		glog.Info("publish tracks")
+		glog.Info("sfu: publish tracks, initial tracks count: ", client.initialTracksCount.Load(), " pending published tracks: ", client.pendingPublishedTracks.Length())
 
 		availableTracks := client.pendingPublishedTracks.GetTracks()
 

@@ -374,7 +374,10 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 
 				client.internalDataChannel = internalDataChannel
 
+				glog.Info("client: renegotiation after creating data channel")
+
 				client.renegotiate()
+
 			}
 
 			if len(client.pendingReceivedTracks) > 0 {
