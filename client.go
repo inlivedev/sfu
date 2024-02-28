@@ -514,10 +514,9 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 
 			// only process track when the lowest quality is available
 			simulcast.mu.Lock()
-			isLowAvailable := simulcast.remoteTrackLow != nil
 			simulcast.mu.Unlock()
 
-			if !track.IsProcessed() && isLowAvailable {
+			if !track.IsProcessed() {
 				client.onTrack(track)
 				track.SetAsProcessed()
 			}
