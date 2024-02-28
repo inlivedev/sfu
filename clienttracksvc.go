@@ -189,14 +189,12 @@ func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 		return
 	}
 
-	var cachedPacket cachedPacket
-
 	// late packer handler
 	if t.sequenceNumber > p.SequenceNumber && t.sequenceNumber-p.SequenceNumber < 1000 {
 		// late packet or retransmission
 		glog.Info("scalabletrack: client ", t.client.id, " late packet ", p.SequenceNumber, " previously ", t.sequenceNumber)
 		isLate = true
-		cachedPacket, hasSent = t.packetCaches.GetPacket(p.SequenceNumber)
+		_, hasSent = t.packetCaches.GetPacket(p.SequenceNumber)
 		if hasSent {
 			glog.Info("scalabletrack: packet ", p.SequenceNumber, " has been sent")
 			return
