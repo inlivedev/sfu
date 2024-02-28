@@ -188,6 +188,7 @@
                     } else if (msg.type == 'candidate') {
                         await peerConnection.addIceCandidate(msg.data);
 					} else if (msg.type == 'tracks_added') {
+						console.log("on tracks added",msg.data)
                         const trackType = {}
                         const tracksAdded = msg.data
                         Object.keys(tracksAdded).forEach(uid => {
@@ -652,7 +653,6 @@
                             `;
 
                             bwController.available = report.availableOutgoingBitrate
-                            ws.send(JSON.stringify({type:'update_bandwidth',data:report.availableOutgoingBitrate}));
                     }
 
                     if (report.type === 'outbound-rtp' && report.kind === 'video'){
@@ -818,7 +818,7 @@
         }
 
         const setBandwidthLimit = () =>{
-            const limit = document.getElementById("selectBandwidth").value
+            const limit = document.getElementById("selectBandwidth").value;
             ws.send(JSON.stringify({type:'set_bandwidth_limit',data:limit}));
         }
 
@@ -828,12 +828,14 @@
                 audio: true
             })
 
-            const videoTrack = stream.getVideoTracks()[0]
-            const audioTrack = stream.getAudioTracks()[0]
-			let tscv = null;
+            const videoTrack = stream.getVideoTracks()[0];
+            const audioTrack = stream.getAudioTracks()[0];
+
+			let tscvAudio = null;
+			let tscvVideo = null;
 
 			if (typeof audioTrack != "undefined"){
-				tscv=peerConnection.addTransceiver(audioTrack, {
+				tscvAudio=peerConnection.addTransceiver(audioTrack, {
 					direction: 'sendonly',
 					streams: [stream],
 					sendEncodings: [{priority: 'high'}],
@@ -841,7 +843,7 @@
 			}
 
 			if (!document.querySelector("#simulcast").checked){
-				tscv=peerConnection.addTransceiver(videoTrack, {
+				tscvVideo=peerConnection.addTransceiver(videoTrack, {
 					direction: 'sendonly',
 					streams: [stream],
 					sendEncodings: [
@@ -852,7 +854,7 @@
 					]
 				})
 			} else {
-				tscv=peerConnection.addTransceiver(videoTrack, {
+				tscvVideo=peerConnection.addTransceiver(videoTrack, {
 					direction: 'sendonly',
 					streams: [stream],
 					sendEncodings: [
@@ -890,10 +892,16 @@
 
             document.querySelector('main').appendChild(container);
 
-            videoTrack.addEventListener('ended', () => {
+            videoTrack.addEventListener('ended', (e) => {
                 console.log('Video track ended, stopping screen sharing');
+				
                 document.querySelector('main').removeChild(container);
 
+				peerConnection.removeTrack(tscvVideo.sender);
+
+				peerConnection.removeTrack(tscvAudio.sender);
+
+				isAllowRenegotiation();
             });
 
             isAllowRenegotiation()

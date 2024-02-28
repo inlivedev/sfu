@@ -221,7 +221,7 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 
 	answerChan := make(chan webrtc.SessionDescription)
 
-	//client.SubscribeAllTracks()
+	// client.SubscribeAllTracks()
 
 	client.OnTracksAdded(func(tracks []sfu.ITrack) {
 		tracksAdded := map[string]map[string]string{}
@@ -452,7 +452,7 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 			} else if req.Type == TypeIsAllowRenegotiation {
 				resp := Respose{
 					Status: true,
-					Type:   TypeIsAllowRenegotiation,
+					Type:   TypeAllowRenegotiation,
 					Data:   client.IsAllowNegotiation(),
 				}
 

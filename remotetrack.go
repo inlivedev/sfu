@@ -69,9 +69,9 @@ func (t *remoteTrack) readRTP() {
 			case <-t.context.Done():
 				return
 			default:
-				if err := t.track.SetReadDeadline(time.Now().Add(100 * time.Millisecond)); err != nil {
-					glog.Error("error setting read deadline: ", err.Error())
-					continue
+				if err := t.track.SetReadDeadline(time.Now().Add(300 * time.Millisecond)); err != nil {
+					glog.Error("remotetrack: failed to set read deadline: ", err)
+					return
 				}
 
 				rtp, _, readErr := t.track.ReadRTP()

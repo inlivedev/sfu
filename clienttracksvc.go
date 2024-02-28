@@ -308,9 +308,8 @@ func normalizeSequenceNumber(sequence, drop uint16) uint16 {
 
 func (t *scaleableClientTrack) send(p *rtp.Packet, isLate bool, tid, sid uint8) {
 	p.SequenceNumber = t.getSequenceNumber(p.SequenceNumber, isLate)
-
-	t.packetCaches.Push(p.SequenceNumber, p.Timestamp, t.dropCounter, tid, sid)
 	t.writeRTP(p, isLate)
+	go t.packetCaches.Push(p.SequenceNumber, p.Timestamp, t.dropCounter, tid, sid)
 }
 
 func (t *scaleableClientTrack) RemoteTrack() *remoteTrack {

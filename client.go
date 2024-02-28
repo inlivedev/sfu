@@ -867,6 +867,14 @@ func (c *Client) setClientTrack(t ITrack) iClientTrack {
 			return
 		}
 
+		defer func() {
+			c.mu.Lock()
+			delete(c.clientTracks, outputTrack.ID())
+			c.mu.Unlock()
+
+			c.renegotiate()
+		}()
+
 		sender := senderTcv.Sender()
 		if sender == nil {
 			return
@@ -882,12 +890,6 @@ func (c *Client) setClientTrack(t ITrack) iClientTrack {
 			glog.Error("client: error remove track ", err)
 			return
 		}
-
-		c.mu.Lock()
-		delete(c.clientTracks, outputTrack.ID())
-		c.mu.Unlock()
-
-		c.renegotiate()
 	}()
 
 	// enable RTCP report and stats
@@ -1205,6 +1207,7 @@ func (c *Client) SetTracksSourceType(trackTypes map[string]TrackType) {
 	c.pendingPublishedTracks.remove(removeTrackIDs)
 
 	if len(availableTracks) > 0 {
+		// broadcast to other clients available tracks from this client
 		c.sfu.onTracksAvailable(c.ID(), availableTracks)
 	}
 }

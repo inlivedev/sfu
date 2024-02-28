@@ -205,6 +205,7 @@ func (s *SFU) NewClient(id, name string, opts ClientOptions) *Client {
 
 	client.onTrack = func(track ITrack) {
 		if err := client.pendingPublishedTracks.Add(track); err == ErrTrackExists {
+			glog.Error("sfu: client ", id, " track already added ", track.ID())
 			// not an error could be because a simulcast track already added
 			return
 		}
@@ -213,19 +214,20 @@ func (s *SFU) NewClient(id, name string, opts ClientOptions) *Client {
 		// TODO:
 		// 1. need to handle simulcast track because  it will be counted as single track
 		if client.Type() == ClientTypePeer && int(client.initialTracksCount.Load()) > client.pendingPublishedTracks.Length() {
+			glog.Info("sfu: client ", id, " pending published tracks: ", client.pendingPublishedTracks.Length(), " initial tracks count: ", client.initialTracksCount.Load())
 			return
 		}
 
-		glog.Info("sfu: publish tracks, initial tracks count: ", client.initialTracksCount.Load(), " pending published tracks: ", client.pendingPublishedTracks.Length())
+		glog.Info("sfu: client ", id, " publish tracks, initial tracks count: ", client.initialTracksCount.Load(), " pending published tracks: ", client.pendingPublishedTracks.Length())
 
-		availableTracks := client.pendingPublishedTracks.GetTracks()
+		addedTracks := client.pendingPublishedTracks.GetTracks()
 
 		if client.onTracksAdded != nil {
-			client.onTracksAdded(availableTracks)
+			client.onTracksAdded(addedTracks)
 		}
 
 		// broadcast to client with auto subscribe tracks
-		s.broadcastTracksToAutoSubscribeClients(client.ID(), availableTracks)
+		s.broadcastTracksToAutoSubscribeClients(client.ID(), addedTracks)
 	}
 
 	client.peerConnection.PC().OnSignalingStateChange(func(state webrtc.SignalingState) {
@@ -251,7 +253,6 @@ func (s *SFU) AvailableTracks() []ITrack {
 }
 
 // Syncs track from connected client to other clients
-// returns true if need renegotiation
 func (s *SFU) syncTrack(client *Client) {
 	publishedTrackIDs := make([]string, 0)
 	for _, track := range client.publishedTracks.GetTracks() {
