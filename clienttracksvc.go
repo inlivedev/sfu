@@ -202,9 +202,13 @@ func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 			return
 		}
 
-		if vp9Packet.E && cachedPacket.sid == vp9Packet.SID {
-			p.Marker = true
-		}
+		// TODO: handle late packet, check if we need to use cachedPacket TID or SID
+		// check the code below
+		// previously the code below making some video has high nacks
+
+		// if vp9Packet.E && cachedPacket.sid == vp9Packet.SID {
+		// 	p.Marker = true
+		// }
 
 		// Can we drop the packet
 		// vp9Packet.Z && vp9Packet.SID < t.sid
@@ -212,13 +216,13 @@ func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 		// targeting a higher spatial layer to know that it can safely
 		// discard this packet's frame without processing it, without having
 		// to wait for the "D" bit in the higher-layer frame
-		if cachedPacket.tid < vp9Packet.TID || cachedPacket.sid < vp9Packet.SID {
-			t.dropCounter++
-			glog.Info("scalabletrack: late packet ", p.SequenceNumber, " is dropped")
-			return
-		}
+		// if cachedPacket.tid < vp9Packet.TID || cachedPacket.sid < vp9Packet.SID {
+		// 	t.dropCounter++
+		// 	glog.Info("scalabletrack: late packet ", p.SequenceNumber, " is dropped")
+		// 	return
+		// }
 
-		t.send(p, isLate, cachedPacket.tid, cachedPacket.sid)
+		// t.send(p, isLate, cachedPacket.tid, cachedPacket.sid)
 	} else {
 		t.sequenceNumber = p.SequenceNumber
 	}
