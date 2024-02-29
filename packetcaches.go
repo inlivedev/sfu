@@ -3,8 +3,6 @@ package sfu
 import (
 	"container/list"
 	"sync"
-
-	"github.com/golang/glog"
 )
 
 // buffer ring for cached packets
@@ -43,7 +41,6 @@ func (p *packetCaches) Push(sequence uint16, timestamp uint32, dropCounter uint1
 	})
 
 	if p.caches.Len() > p.size {
-		glog.Info("packetCaches: dropping packet", p.caches.Front().Value.(cachedPacket).sequence)
 		p.caches.Remove(p.caches.Front())
 	}
 }

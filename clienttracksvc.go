@@ -318,15 +318,6 @@ func (t *scaleableClientTrack) RemoteTrack() *remoteTrack {
 	return t.remoteTrack.remoteTrack
 }
 
-func (t *scaleableClientTrack) getCurrentBitrate() uint32 {
-	currentTrack := t.RemoteTrack()
-	if currentTrack == nil {
-		return 0
-	}
-
-	return currentTrack.GetCurrentBitrate()
-}
-
 func (t *scaleableClientTrack) ID() string {
 	return t.id
 }
