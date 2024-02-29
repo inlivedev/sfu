@@ -1,107 +1,100 @@
 package sfu
 
-// import (
-// 	"slices"
-// 	"testing"
-// )
+import (
+	"slices"
+	"testing"
+)
 
-// func TestPush(t *testing.T) {
-// 	p := newPacketCaches(1000)
-// 	p.push(1, 2, 3)
-// 	if p.tail != 1 {
-// 		t.Error("tail is not 1")
-// 	}
-// 	if p.head != 0 {
-// 		t.Error("head is not 0")
-// 	}
-// 	if p.caches[1].sequence != 1 {
-// 		t.Error("sequence is not 1")
-// 	}
-// 	if p.caches[1].timestamp != 2 {
-// 		t.Error("timestamp is not 2")
-// 	}
-// 	if p.caches[1].dropCounter != 3 {
-// 		t.Error("dropCounter is not 3")
-// 	}
-// }
+func TestPush(t *testing.T) {
+	p := newPacketCaches(1000)
+	p.Push(1, 0, 0, 0, 0)
+	p.Push(2, 0, 0, 0, 0)
+	p.Push(3, 0, 0, 0, 0)
 
-// func TestOverwrite(t *testing.T) {
-// 	p := newPacketCaches(1000)
-// 	for i := 0; i < 1100; i++ {
-// 		p.push(uint16(i), uint32(i), uint16(i))
-// 	}
+	if p.caches.Front().Value.(cachedPacket).sequence != 1 {
+		t.Error("front is not 1")
+	}
+	if p.caches.Back().Value.(cachedPacket).sequence != 3 {
+		t.Error("back is not 3")
+	}
 
-// }
+}
 
-// func TestGet(t *testing.T) {
-// 	p := newPacketCaches(1000)
-// 	for i := 0; i < 1100; i++ {
-// 		p.push(uint16(i), uint32(i), uint16(i))
-// 	}
+func TestOverwrite(t *testing.T) {
+	p := newPacketCaches(1000)
+	for i := 0; i < 1100; i++ {
+		p.Push(uint16(i), uint32(i), uint16(i), 0, 0)
+	}
 
-// 	pkt, ok := p.getPacket(1099)
-// 	if !ok {
-// 		t.Error("packet not found")
-// 	}
+}
 
-// 	if pkt.sequence != 1099 {
-// 		t.Error("sequence is not 1099, got ", pkt.sequence)
-// 	}
+func TestGet(t *testing.T) {
+	p := newPacketCaches(1000)
+	for i := 0; i < 1100; i++ {
+		p.Push(uint16(i), uint32(i), uint16(i), uint8(0), uint8(0))
+	}
 
-// 	if pkt.timestamp != 1099 {
-// 		t.Error("timestamp is not 1099, got ", pkt.timestamp)
-// 	}
+	pkt, ok := p.GetPacket(1099)
+	if !ok {
+		t.Error("packet not found")
+	}
 
-// 	if pkt.dropCounter != 1099 {
-// 		t.Error("dropCounter is not 1099, got ", pkt.dropCounter)
-// 	}
+	if pkt.sequence != 1099 {
+		t.Error("sequence is not 1099, got ", pkt.sequence)
+	}
 
-// 	pkt, ok = p.getPacket(1299)
-// 	if ok {
-// 		t.Error("packet found, expected not found")
-// 	}
+	if pkt.timestamp != 1099 {
+		t.Error("timestamp is not 1099, got ", pkt.timestamp)
+	}
 
-// 	pkt, ok = p.getPacket(99)
-// 	if ok {
-// 		t.Error("packet found, expected not found")
-// 	}
-// }
+	if pkt.dropCounter != 1099 {
+		t.Error("dropCounter is not 1099, got ", pkt.dropCounter)
+	}
 
-// func TestGetPacketOrBefore(t *testing.T) {
-// 	// drop 8 packets
-// 	dropPackets := []uint16{111, 222, 333, 444, 555, 666, 777, 888}
-// 	p := newPacketCaches(1000)
-// 	for i := 0; i < 1100; i++ {
-// 		if !slices.Contains(dropPackets, uint16(i)) {
-// 			p.push(uint16(i), uint32(i), uint16(i))
-// 		}
-// 	}
+	pkt, ok = p.GetPacket(1299)
+	if ok {
+		t.Error("packet found, expected not found")
+	}
 
-// 	if p.tail != 92 {
-// 		t.Error("tail is not 92, got ", p.tail)
-// 	}
+	pkt, ok = p.GetPacket(99)
+	if ok {
+		t.Error("packet found, expected not found")
+	}
+}
 
-// 	pkt, ok := p.getPacket(999)
-// 	if !ok {
-// 		t.Error("packet not found, expected found")
-// 	}
+func TestGetPacketOrBefore(t *testing.T) {
+	// drop 8 packets
+	dropPackets := []uint16{65111, 65222, 65333, 65444, 1, 11, 222, 333, 444}
+	p := newPacketCaches(1000)
 
-// 	if pkt.sequence != 999 {
-// 		t.Error("sequence is not 999, got ", pkt.sequence)
-// 	}
+	for i := 65035; i < 65536; i++ {
+		if !slices.Contains(dropPackets, uint16(i)) {
+			p.Push(uint16(i), uint32(i), uint16(i), uint8(0), uint8(0))
+		}
+	}
 
-// 	pkt, ok = p.getPacket(777)
-// 	if ok {
-// 		t.Error("packet found, expected not found")
-// 	}
+	for i := 1; i < 500; i++ {
+		if !slices.Contains(dropPackets, uint16(i)) {
+			p.Push(uint16(i), uint32(i), uint16(i), uint8(0), uint8(0))
+		}
+	}
 
-// 	pkt, ok = p.getPacketOrBefore(777)
-// 	if !ok {
-// 		t.Error("packet not found, expected found")
-// 	}
+	pkt, ok := p.GetPacketOrBefore(444)
+	if !ok {
+		t.Error("packet not found, expected found")
+	}
 
-// 	if pkt.sequence != 776 {
-// 		t.Error("sequence is not 776, got ", pkt.sequence)
-// 	}
+	if pkt.sequence != 443 {
+		t.Error("sequence is not 444, got ", pkt.sequence)
+	}
 
-// }
+	pkt, ok = p.GetPacketOrBefore(1)
+	if !ok {
+		t.Error("packet not found, expected found")
+	}
+
+	if pkt.sequence != 65535 {
+		t.Error("sequence is not 65535, got ", pkt.sequence)
+	}
+
+}

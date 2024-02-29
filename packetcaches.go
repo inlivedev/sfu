@@ -3,6 +3,8 @@ package sfu
 import (
 	"container/list"
 	"sync"
+
+	"github.com/golang/glog"
 )
 
 // buffer ring for cached packets
@@ -41,6 +43,7 @@ func (p *packetCaches) Push(sequence uint16, timestamp uint32, dropCounter uint1
 	})
 
 	if p.caches.Len() > p.size {
+		glog.Info("packetCaches: dropping packet", p.caches.Front().Value.(cachedPacket).sequence)
 		p.caches.Remove(p.caches.Front())
 	}
 }
@@ -54,7 +57,7 @@ Loop:
 		packet := e.Value.(cachedPacket)
 		if packet.sequence == sequence {
 			return packet, true
-		} else if packet.sequence > sequence {
+		} else if packet.sequence < sequence {
 			break Loop
 		}
 	}
@@ -66,10 +69,18 @@ func (p *packetCaches) GetPacketOrBefore(sequence uint16) (cachedPacket, bool) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
-	for e := p.caches.Back(); e != nil; e = e.Prev() {
+	var e *list.Element
+
+	for e = p.caches.Back(); e != nil; e = e.Prev() {
 		packet := e.Value.(cachedPacket)
-		if packet.sequence == sequence || packet.sequence > sequence {
+
+		if packet.sequence == sequence || packet.sequence < sequence {
 			return packet, true
+		} else if packet.sequence > sequence && e.Next() != nil {
+			packetBefore := e.Next().Value.(cachedPacket)
+			if packet.sequence > packetBefore.sequence && packet.sequence-packetBefore.sequence > 30000 {
+				return packet, true
+			}
 		}
 	}
 
