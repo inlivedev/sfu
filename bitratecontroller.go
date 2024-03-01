@@ -528,10 +528,11 @@ func (bc *bitrateController) fitBitratesToBandwidth(bw uint32) {
 			for _, claim := range claims {
 				if claim.IsAdjustable() &&
 					claim.Quality() == QualityLevel(i) {
-					claim.track.RequestPLI()
+
 					glog.Info("bitratecontroller: reduce bitrate for track ", claim.track.ID(), " from ", claim.Quality(), " to ", claim.Quality()-1)
 					bc.setQuality(claim.track.ID(), claim.Quality()-1)
 
+					claim.track.RequestPLI()
 					totalSentBitrates = bc.totalSentBitrates()
 
 					// check if the reduced bitrate is fit to the available bandwidth
@@ -557,11 +558,11 @@ func (bc *bitrateController) fitBitratesToBandwidth(bw uint32) {
 						return
 					}
 
-					claim.track.RequestPLI()
 					glog.Info("bitratecontroller: increase bitrate for track ", claim.track.ID(), " from ", claim.Quality(), " to ", claim.Quality()+1)
 					bc.setQuality(claim.track.ID(), claim.Quality()+1)
 					// update current total bitrates
 					totalSentBitrates = bc.totalSentBitrates()
+					claim.track.RequestPLI()
 				}
 			}
 		}

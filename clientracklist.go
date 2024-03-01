@@ -11,8 +11,8 @@ type clientTrackList struct {
 }
 
 func (l *clientTrackList) Add(track iClientTrack) {
-	l.mu.RLock()
-	defer l.mu.RUnlock()
+	l.mu.Lock()
+	defer l.mu.Unlock()
 
 	go func() {
 		ctx, cancel := context.WithCancel(track.Context())
