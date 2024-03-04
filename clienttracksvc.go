@@ -127,6 +127,12 @@ func newScaleableClientTrack(
 		sid:           qualityPreset.High.SID,
 	}
 
+	go func() {
+		defer cancel()
+		<-ctx.Done()
+		sct.Clear()
+	}()
+
 	return sct
 }
 
@@ -171,7 +177,15 @@ func (t *scaleableClientTrack) isKeyframe(vp9 *codecs.VP9Packet) bool {
 // this where the temporal and spatial layers are will be decided to be sent to the client or not
 // compare it with the claimed quality to decide if the packet should be sent or not
 func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
-	packets, err := t.packetCaches.Sort(p)
+	copyPayload := make([]byte, len(p.Payload))
+	copy(copyPayload, p.Payload)
+	copyPacket := &rtp.Packet{
+		Header:      p.Header,
+		Payload:     copyPayload,
+		PaddingSize: p.PaddingSize,
+	}
+
+	packets, err := t.packetCaches.Sort(copyPacket)
 	if err == ErrPacketTooLate {
 		glog.Warning("scalabletrack: ", err)
 	}
@@ -357,4 +371,8 @@ func (t *scaleableClientTrack) getQuality() QualityLevel {
 	}
 
 	return min(t.MaxQuality(), claim.Quality(), Uint32ToQualityLevel(t.client.quality.Load()))
+}
+
+func (t *scaleableClientTrack) Clear() {
+	t.packetCaches.Clear()
 }

@@ -39,7 +39,7 @@ func TestAdd(t *testing.T) {
 	i := 0
 	for e := caches.caches.Front(); e != nil; e = e.Next() {
 		packet := e.Value.(*packetCache)
-		require.Equal(t, packet.Header.SequenceNumber, sortedNumbers[i], fmt.Sprintf("packet sequence number %d should be equal to sortedNumbers sequence number %d", packet.Header.SequenceNumber, sortedNumbers[i]))
+		require.Equal(t, packet.RTP.SequenceNumber, sortedNumbers[i], fmt.Sprintf("packet sequence number %d should be equal to sortedNumbers sequence number %d", packet.RTP.SequenceNumber, sortedNumbers[i]))
 		i++
 	}
 }

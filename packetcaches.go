@@ -24,8 +24,7 @@ type packetCaches struct {
 }
 
 type packetCache struct {
-	Header    rtp.Header
-	Payload   []byte
+	RTP       *rtp.Packet
 	AddedTime time.Time
 }
 
@@ -56,11 +55,8 @@ func (p *packetCaches) Add(pkt *rtp.Packet) error {
 		return ErrPacketTooLate
 	}
 
-	payload := make([]byte, len(pkt.Payload))
-	copy(payload, pkt.Payload)
 	newPacket := packetCache{
-		Header:    pkt.Header,
-		Payload:   payload,
+		RTP:       pkt,
 		AddedTime: time.Now(),
 	}
 
@@ -74,14 +70,14 @@ func (p *packetCaches) Add(pkt *rtp.Packet) error {
 Loop:
 	for e := p.caches.Back(); e != nil; e = e.Prev() {
 		packet = e.Value.(*packetCache)
-		if packet.Header.SequenceNumber == pkt.SequenceNumber {
+		if packet.RTP.SequenceNumber == pkt.SequenceNumber {
 			return nil
 		}
 
-		if packet.Header.SequenceNumber < pkt.SequenceNumber && pkt.SequenceNumber-packet.Header.SequenceNumber < 30000 {
+		if packet.RTP.SequenceNumber < pkt.SequenceNumber && pkt.SequenceNumber-packet.RTP.SequenceNumber < 30000 {
 			p.caches.InsertAfter(&newPacket, e)
 			break Loop
-		} else if packet.Header.SequenceNumber-pkt.SequenceNumber > math.MaxUint16/2 {
+		} else if packet.RTP.SequenceNumber-pkt.SequenceNumber > math.MaxUint16/2 {
 			p.caches.InsertAfter(&newPacket, e)
 			break Loop
 		} else if e.Prev() == nil {
@@ -95,14 +91,9 @@ Loop:
 
 func (p *packetCaches) appendPacket(packets []*rtp.Packet, e *list.Element) []*rtp.Packet {
 	pkt := e.Value.(*packetCache)
-	p.lastSequenceNumber = pkt.Header.SequenceNumber
-	payload := make([]byte, len(pkt.Payload))
-	copy(payload, pkt.Payload)
+	p.lastSequenceNumber = pkt.RTP.SequenceNumber
 
-	packets = append(packets, &rtp.Packet{
-		Header:  pkt.Header,
-		Payload: payload,
-	})
+	packets = append(packets, pkt.RTP)
 
 	// remove the packets from the cache
 	p.caches.Remove(e)
@@ -124,7 +115,7 @@ func (p *packetCaches) flush() []*rtp.Packet {
 Loop:
 	for e := p.caches.Front(); p.caches.Front() != nil; e = p.caches.Front() {
 		currentPacket := e.Value.(*packetCache)
-		currentSeq := currentPacket.Header.SequenceNumber
+		currentSeq := currentPacket.RTP.SequenceNumber
 
 		if !p.init {
 			// first packet to send, return immediately
@@ -142,12 +133,11 @@ Loop:
 			// glog.Info("packet latency: ", packetLatency, " gap: ", gap, " currentSeq: ", currentSeq, " nextSeq: ", nextSeq)
 			if packetLatency > p.maxLatency {
 				// we have waited too long, we should send the packets
-				glog.Warning("packet cache: packet sequence ", currentPacket.Header.SequenceNumber, " latency ", packetLatency, ", reached max latency ", p.maxLatency, ", will sending the packets")
+				glog.Warning("packet cache: packet sequence ", currentPacket.RTP.SequenceNumber, " latency ", packetLatency, ", reached max latency ", p.maxLatency, ", will sending the packets")
 				packets = p.appendPacket(packets, e)
 
 			} else {
 				// we should wait for the next packet
-				glog.Warning("packet cache: packet sequence ", currentPacket.Header.SequenceNumber, "  latency ", packetLatency, ", not sending the packets")
 				break Loop
 			}
 
@@ -170,4 +160,18 @@ func (p *packetCaches) Last() *packetCache {
 	}
 
 	return p.caches.Back().Value.(*packetCache)
+}
+
+func (p *packetCaches) Len() int {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	return p.caches.Len()
+}
+
+func (p *packetCaches) Clear() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	p.caches.Init()
 }
