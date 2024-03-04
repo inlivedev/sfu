@@ -1,100 +1,122 @@
 package sfu
 
 import (
-	"slices"
+	"fmt"
 	"testing"
+	"time"
+
+	"github.com/golang/glog"
+	"github.com/pion/rtp"
+	"github.com/stretchr/testify/require"
 )
 
-func TestPush(t *testing.T) {
-	p := newPacketCaches(1000)
-	p.Push(1, 0, 0, 0, 0)
-	p.Push(2, 0, 0, 0, 0)
-	p.Push(3, 0, 0, 0, 0)
+var sortedNumbers = []uint16{65527, 65528, 65529, 65530, 65531, 65532, 65533, 65534, 65535, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+var unsortedNumbers = []uint16{65527, 65532, 65531, 65533, 65534, 65535, 1, 2, 3, 4, 5, 65528, 65529, 65530, 0, 6, 7, 8, 9, 10}
 
-	if p.caches.Front().Value.(cachedPacket).sequence != 1 {
-		t.Error("front is not 1")
-	}
-	if p.caches.Back().Value.(cachedPacket).sequence != 3 {
-		t.Error("back is not 3")
-	}
+func TestAdd(t *testing.T) {
+	t.Parallel()
 
-}
+	packets := make([]*rtp.Packet, len(unsortedNumbers))
 
-func TestOverwrite(t *testing.T) {
-	p := newPacketCaches(1000)
-	for i := 0; i < 1100; i++ {
-		p.Push(uint16(i), uint32(i), uint16(i), 0, 0)
-	}
-
-}
-
-func TestGet(t *testing.T) {
-	p := newPacketCaches(1000)
-	for i := 0; i < 1100; i++ {
-		p.Push(uint16(i), uint32(i), uint16(i), uint8(0), uint8(0))
-	}
-
-	pkt, ok := p.GetPacket(1099)
-	if !ok {
-		t.Error("packet not found")
-	}
-
-	if pkt.sequence != 1099 {
-		t.Error("sequence is not 1099, got ", pkt.sequence)
-	}
-
-	if pkt.timestamp != 1099 {
-		t.Error("timestamp is not 1099, got ", pkt.timestamp)
-	}
-
-	if pkt.dropCounter != 1099 {
-		t.Error("dropCounter is not 1099, got ", pkt.dropCounter)
-	}
-
-	pkt, ok = p.GetPacket(1299)
-	if ok {
-		t.Error("packet found, expected not found")
-	}
-
-	pkt, ok = p.GetPacket(99)
-	if ok {
-		t.Error("packet found, expected not found")
-	}
-}
-
-func TestGetPacketOrBefore(t *testing.T) {
-	// drop 8 packets
-	dropPackets := []uint16{65111, 65222, 65333, 65444, 1, 11, 222, 333, 444}
-	p := newPacketCaches(1000)
-
-	for i := 65035; i < 65536; i++ {
-		if !slices.Contains(dropPackets, uint16(i)) {
-			p.Push(uint16(i), uint32(i), uint16(i), uint8(0), uint8(0))
+	for i, seq := range unsortedNumbers {
+		packets[i] = &rtp.Packet{
+			Header: rtp.Header{
+				SequenceNumber: seq,
+			},
 		}
 	}
 
-	for i := 1; i < 500; i++ {
-		if !slices.Contains(dropPackets, uint16(i)) {
-			p.Push(uint16(i), uint32(i), uint16(i), uint8(0), uint8(0))
+	maxLatency := 100 * time.Millisecond
+
+	caches := newPacketCaches(maxLatency)
+
+	for _, pkt := range packets {
+		caches.Add(pkt)
+	}
+
+	require.Equal(t, caches.caches.Len(), len(sortedNumbers), "caches length should be equal to sortedNumbers length")
+
+	i := 0
+	for e := caches.caches.Front(); e != nil; e = e.Next() {
+		packet := e.Value.(*packetCache)
+		require.Equal(t, packet.Header.SequenceNumber, sortedNumbers[i], fmt.Sprintf("packet sequence number %d should be equal to sortedNumbers sequence number %d", packet.Header.SequenceNumber, sortedNumbers[i]))
+		i++
+	}
+}
+
+func TestFlush(t *testing.T) {
+	t.Parallel()
+
+	packets := make([]*rtp.Packet, len(unsortedNumbers))
+
+	for i, seq := range unsortedNumbers {
+		packets[i] = &rtp.Packet{
+			Header: rtp.Header{
+				SequenceNumber: seq,
+			},
 		}
 	}
 
-	pkt, ok := p.GetPacketOrBefore(444)
-	if !ok {
-		t.Error("packet not found, expected found")
+	maxLatency := 100 * time.Millisecond
+
+	caches := newPacketCaches(maxLatency)
+
+	for _, pkt := range packets {
+		caches.Add(pkt)
 	}
 
-	if pkt.sequence != 443 {
-		t.Error("sequence is not 444, got ", pkt.sequence)
+	sorted := caches.Flush()
+
+	sorted = append(sorted, caches.Flush()...)
+
+	require.Equal(t, len(sortedNumbers), len(sorted), "sorted length should be equal to sortedNumbers length")
+
+	for i, pkt := range sorted {
+		require.Equal(t, pkt.Header.SequenceNumber, sortedNumbers[i], fmt.Sprintf("packet sequence number %d should be equal to sortedNumbers sequence number %d", pkt.Header.SequenceNumber, sortedNumbers[i]))
+	}
+}
+
+func TestSort(t *testing.T) {
+	t.Parallel()
+
+	unsoretedPackets := make([]*rtp.Packet, len(unsortedNumbers))
+
+	for i, seq := range unsortedNumbers {
+		unsoretedPackets[i] = &rtp.Packet{
+			Header: rtp.Header{
+				SequenceNumber: seq,
+			},
+		}
 	}
 
-	pkt, ok = p.GetPacketOrBefore(1)
-	if !ok {
-		t.Error("packet not found, expected found")
+	maxLatency := 100 * time.Millisecond
+
+	caches := newPacketCaches(maxLatency)
+
+	sorted := make([]*rtp.Packet, 0)
+
+	for _, pkt := range unsoretedPackets {
+		if pkt.Header.SequenceNumber == 65530 {
+			glog.Info("packet sequence number ", pkt.Header.SequenceNumber)
+		}
+		resultsSeqs := make([]uint16, 0)
+		sorted = append(sorted, caches.Sort(pkt)...)
+
+		for _, pkt := range sorted {
+			resultsSeqs = append(resultsSeqs, pkt.Header.SequenceNumber)
+		}
+
+		if pkt.Header.SequenceNumber == unsortedNumbers[0] {
+			// first sort call should return immediately
+			require.Equal(t, 1, len(sorted), "sorted length should be equal to 1", resultsSeqs)
+		} else if pkt.Header.SequenceNumber == 65530 {
+			// last sort call should return immediately
+			require.Equal(t, 9, len(sorted), "sorted length should be equal to 9, result ", resultsSeqs)
+		} else if pkt.Header.SequenceNumber == 0 {
+			// last sort call should return immediately
+			require.Equal(t, 15, len(sorted), "sorted length should be equal to 5, result ", resultsSeqs)
+		}
 	}
 
-	if pkt.sequence != 65535 {
-		t.Error("sequence is not 65535, got ", pkt.sequence)
-	}
-
+	require.Equal(t, len(sortedNumbers), len(sorted), "sorted length should be equal to sortedNumbers length")
 }
