@@ -2,6 +2,7 @@ package sfu
 
 import (
 	"container/list"
+	"errors"
 	"math"
 	"sync"
 	"time"
@@ -9,6 +10,8 @@ import (
 	"github.com/golang/glog"
 	"github.com/pion/rtp"
 )
+
+var ErrPacketTooLate = errors.New("packet is too late")
 
 // buffer ring for cached packets
 type packetCaches struct {
@@ -35,19 +38,24 @@ func newPacketCaches(maxLatency time.Duration) *packetCaches {
 }
 
 // Sort sorts the packets and returns the sorted packets ASAP
-func (p *packetCaches) Sort(pkt *rtp.Packet) []*rtp.Packet {
-	p.Add(pkt)
+func (p *packetCaches) Sort(pkt *rtp.Packet) ([]*rtp.Packet, error) {
+	err := p.Add(pkt)
 
 	packets := make([]*rtp.Packet, 0)
 
 	packets = append(packets, p.flush()...)
 
-	return packets
+	return packets, err
 }
 
-func (p *packetCaches) Add(pkt *rtp.Packet) {
+func (p *packetCaches) Add(pkt *rtp.Packet) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.init && (p.lastSequenceNumber > pkt.SequenceNumber && pkt.SequenceNumber-p.lastSequenceNumber > math.MaxUint16/2) {
+		glog.Warning("packet cache: packet sequence ", pkt.SequenceNumber, " is too late, last sent was ", p.lastSequenceNumber, ", will not adding the packet")
+		return ErrPacketTooLate
+	}
+
 	payload := make([]byte, len(pkt.Payload))
 	copy(payload, pkt.Payload)
 	newPacket := packetCache{
@@ -60,20 +68,20 @@ func (p *packetCaches) Add(pkt *rtp.Packet) {
 
 	if p.caches.Len() == 0 {
 		p.caches.PushBack(&newPacket)
-		return
+		return nil
 	}
 	// add packet in order
 Loop:
 	for e := p.caches.Back(); e != nil; e = e.Prev() {
 		packet = e.Value.(*packetCache)
 		if packet.Header.SequenceNumber == pkt.SequenceNumber {
-			return
+			return nil
 		}
 
 		if packet.Header.SequenceNumber < pkt.SequenceNumber && pkt.SequenceNumber-packet.Header.SequenceNumber < 30000 {
 			p.caches.InsertAfter(&newPacket, e)
 			break Loop
-		} else if packet.Header.SequenceNumber-pkt.SequenceNumber > 30000 {
+		} else if packet.Header.SequenceNumber-pkt.SequenceNumber > math.MaxUint16/2 {
 			p.caches.InsertAfter(&newPacket, e)
 			break Loop
 		} else if e.Prev() == nil {
@@ -82,6 +90,7 @@ Loop:
 		}
 	}
 
+	return nil
 }
 
 func (p *packetCaches) appendPacket(packets []*rtp.Packet, e *list.Element) []*rtp.Packet {
@@ -117,7 +126,7 @@ Loop:
 		currentPacket := e.Value.(*packetCache)
 		currentSeq := currentPacket.Header.SequenceNumber
 
-		if p.lastSequenceNumber == 0 && !p.init {
+		if !p.init {
 			// first packet to send, return immediately
 			packets = p.appendPacket(packets, e)
 			break Loop
@@ -133,11 +142,12 @@ Loop:
 			// glog.Info("packet latency: ", packetLatency, " gap: ", gap, " currentSeq: ", currentSeq, " nextSeq: ", nextSeq)
 			if packetLatency > p.maxLatency {
 				// we have waited too long, we should send the packets
-				glog.Warning("packet cache: packet sequence ", currentPacket.Header.SequenceNumber, " reached max latency ", p.maxLatency, ", will sending the packets")
+				glog.Warning("packet cache: packet sequence ", currentPacket.Header.SequenceNumber, " latency ", packetLatency, ", reached max latency ", p.maxLatency, ", will sending the packets")
 				packets = p.appendPacket(packets, e)
 
 			} else {
 				// we should wait for the next packet
+				glog.Warning("packet cache: packet sequence ", currentPacket.Header.SequenceNumber, "  latency ", packetLatency, ", not sending the packets")
 				break Loop
 			}
 

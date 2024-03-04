@@ -173,7 +173,11 @@ func (t *scaleableClientTrack) isKeyframe(vp9 *codecs.VP9Packet) bool {
 // this where the temporal and spatial layers are will be decided to be sent to the client or not
 // compare it with the claimed quality to decide if the packet should be sent or not
 func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
-	packets := t.packetCaches.Sort(p)
+	packets, err := t.packetCaches.Sort(p)
+	if err == ErrPacketTooLate {
+		glog.Warning("scalabletrack: ", err)
+	}
+
 	for _, pkt := range packets {
 		t.process(pkt)
 	}
@@ -230,8 +234,6 @@ func (t *scaleableClientTrack) process(p *rtp.Packet) {
 	}
 
 	if currentTID < vp9Packet.TID {
-		glog.Info("scalabletrack: packet ", p.SequenceNumber, " is dropped because of temporal layer TID ", vp9Packet.TID, " is higher than current TID ", currentTID)
-
 		t.dropCounter++
 		return
 	}
@@ -258,15 +260,14 @@ func (t *scaleableClientTrack) process(p *rtp.Packet) {
 	if currentSID < vp9Packet.SID {
 		t.dropCounter++
 
-		glog.Info("scalabletrack: packet ", p.SequenceNumber, " is dropped because of spatial layer SID ", vp9Packet.SID, " is higher than current SID ", currentSID)
-
 		return
 	}
 
 	if !t.firstInterPicReceived {
 		if !vp9Packet.P {
-			glog.Info("scalabletrack: packet ", p.SequenceNumber, " is dropped because of it is not a first inter picture")
+
 			t.dropCounter++
+
 			return
 		}
 

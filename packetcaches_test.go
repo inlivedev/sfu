@@ -79,10 +79,10 @@ func TestFlush(t *testing.T) {
 func TestSort(t *testing.T) {
 	t.Parallel()
 
-	unsoretedPackets := make([]*rtp.Packet, len(unsortedNumbers))
+	unsortedPackets := make([]*rtp.Packet, len(unsortedNumbers))
 
 	for i, seq := range unsortedNumbers {
-		unsoretedPackets[i] = &rtp.Packet{
+		unsortedPackets[i] = &rtp.Packet{
 			Header: rtp.Header{
 				SequenceNumber: seq,
 			},
@@ -95,12 +95,10 @@ func TestSort(t *testing.T) {
 
 	sorted := make([]*rtp.Packet, 0)
 
-	for _, pkt := range unsoretedPackets {
-		if pkt.Header.SequenceNumber == 65530 {
-			glog.Info("packet sequence number ", pkt.Header.SequenceNumber)
-		}
+	for _, pkt := range unsortedPackets {
 		resultsSeqs := make([]uint16, 0)
-		sorted = append(sorted, caches.Sort(pkt)...)
+		sortedPackets, _ := caches.Sort(pkt)
+		sorted = append(sorted, sortedPackets...)
 
 		for _, pkt := range sorted {
 			resultsSeqs = append(resultsSeqs, pkt.Header.SequenceNumber)
@@ -119,4 +117,67 @@ func TestSort(t *testing.T) {
 	}
 
 	require.Equal(t, len(sortedNumbers), len(sorted), "sorted length should be equal to sortedNumbers length")
+}
+
+func TestLatency(t *testing.T) {
+	t.Parallel()
+
+	unsortedPackets := make([]*rtp.Packet, len(unsortedNumbers))
+
+	for i, seq := range unsortedNumbers {
+		unsortedPackets[i] = &rtp.Packet{
+			Header: rtp.Header{
+				SequenceNumber: seq,
+			},
+		}
+	}
+
+	maxLatency := 100 * time.Millisecond
+
+	caches := newPacketCaches(maxLatency)
+
+	sorted := make([]*rtp.Packet, 0)
+	seqs := make([]uint16, 0)
+	resultsSeqs := make([]uint16, 0)
+	dropped := 0
+
+	for _, pkt := range unsortedPackets {
+		seqs = append(seqs, pkt.Header.SequenceNumber)
+
+		if pkt.Header.SequenceNumber == 65535 {
+			// last sort call should return immediately
+			glog.Info("packet sequence ", pkt.Header.SequenceNumber)
+			time.Sleep(2 * maxLatency)
+			sortedPackets, err := caches.Sort(pkt)
+			sorted = append(sorted, sortedPackets...)
+			if err != nil {
+				dropped++
+			}
+			for _, pkt := range sorted {
+				resultsSeqs = append(resultsSeqs, pkt.Header.SequenceNumber)
+			}
+			require.Equal(t, 6, len(sorted), "sorted length should be equal to 6, result ", resultsSeqs, seqs)
+		} else if pkt.Header.SequenceNumber == 0 {
+			// last sort call should return immediately
+			time.Sleep(2 * maxLatency)
+			sortedPackets, err := caches.Sort(pkt)
+			sorted = append(sorted, sortedPackets...)
+			if err != nil {
+				dropped++
+			}
+			for _, pkt := range sorted {
+				resultsSeqs = append(resultsSeqs, pkt.Header.SequenceNumber)
+			}
+			// from 15 packets added, 3 packets will be dropped because it's too late
+			require.Equal(t, 12, len(sorted), "sorted length should be equal to 15, result ", resultsSeqs, seqs)
+		} else {
+			sortedPackets, err := caches.Sort(pkt)
+			sorted = append(sorted, sortedPackets...)
+			if err != nil {
+				dropped++
+			}
+		}
+	}
+
+	require.Equal(t, len(seqs)-dropped, len(sorted), "sorted length should be equal to 15, result ", resultsSeqs, seqs)
 }
