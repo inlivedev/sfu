@@ -79,27 +79,25 @@ func DefaultQualityPreset() QualityPreset {
 }
 
 type scaleableClientTrack struct {
-	id                    string
-	context               context.Context
-	cancel                context.CancelFunc
-	mu                    sync.RWMutex
-	client                *Client
-	kind                  webrtc.RTPCodecType
-	mimeType              string
-	localTrack            *webrtc.TrackLocalStaticRTP
-	remoteTrack           *Track
-	lastQuality           QualityLevel
-	maxQuality            QualityLevel
-	tid                   uint8
-	sid                   uint8
-	lastTimestamp         uint32
-	lastSequence          uint16
-	isScreen              bool
-	dropCounter           uint16
-	qualityPreset         QualityPreset
-	packetCaches          *packetCaches
-	packetChan            chan *rtp.Packet
-	firstInterPicReceived bool
+	id            string
+	context       context.Context
+	cancel        context.CancelFunc
+	mu            sync.RWMutex
+	client        *Client
+	kind          webrtc.RTPCodecType
+	mimeType      string
+	localTrack    *webrtc.TrackLocalStaticRTP
+	remoteTrack   *Track
+	lastQuality   QualityLevel
+	maxQuality    QualityLevel
+	tid           uint8
+	sid           uint8
+	lastTimestamp uint32
+	isScreen      bool
+	dropCounter   uint16
+	qualityPreset QualityPreset
+	packetCaches  *packetCaches
+	packetChan    chan *rtp.Packet
 }
 
 func newScaleableClientTrack(
@@ -263,17 +261,6 @@ func (t *scaleableClientTrack) process(p *rtp.Packet) {
 		return
 	}
 
-	if !t.firstInterPicReceived {
-		if !vp9Packet.P {
-
-			t.dropCounter++
-
-			return
-		}
-
-		t.firstInterPicReceived = true
-	}
-
 	// mark packet as a last spatial layer packet
 	if vp9Packet.E && currentSID == vp9Packet.SID && targetSID <= currentSID {
 		p.Marker = true
@@ -295,8 +282,6 @@ func (t *scaleableClientTrack) send(p *rtp.Packet) {
 	p.SequenceNumber = normalizeSequenceNumber(p.SequenceNumber, t.dropCounter)
 
 	t.writeRTP(p)
-
-	// t.packetCaches.Push(p.SequenceNumber, p.Timestamp, t.dropCounter, tid, sid, nextsid)
 }
 
 func (t *scaleableClientTrack) RemoteTrack() *remoteTrack {
