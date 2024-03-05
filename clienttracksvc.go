@@ -121,7 +121,7 @@ func newScaleableClientTrack(
 		qualityPreset: qualityPreset,
 		maxQuality:    QualityHigh,
 		lastQuality:   QualityHigh,
-		packetCaches:  newPacketCaches(100 * time.Millisecond),
+		packetCaches:  newPacketCaches(50*time.Millisecond, 100*time.Millisecond),
 		packetChan:    make(chan *rtp.Packet, 1),
 		tid:           qualityPreset.High.TID,
 		sid:           qualityPreset.High.SID,

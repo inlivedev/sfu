@@ -16,11 +16,14 @@ var ErrPacketTooLate = errors.New("packet is too late")
 // buffer ring for cached packets
 type packetCaches struct {
 	init               bool
-	size               int
 	mu                 sync.RWMutex
 	caches             *list.List
 	lastSequenceNumber uint16
-	maxLatency         time.Duration
+	// min duration to wait before sending
+	minLatency time.Duration
+	// max duration to wait before sending
+	maxLatency   time.Duration
+	oldestPacket *packetCache
 }
 
 type packetCache struct {
@@ -28,10 +31,11 @@ type packetCache struct {
 	AddedTime time.Time
 }
 
-func newPacketCaches(maxLatency time.Duration) *packetCaches {
+func newPacketCaches(minLatency, maxLatency time.Duration) *packetCaches {
 	return &packetCaches{
 		mu:         sync.RWMutex{},
 		caches:     list.New(),
+		minLatency: minLatency,
 		maxLatency: maxLatency,
 	}
 }
@@ -89,14 +93,26 @@ Loop:
 	return nil
 }
 
-func (p *packetCaches) appendPacket(packets []*rtp.Packet, e *list.Element) []*rtp.Packet {
-	pkt := e.Value.(*packetCache)
+func (p *packetCaches) appendPacket(packets []*rtp.Packet, el *list.Element) []*rtp.Packet {
+	pkt := el.Value.(*packetCache)
 	p.lastSequenceNumber = pkt.RTP.SequenceNumber
 
 	packets = append(packets, pkt.RTP)
 
+	if p.oldestPacket == nil || p.oldestPacket.RTP.SequenceNumber == pkt.RTP.SequenceNumber {
+		// oldest packet will be remove, find the next oldest packet in the list
+		p.oldestPacket = nil
+		for e := el.Next(); e != nil; e = e.Next() {
+			packet := e.Value.(*packetCache)
+			if p.oldestPacket == nil || packet.AddedTime.Before(p.oldestPacket.AddedTime) {
+				p.oldestPacket = packet
+			}
+		}
+
+	}
+
 	// remove the packets from the cache
-	p.caches.Remove(e)
+	p.caches.Remove(el)
 
 	return packets
 }
@@ -104,12 +120,6 @@ func (p *packetCaches) appendPacket(packets []*rtp.Packet, e *list.Element) []*r
 func (p *packetCaches) flush() []*rtp.Packet {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
-
-	defer func() {
-		if !p.init {
-			p.init = true
-		}
-	}()
 
 	packets := make([]*rtp.Packet, 0)
 Loop:
@@ -119,11 +129,19 @@ Loop:
 
 		if !p.init {
 			// first packet to send, return immediately
-			packets = p.appendPacket(packets, e)
+			latency := time.Since(currentPacket.AddedTime)
+			if latency > p.minLatency {
+				packets = p.appendPacket(packets, e)
+				p.init = true
+			}
+
 			break Loop
-		} else if (p.lastSequenceNumber < currentSeq || p.lastSequenceNumber-currentSeq > math.MaxUint16/2) && currentSeq-p.lastSequenceNumber == 1 {
-			// the current packet is in sequence with the last packet we popped
+		} else if (p.lastSequenceNumber < currentSeq || p.lastSequenceNumber-currentSeq > math.MaxUint16/2) && currentSeq-p.lastSequenceNumber == 1 &&
+			(time.Since(currentPacket.AddedTime) > p.minLatency || (p.oldestPacket != nil && time.Since(p.oldestPacket.AddedTime) > p.maxLatency)) {
+			// the current packet is in sequence with the last packet we popped and passed the min latency
+
 			packets = p.appendPacket(packets, e)
+
 		} else {
 			// there is a gap between the last packet we popped and the current packet
 			// we should wait for the next packet

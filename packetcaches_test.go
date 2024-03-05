@@ -26,12 +26,14 @@ func TestAdd(t *testing.T) {
 		}
 	}
 
+	minLatency := 10 * time.Millisecond
 	maxLatency := 100 * time.Millisecond
 
-	caches := newPacketCaches(maxLatency)
+	caches := newPacketCaches(minLatency, maxLatency)
 
 	for _, pkt := range packets {
-		caches.Add(pkt)
+		err := caches.Add(pkt)
+		require.NoError(t, err)
 	}
 
 	require.Equal(t, caches.caches.Len(), len(sortedNumbers), "caches length should be equal to sortedNumbers length")
@@ -57,13 +59,17 @@ func TestFlush(t *testing.T) {
 		}
 	}
 
+	minLatency := 10 * time.Millisecond
 	maxLatency := 100 * time.Millisecond
 
-	caches := newPacketCaches(maxLatency)
+	caches := newPacketCaches(minLatency, maxLatency)
 
 	for _, pkt := range packets {
-		caches.Add(pkt)
+		err := caches.Add(pkt)
+		require.NoError(t, err)
 	}
+
+	time.Sleep(5 * minLatency)
 
 	sorted := caches.Flush()
 
@@ -89,34 +95,60 @@ func TestSort(t *testing.T) {
 		}
 	}
 
+	minLatency := 50 * time.Millisecond
 	maxLatency := 100 * time.Millisecond
 
-	caches := newPacketCaches(maxLatency)
+	caches := newPacketCaches(minLatency, maxLatency)
 
 	sorted := make([]*rtp.Packet, 0)
+	packetAddedTime := make(map[uint16]time.Time, 0)
+	packetLatencies := make(map[uint16]time.Duration, 0)
+
+	resultsSeqs := make([]uint16, 0)
 
 	for _, pkt := range unsortedPackets {
-		resultsSeqs := make([]uint16, 0)
 		sortedPackets, _ := caches.Sort(pkt)
+
+		packetAddedTime[pkt.Header.SequenceNumber] = time.Now()
+
 		sorted = append(sorted, sortedPackets...)
 
 		for _, pkt := range sorted {
 			resultsSeqs = append(resultsSeqs, pkt.Header.SequenceNumber)
+			packetLatencies[pkt.Header.SequenceNumber] = time.Since(packetAddedTime[pkt.Header.SequenceNumber])
 		}
 
 		if pkt.Header.SequenceNumber == unsortedNumbers[0] {
 			// first sort call should return immediately
+			time.Sleep(2 * minLatency)
+		} else if pkt.Header.SequenceNumber == unsortedNumbers[1] {
 			require.Equal(t, 1, len(sorted), "sorted length should be equal to 1", resultsSeqs)
 		} else if pkt.Header.SequenceNumber == 65530 {
-			// last sort call should return immediately
-			require.Equal(t, 9, len(sorted), "sorted length should be equal to 9, result ", resultsSeqs)
+			require.Equal(t, 1, len(sorted), "sorted length should be equal to 9, result ", resultsSeqs)
+			time.Sleep(2 * minLatency)
 		} else if pkt.Header.SequenceNumber == 0 {
-			// last sort call should return immediately
 			require.Equal(t, 15, len(sorted), "sorted length should be equal to 5, result ", resultsSeqs)
 		}
 	}
 
+	time.Sleep(2 * minLatency)
+
+	sortedPackets := caches.Flush()
+
+	sorted = append(sorted, sortedPackets...)
+
+	for _, pkt := range sorted {
+		resultsSeqs = append(resultsSeqs, pkt.Header.SequenceNumber)
+		packetLatencies[pkt.Header.SequenceNumber] = time.Since(packetAddedTime[pkt.Header.SequenceNumber])
+	}
+
 	require.Equal(t, len(sortedNumbers), len(sorted), "sorted length should be equal to sortedNumbers length")
+
+	for seq, latency := range packetLatencies {
+		if latency < minLatency {
+			t.Error("packet sequence ", seq, " latency ", latency, " is less than minLatency ", minLatency)
+		}
+	}
 }
 
 func TestLatency(t *testing.T) {
@@ -132,9 +164,10 @@ func TestLatency(t *testing.T) {
 		}
 	}
 
+	minLatency := 50 * time.Millisecond
 	maxLatency := 100 * time.Millisecond
 
-	caches := newPacketCaches(maxLatency)
+	caches := newPacketCaches(minLatency, maxLatency)
 
 	sorted := make([]*rtp.Packet, 0)
 	seqs := make([]uint16, 0)
@@ -156,7 +189,7 @@ func TestLatency(t *testing.T) {
 			for _, pkt := range sorted {
 				resultsSeqs = append(resultsSeqs, pkt.Header.SequenceNumber)
 			}
-			require.Equal(t, 6, len(sorted), "sorted length should be equal to 6, result ", resultsSeqs, seqs)
+			require.Equal(t, 1, len(sorted), "sorted length should be equal to 1, result ", resultsSeqs, seqs)
 		} else if pkt.Header.SequenceNumber == 0 {
 			// last sort call should return immediately
 			time.Sleep(2 * maxLatency)
@@ -178,6 +211,14 @@ func TestLatency(t *testing.T) {
 			}
 		}
 	}
+
+	require.Equal(t, len(seqs)-dropped-5, len(sorted), "sorted length should be equal to 12, 3 packets still less than min latency. result ", resultsSeqs, seqs)
+
+	time.Sleep(2 * minLatency)
+
+	sortedPackets := caches.Flush()
+
+	sorted = append(sorted, sortedPackets...)
 
 	require.Equal(t, len(seqs)-dropped, len(sorted), "sorted length should be equal to 15, result ", resultsSeqs, seqs)
 }
