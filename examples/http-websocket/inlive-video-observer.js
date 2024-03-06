@@ -22,6 +22,7 @@ export class InliveVideoObserver {
         } else {
             this.#intervalGap = intervalGap
         }
+		this.#lastReportTime=[]
        
         this.#dataChannel = dataChannel
         this.#videoElements = []
@@ -105,21 +106,24 @@ export class InliveVideoObserver {
      * @returns {void}
      */
     #onVideoSizeChanged(id,width, height) {
-        if (this.#lastReportTime !== null && (Date.now() - this.#lastReportTime) < this.#intervalGap) {
+        if (id in this.#lastReportTime && (Date.now() - this.#lastReportTime[id]) < this.#intervalGap) {
             return;
         }
 
-        this.#lastReportTime = Date.now();
+        this.#lastReportTime[id] = Date.now();
 
         if(this.#dataChannel.readyState == "open"){
-            this.#dataChannel.send(JSON.stringify({
+			const data = JSON.stringify({
                 type: 'video_size',
                 data: {
                     track_id: id,
                     width: Math.floor(width),
                     height:  Math.floor(height)
                 }
-            }));
+            });
+
+			console.log("Sending video size data: ", data);
+            this.#dataChannel.send(data);
         } else {
             const listener = () => {
                 this.#dataChannel.send(JSON.stringify({
