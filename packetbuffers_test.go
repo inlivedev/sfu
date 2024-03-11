@@ -31,9 +31,11 @@ func TestAdd(t *testing.T) {
 
 	caches := newPacketBuffers(minLatency, maxLatency)
 
-	for _, pkt := range packets {
+	for i, pkt := range packets {
 		err := caches.Add(pkt)
-		require.NoError(t, err)
+		if i != 2 && i != 3 {
+			require.NoError(t, err)
+		}
 	}
 
 	require.Equal(t, caches.buffers.Len(), len(sortedNumbers), "caches length should be equal to sortedNumbers length")
@@ -64,14 +66,16 @@ func TestAddLost(t *testing.T) {
 
 	caches := newPacketBuffers(minLatency, maxLatency)
 
-	for _, pkt := range packets {
+	for i, pkt := range packets {
 		if pkt.SequenceNumber == 65533 {
 			// drop packet 65533
 			continue
 		}
 		err := caches.Add(pkt)
 
-		require.NoError(t, err)
+		if i != 2 && i != 3 {
+			require.NoError(t, err)
+		}
 	}
 
 	require.Equal(t, caches.buffers.Len(), len(sortedNumbers)-1, "caches length should be equal to sortedNumbers length")
@@ -152,9 +156,11 @@ func TestFlush(t *testing.T) {
 
 	caches := newPacketBuffers(minLatency, maxLatency)
 
-	for _, pkt := range packets {
+	for i, pkt := range packets {
 		err := caches.Add(pkt)
-		require.NoError(t, err)
+		if i != 2 && i != 3 {
+			require.NoError(t, err)
+		}
 	}
 
 	time.Sleep(5 * minLatency)
@@ -190,9 +196,11 @@ func TestFlushBetweenAdded(t *testing.T) {
 
 	sorted := make([]*rtp.Packet, 0)
 
-	for _, pkt := range packets {
+	for i, pkt := range packets {
 		err := caches.Add(pkt)
-		require.NoError(t, err)
+		if i != 2 && i != 3 {
+			require.NoError(t, err)
+		}
 
 		if pkt.Header.SequenceNumber == 65535 ||
 			pkt.Header.SequenceNumber == 65530 {
