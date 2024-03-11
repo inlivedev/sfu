@@ -525,8 +525,11 @@ func negotiate(pc *webrtc.PeerConnection, client *Client) {
 	offer, _ := pc.CreateOffer(nil)
 
 	_ = pc.SetLocalDescription(offer)
+
 	answer, _ := client.Negotiate(offer)
-	_ = pc.SetRemoteDescription(*answer)
+	if answer != nil {
+		_ = pc.SetRemoteDescription(*answer)
+	}
 }
 
 func CreateDataPair(ctx context.Context, room *Room, iceServers []webrtc.ICEServer, peerName string, onDataChannel func(d *webrtc.DataChannel)) (*webrtc.PeerConnection, *Client, stats.Getter, chan webrtc.PeerConnectionState) {
