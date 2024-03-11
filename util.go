@@ -25,7 +25,24 @@ import (
 
 const (
 	SdesRepairRTPStreamIDURI = "urn:ietf:params:rtp-hdrext:sdes:repaired-rtp-stream-id"
+	uint16SizeHalf           = 1 << 15
 )
+
+var customChars = [62]byte{
+	'A', 'B', 'C', 'D', 'E',
+	'F', 'G', 'H', 'I', 'J',
+	'K', 'L', 'M', 'N', 'O',
+	'P', 'Q', 'R', 'S', 'T',
+	'U', 'V', 'W', 'X', 'Y',
+	'Z', 'a', 'b', 'c', 'd',
+	'e', 'f', 'g', 'h', 'i',
+	'j', 'k', 'l', 'm', 'n',
+	'o', 'p', 'q', 'r', 's',
+	't', 'u', 'v', 'w', 'x',
+	'y', 'z', '0', '1', '2',
+	'3', '4', '5', '6', '7',
+	'8', '9',
+}
 
 func GetUfragAndPass(sdp string) (ufrag, pass string) {
 	scanner := bufio.NewScanner(strings.NewReader(sdp))
@@ -62,8 +79,8 @@ func CountTracks(sdp string) int {
 	return counter
 }
 
-func GenerateID() string {
-	canonicID, err := nanoid.Standard(21)
+func GenerateID(length int) string {
+	canonicID, err := nanoid.CustomASCII(string(customChars[:]), length)
 	if err != nil {
 		panic(err)
 	}
@@ -472,4 +489,16 @@ func bitrateAdjustmentToString(adjustment bitrateAdjustment) string {
 	default:
 		return "none"
 	}
+}
+
+func IsRTPPacketLate(packetSeqNum uint16, lastSeqNum uint16) bool {
+	return lastSeqNum > packetSeqNum && lastSeqNum-packetSeqNum < uint16SizeHalf
+}
+
+func copyRTPPacket(packet *rtp.Packet) *rtp.Packet {
+	newPacket := &rtp.Packet{}
+	*newPacket = *packet
+	newPacket.Payload = make([]byte, len(packet.Payload))
+	copy(newPacket.Payload, packet.Payload)
+	return newPacket
 }

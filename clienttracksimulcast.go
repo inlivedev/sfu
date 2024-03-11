@@ -55,7 +55,7 @@ func newSimulcastClientTrack(c *Client, t *SimulcastTrack) *simulcastClientTrack
 
 	ct := &simulcastClientTrack{
 		mu:                      sync.RWMutex{},
-		id:                      t.base.id,
+		id:                      GenerateID(16),
 		context:                 ctx,
 		cancel:                  cancel,
 		kind:                    t.base.kind,
@@ -116,7 +116,7 @@ func (t *simulcastClientTrack) writeRTP(p *rtp.Packet) {
 	}
 }
 
-func (t *simulcastClientTrack) push(p *rtp.Packet, quality QualityLevel) {
+func (t *simulcastClientTrack) push(p rtp.Packet, quality QualityLevel) {
 	var trackQuality QualityLevel
 
 	lastQuality := t.LastQuality()
@@ -126,7 +126,7 @@ func (t *simulcastClientTrack) push(p *rtp.Packet, quality QualityLevel) {
 		return
 	}
 
-	isFirstKeyframePacket := t.isFirstKeyframePacket(p)
+	isFirstKeyframePacket := t.isFirstKeyframePacket(&p)
 
 	// check if it's a first packet to send
 	if lastQuality == QualityNone && t.sequenceNumber.Load() == 0 {
@@ -177,7 +177,7 @@ func (t *simulcastClientTrack) push(p *rtp.Packet, quality QualityLevel) {
 	}
 
 	if trackQuality == quality {
-		t.send(p, trackQuality, lastQuality)
+		t.send(&p, trackQuality, lastQuality)
 	}
 }
 

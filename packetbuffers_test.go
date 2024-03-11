@@ -10,8 +10,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-var sortedNumbers = []uint16{65527, 65528, 65529, 65530, 65531, 65532, 65533, 65534, 65535, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
-var unsortedNumbers = []uint16{65527, 65532, 65531, 65533, 65534, 65535, 1, 2, 3, 4, 5, 65528, 65529, 65530, 0, 6, 7, 8, 9, 10}
+var sortedNumbers = []uint16{65526, 65527, 65528, 65529, 65530, 65531, 65532, 65533, 65534, 65535, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+var unsortedNumbers = []uint16{65526, 65527, 65527, 65526, 65532, 65531, 65533, 65534, 65535, 1, 2, 3, 4, 5, 65528, 65529, 65530, 0, 6, 7, 8, 9, 10}
 
 func TestAdd(t *testing.T) {
 	t.Parallel()
@@ -29,23 +29,111 @@ func TestAdd(t *testing.T) {
 	minLatency := 10 * time.Millisecond
 	maxLatency := 100 * time.Millisecond
 
-	caches := newPacketCaches(minLatency, maxLatency)
+	caches := newPacketBuffers(minLatency, maxLatency)
 
 	for _, pkt := range packets {
 		err := caches.Add(pkt)
 		require.NoError(t, err)
 	}
 
-	require.Equal(t, caches.caches.Len(), len(sortedNumbers), "caches length should be equal to sortedNumbers length")
+	require.Equal(t, caches.buffers.Len(), len(sortedNumbers), "caches length should be equal to sortedNumbers length")
 
 	i := 0
-	for e := caches.caches.Front(); e != nil; e = e.Next() {
-		packet := e.Value.(*packetCache)
+	for e := caches.buffers.Front(); e != nil; e = e.Next() {
+		packet := e.Value.(*packet)
 		require.Equal(t, packet.RTP.SequenceNumber, sortedNumbers[i], fmt.Sprintf("packet sequence number %d should be equal to sortedNumbers sequence number %d", packet.RTP.SequenceNumber, sortedNumbers[i]))
 		i++
 	}
 }
 
+func TestAddLost(t *testing.T) {
+	t.Parallel()
+
+	packets := make([]*rtp.Packet, len(unsortedNumbers))
+
+	for i, seq := range unsortedNumbers {
+		packets[i] = &rtp.Packet{
+			Header: rtp.Header{
+				SequenceNumber: seq,
+			},
+		}
+	}
+
+	minLatency := 10 * time.Millisecond
+	maxLatency := 100 * time.Millisecond
+
+	caches := newPacketBuffers(minLatency, maxLatency)
+
+	for _, pkt := range packets {
+		if pkt.SequenceNumber == 65533 {
+			// drop packet 65533
+			continue
+		}
+		err := caches.Add(pkt)
+
+		require.NoError(t, err)
+	}
+
+	require.Equal(t, caches.buffers.Len(), len(sortedNumbers)-1, "caches length should be equal to sortedNumbers length")
+
+	i := 0
+	for e := caches.buffers.Front(); e != nil; e = e.Next() {
+		packet := e.Value.(*packet)
+		if sortedNumbers[i] == 65533 {
+			i++
+		}
+
+		require.Equal(t, packet.RTP.SequenceNumber, sortedNumbers[i], fmt.Sprintf("packet sequence number %d should be equal to sortedNumbers sequence number %d", packet.RTP.SequenceNumber, sortedNumbers[i]))
+		i++
+	}
+}
+
+func TestDuplicateAdd(t *testing.T) {
+	t.Parallel()
+
+	packets := make([]*rtp.Packet, len(unsortedNumbers))
+
+	for i, seq := range unsortedNumbers {
+		packets[i] = &rtp.Packet{
+			Header: rtp.Header{
+				SequenceNumber: seq,
+			},
+		}
+	}
+
+	minLatency := 10 * time.Millisecond
+	maxLatency := 100 * time.Millisecond
+
+	caches := newPacketBuffers(minLatency, maxLatency)
+
+	for i, pkt := range packets {
+		if i == 9 {
+			glog.Info("packet sequence ", pkt.Header.SequenceNumber)
+		}
+
+		err := caches.Add(pkt)
+		if i == 2 || i == 3 {
+			require.EqualError(t, err, ErrPacketTooLate.Error())
+		} else {
+			require.NoError(t, err, "should not return error on add packet %d sequence %d", i, pkt.Header.SequenceNumber)
+		}
+
+		if i == 1 {
+			time.Sleep(2 * minLatency)
+			pkts := caches.Flush()
+			require.Equal(t, 2, len(pkts), "caches length should be equal to 1")
+		}
+	}
+
+	// require.Equal(t, caches.buffers.Len(), len(sortedNumbers), "caches length should be equal to sortedNumbers length")
+
+	// i := 0
+	// for e := caches.buffers.Front(); e != nil; e = e.Next() {
+	// 	packet := e.Value.(*packet)
+	// 	require.Equal(t, packet.RTP.SequenceNumber, sortedNumbers[i], fmt.Sprintf("packet sequence number %d should be equal to sortedNumbers sequence number %d", packet.RTP.SequenceNumber, sortedNumbers[i]))
+	// 	i++
+	// }
+}
 func TestFlush(t *testing.T) {
 	t.Parallel()
 
@@ -62,7 +150,7 @@ func TestFlush(t *testing.T) {
 	minLatency := 10 * time.Millisecond
 	maxLatency := 100 * time.Millisecond
 
-	caches := newPacketCaches(minLatency, maxLatency)
+	caches := newPacketBuffers(minLatency, maxLatency)
 
 	for _, pkt := range packets {
 		err := caches.Add(pkt)
@@ -82,72 +170,45 @@ func TestFlush(t *testing.T) {
 	}
 }
 
-func TestSort(t *testing.T) {
+func TestFlushBetweenAdded(t *testing.T) {
 	t.Parallel()
 
-	unsortedPackets := make([]*rtp.Packet, len(unsortedNumbers))
+	packets := make([]*rtp.Packet, len(unsortedNumbers))
 
 	for i, seq := range unsortedNumbers {
-		unsortedPackets[i] = &rtp.Packet{
+		packets[i] = &rtp.Packet{
 			Header: rtp.Header{
 				SequenceNumber: seq,
 			},
 		}
 	}
 
-	minLatency := 50 * time.Millisecond
+	minLatency := 10 * time.Millisecond
 	maxLatency := 100 * time.Millisecond
 
-	caches := newPacketCaches(minLatency, maxLatency)
+	caches := newPacketBuffers(minLatency, maxLatency)
 
 	sorted := make([]*rtp.Packet, 0)
-	packetAddedTime := make(map[uint16]time.Time, 0)
-	packetLatencies := make(map[uint16]time.Duration, 0)
 
-	resultsSeqs := make([]uint16, 0)
+	for _, pkt := range packets {
+		err := caches.Add(pkt)
+		require.NoError(t, err)
 
-	for _, pkt := range unsortedPackets {
-		sortedPackets, _ := caches.Sort(pkt)
-
-		packetAddedTime[pkt.Header.SequenceNumber] = time.Now()
-
-		sorted = append(sorted, sortedPackets...)
-
-		for _, pkt := range sorted {
-			resultsSeqs = append(resultsSeqs, pkt.Header.SequenceNumber)
-			packetLatencies[pkt.Header.SequenceNumber] = time.Since(packetAddedTime[pkt.Header.SequenceNumber])
-		}
-
-		if pkt.Header.SequenceNumber == unsortedNumbers[0] {
-			// first sort call should return immediately
+		if pkt.Header.SequenceNumber == 65535 ||
+			pkt.Header.SequenceNumber == 65530 {
 			time.Sleep(2 * minLatency)
-		} else if pkt.Header.SequenceNumber == unsortedNumbers[1] {
-			require.Equal(t, 1, len(sorted), "sorted length should be equal to 1", resultsSeqs)
-		} else if pkt.Header.SequenceNumber == 65530 {
-			require.Equal(t, 1, len(sorted), "sorted length should be equal to 9, result ", resultsSeqs)
-			time.Sleep(2 * minLatency)
-		} else if pkt.Header.SequenceNumber == 0 {
-			require.Equal(t, 15, len(sorted), "sorted length should be equal to 5, result ", resultsSeqs)
+			sorted = append(sorted, caches.Flush()...)
 		}
 	}
 
-	time.Sleep(2 * minLatency)
+	time.Sleep(5 * minLatency)
 
-	sortedPackets := caches.Flush()
-
-	sorted = append(sorted, sortedPackets...)
-
-	for _, pkt := range sorted {
-		resultsSeqs = append(resultsSeqs, pkt.Header.SequenceNumber)
-		packetLatencies[pkt.Header.SequenceNumber] = time.Since(packetAddedTime[pkt.Header.SequenceNumber])
-	}
+	sorted = append(sorted, caches.Flush()...)
 
 	require.Equal(t, len(sortedNumbers), len(sorted), "sorted length should be equal to sortedNumbers length")
 
-	for seq, latency := range packetLatencies {
-		if latency < minLatency {
-			t.Error("packet sequence ", seq, " latency ", latency, " is less than minLatency ", minLatency)
-		}
+	for i, pkt := range sorted {
+		require.Equal(t, pkt.Header.SequenceNumber, sortedNumbers[i], fmt.Sprintf("packet sequence number %d should be equal to sortedNumbers sequence number %d", pkt.Header.SequenceNumber, sortedNumbers[i]))
 	}
 }
 
@@ -167,7 +228,7 @@ func TestLatency(t *testing.T) {
 	minLatency := 50 * time.Millisecond
 	maxLatency := 100 * time.Millisecond
 
-	caches := newPacketCaches(minLatency, maxLatency)
+	caches := newPacketBuffers(minLatency, maxLatency)
 
 	sorted := make([]*rtp.Packet, 0)
 	seqs := make([]uint16, 0)
@@ -181,7 +242,8 @@ func TestLatency(t *testing.T) {
 			// last sort call should return immediately
 			glog.Info("packet sequence ", pkt.Header.SequenceNumber)
 			time.Sleep(2 * maxLatency)
-			sortedPackets, err := caches.Sort(pkt)
+			err := caches.Add(pkt)
+			sortedPackets := caches.Flush()
 			sorted = append(sorted, sortedPackets...)
 			if err != nil {
 				dropped++
@@ -193,7 +255,8 @@ func TestLatency(t *testing.T) {
 		} else if pkt.Header.SequenceNumber == 0 {
 			// last sort call should return immediately
 			time.Sleep(2 * maxLatency)
-			sortedPackets, err := caches.Sort(pkt)
+			err := caches.Add(pkt)
+			sortedPackets := caches.Flush()
 			sorted = append(sorted, sortedPackets...)
 			if err != nil {
 				dropped++
@@ -204,7 +267,8 @@ func TestLatency(t *testing.T) {
 			// from 15 packets added, 3 packets will be dropped because it's too late
 			require.Equal(t, 12, len(sorted), "sorted length should be equal to 15, result ", resultsSeqs, seqs)
 		} else {
-			sortedPackets, err := caches.Sort(pkt)
+			err := caches.Add(pkt)
+			sortedPackets := caches.Flush()
 			sorted = append(sorted, sortedPackets...)
 			if err != nil {
 				dropped++

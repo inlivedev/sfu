@@ -37,8 +37,8 @@ func (l *clientTrackList) remove(id string) {
 }
 
 func (l *clientTrackList) Get(id string) iClientTrack {
-	l.mu.Lock()
-	defer l.mu.Unlock()
+	l.mu.RLock()
+	defer l.mu.RUnlock()
 
 	for _, t := range l.tracks {
 		if t.ID() == id {
@@ -50,20 +50,17 @@ func (l *clientTrackList) Get(id string) iClientTrack {
 }
 
 func (l *clientTrackList) Length() int {
-	l.mu.Lock()
-	defer l.mu.Unlock()
+	l.mu.RLock()
+	defer l.mu.RUnlock()
 
 	return len(l.tracks)
 }
 
 func (l *clientTrackList) GetTracks() []iClientTrack {
-	l.mu.Lock()
-	defer l.mu.Unlock()
+	l.mu.RLock()
+	defer l.mu.RUnlock()
 
-	tracks := make([]iClientTrack, 0)
-	tracks = append(tracks, l.tracks...)
-
-	return tracks
+	return l.tracks
 }
 
 func newClientTrackList() *clientTrackList {

@@ -40,7 +40,7 @@ func newClientTrackRed(c *Client, t *Track) *clientTrackRed {
 	}
 
 	ct := &clientTrackRed{
-		id:           t.base.id,
+		id:           GenerateID(16),
 		context:      ctx,
 		cancel:       cancel,
 		mu:           sync.RWMutex{},
@@ -71,16 +71,16 @@ func (t *clientTrackRed) Kind() webrtc.RTPCodecType {
 	return t.remoteTrack.track.Kind()
 }
 
-func (t *clientTrackRed) push(rtp *rtp.Packet, _ QualityLevel) {
+func (t *clientTrackRed) push(p rtp.Packet, _ QualityLevel) {
 	if t.client.peerConnection.PC().ConnectionState() != webrtc.PeerConnectionStateConnected {
 		return
 	}
 
 	if !t.isReceiveRed {
-		rtp = t.getPrimaryEncoding(rtp)
+		p = t.getPrimaryEncoding(p)
 	}
 
-	if err := t.localTrack.WriteRTP(rtp); err != nil {
+	if err := t.localTrack.WriteRTP(&p); err != nil {
 		glog.Error("clienttrack: error on write rtp", err)
 	}
 }
@@ -117,7 +117,7 @@ func (t *clientTrackRed) MaxQuality() QualityLevel {
 	return QualityHigh
 }
 
-func (t *clientTrackRed) getPrimaryEncoding(rtp *rtp.Packet) *rtp.Packet {
+func (t *clientTrackRed) getPrimaryEncoding(rtp rtp.Packet) rtp.Packet {
 	payload, err := extractPrimaryEncodingForRED(rtp.Payload)
 	if err != nil {
 		glog.Error("clienttrack: error on extract primary encoding for red", err)

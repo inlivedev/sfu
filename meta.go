@@ -92,7 +92,7 @@ func (m *Metadata) onChanged(key string, value interface{}) {
 // Make sure OnMetaChangedSubscription.Unsubscribe() is called when the callback is no longer needed
 func (m *Metadata) OnChanged(f func(key string, value interface{})) *OnMetaChangedCallback {
 	m.mu.Lock()
-	key := GenerateID()
+	key := GenerateID(21)
 	m.onChangedCallbacks[key] = f
 	m.mu.Unlock()
 

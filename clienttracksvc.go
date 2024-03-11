@@ -3,7 +3,6 @@ package sfu
 import (
 	"context"
 	"sync"
-	"time"
 
 	"github.com/golang/glog"
 	"github.com/pion/rtp"
@@ -79,25 +78,25 @@ func DefaultQualityPreset() QualityPreset {
 }
 
 type scaleableClientTrack struct {
-	id            string
-	context       context.Context
-	cancel        context.CancelFunc
-	mu            sync.RWMutex
-	client        *Client
-	kind          webrtc.RTPCodecType
-	mimeType      string
-	localTrack    *webrtc.TrackLocalStaticRTP
-	remoteTrack   *Track
-	lastQuality   QualityLevel
-	maxQuality    QualityLevel
-	tid           uint8
-	sid           uint8
-	lastTimestamp uint32
-	isScreen      bool
-	dropCounter   uint16
-	qualityPreset QualityPreset
-	packetCaches  *packetCaches
-	packetChan    chan *rtp.Packet
+	id              string
+	context         context.Context
+	cancel          context.CancelFunc
+	mu              sync.RWMutex
+	client          *Client
+	kind            webrtc.RTPCodecType
+	mimeType        string
+	localTrack      *webrtc.TrackLocalStaticRTP
+	remoteTrack     *Track
+	lastQuality     QualityLevel
+	maxQuality      QualityLevel
+	tid             uint8
+	sid             uint8
+	lastTimestamp   uint32
+	isScreen        bool
+	dropCounter     uint16
+	qualityPreset   QualityPreset
+	hasInterPicture bool
+	lastSequence    uint16
 }
 
 func newScaleableClientTrack(
@@ -111,7 +110,7 @@ func newScaleableClientTrack(
 		context:       ctx,
 		cancel:        cancel,
 		mu:            sync.RWMutex{},
-		id:            t.base.id,
+		id:            GenerateID(16),
 		kind:          t.base.kind,
 		mimeType:      t.base.codec.MimeType,
 		client:        c,
@@ -121,17 +120,9 @@ func newScaleableClientTrack(
 		qualityPreset: qualityPreset,
 		maxQuality:    QualityHigh,
 		lastQuality:   QualityHigh,
-		packetCaches:  newPacketCaches(50*time.Millisecond, 100*time.Millisecond),
-		packetChan:    make(chan *rtp.Packet, 1),
 		tid:           qualityPreset.High.TID,
 		sid:           qualityPreset.High.SID,
 	}
-
-	go func() {
-		defer cancel()
-		<-ctx.Done()
-		sct.Clear()
-	}()
 
 	return sct
 }
@@ -145,14 +136,6 @@ func (t *scaleableClientTrack) Client() *Client {
 
 func (t *scaleableClientTrack) Context() context.Context {
 	return t.context
-}
-
-func (t *scaleableClientTrack) writeRTP(p *rtp.Packet) {
-	t.lastTimestamp = p.Timestamp
-
-	if err := t.localTrack.WriteRTP(p); err != nil {
-		glog.Error("track: error on write rtp", err)
-	}
 }
 
 func (t *scaleableClientTrack) isKeyframe(vp9 *codecs.VP9Packet) bool {
@@ -174,39 +157,31 @@ func (t *scaleableClientTrack) isKeyframe(vp9 *codecs.VP9Packet) bool {
 	return (vp9.Payload[0]&0x6) == 0 && true
 }
 
-// this where the temporal and spatial layers are will be decided to be sent to the client or not
-// compare it with the claimed quality to decide if the packet should be sent or not
-func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
-	copyPayload := make([]byte, len(p.Payload))
-	copy(copyPayload, p.Payload)
-	copyPacket := &rtp.Packet{
-		Header:      p.Header,
-		Payload:     copyPayload,
-		PaddingSize: p.PaddingSize,
+func (t *scaleableClientTrack) push(p rtp.Packet, _ QualityLevel) {
+	// detect late packet
+	if IsRTPPacketLate(p.Header.SequenceNumber, t.lastSequence) {
+		glog.Warning("scalabletrack: packet SSRC ", t.RemoteTrack().track.SSRC(), " client ", t.client.ID(), " sequence ", p.SequenceNumber, " is late, last sequence ", t.lastSequence)
+		// return
 	}
 
-	packets, err := t.packetCaches.Sort(copyPacket)
-	if err == ErrPacketTooLate {
-		glog.Warning("scalabletrack: ", err)
-	}
+	t.lastSequence = p.Header.SequenceNumber
 
-	for _, pkt := range packets {
-		t.process(pkt)
-	}
-}
-
-func (t *scaleableClientTrack) process(p *rtp.Packet) {
 	var qualityPreset IQualityPreset
 
 	vp9Packet := &codecs.VP9Packet{}
 	if _, err := vp9Packet.Unmarshal(p.Payload); err != nil {
-		t.send(p)
+		t.send(&p)
 		return
 	}
 
-	isKeyframe := t.isKeyframe(vp9Packet)
-	if isKeyframe {
-		glog.Info("scalabletrack: keyframe ", p.SequenceNumber, " is detected")
+	if !t.hasInterPicture {
+		if !vp9Packet.P {
+			t.RequestPLI()
+			glog.Info("scalabletrack: packet ", p.SequenceNumber, " client ", t.client.ID(), " is dropped because of no intra frame")
+			return
+
+		}
+		t.hasInterPicture = true
 	}
 
 	quality := t.getQuality()
@@ -246,6 +221,7 @@ func (t *scaleableClientTrack) process(p *rtp.Packet) {
 	}
 
 	if currentTID < vp9Packet.TID {
+		// glog.Info("scalabletrack: packet ", p.SequenceNumber, " is dropped because of currentTID < vp9Packet.TID")
 		t.dropCounter++
 		return
 	}
@@ -271,7 +247,7 @@ func (t *scaleableClientTrack) process(p *rtp.Packet) {
 
 	if currentSID < vp9Packet.SID {
 		t.dropCounter++
-
+		// glog.Info("scalabletrack: packet ", p.SequenceNumber, " is dropped because of currentSID < vp9Packet.SID")
 		return
 	}
 
@@ -280,7 +256,7 @@ func (t *scaleableClientTrack) process(p *rtp.Packet) {
 		p.Marker = true
 	}
 
-	t.send(p)
+	t.send(&p)
 }
 
 // functiont to normalize the sequence number in case the sequence is rollover
@@ -295,7 +271,11 @@ func normalizeSequenceNumber(sequence, drop uint16) uint16 {
 func (t *scaleableClientTrack) send(p *rtp.Packet) {
 	p.SequenceNumber = normalizeSequenceNumber(p.SequenceNumber, t.dropCounter)
 
-	t.writeRTP(p)
+	t.lastTimestamp = p.Timestamp
+
+	if err := t.localTrack.WriteRTP(p); err != nil {
+		glog.Error("scaleabletrack: error on write rtp", err)
+	}
 }
 
 func (t *scaleableClientTrack) RemoteTrack() *remoteTrack {
@@ -371,8 +351,4 @@ func (t *scaleableClientTrack) getQuality() QualityLevel {
 	}
 
 	return min(t.MaxQuality(), claim.Quality(), Uint32ToQualityLevel(t.client.quality.Load()))
-}
-
-func (t *scaleableClientTrack) Clear() {
-	t.packetCaches.Clear()
 }

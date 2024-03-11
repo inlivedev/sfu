@@ -14,10 +14,11 @@ import (
 )
 
 type remoteTrack struct {
-	context               context.Context
-	cancel                context.CancelFunc
-	mu                    sync.RWMutex
-	track                 IRemoteTrack
+	context context.Context
+	cancel  context.CancelFunc
+	mu      sync.RWMutex
+	track   IRemoteTrack
+
 	onRead                func(*rtp.Packet)
 	onPLI                 func()
 	bitrate               *atomic.Uint32
@@ -28,6 +29,7 @@ type remoteTrack struct {
 	onEndedCallbacks      []func()
 	statsGetter           stats.Getter
 	onStatsUpdated        func(*stats.Stats)
+	packetBuffers         *packetBuffers
 }
 
 func newRemoteTrack(ctx context.Context, track IRemoteTrack, pliInterval time.Duration, onPLI func(), statsGetter stats.Getter, onStatsUpdated func(*stats.Stats), onRead func(*rtp.Packet)) *remoteTrack {
@@ -46,13 +48,16 @@ func newRemoteTrack(ctx context.Context, track IRemoteTrack, pliInterval time.Du
 		onStatsUpdated:        onStatsUpdated,
 		onPLI:                 onPLI,
 		onRead:                onRead,
+		packetBuffers:         newPacketBuffers(20*time.Millisecond, 100*time.Millisecond),
 	}
 
 	if pliInterval > 0 {
 		rt.enableIntervalPLI(pliInterval)
 	}
 
-	rt.readRTP()
+	go rt.readRTP()
+
+	go rt.bufferLoop()
 
 	return rt
 }
@@ -62,34 +67,72 @@ func (t *remoteTrack) Context() context.Context {
 }
 
 func (t *remoteTrack) readRTP() {
-	go func() {
-		defer t.cancel()
-		for {
-			select {
-			case <-t.context.Done():
+	defer t.cancel()
+	for {
+		select {
+		case <-t.context.Done():
+			return
+		default:
+			if err := t.track.SetReadDeadline(time.Now().Add(1 * time.Second)); err != nil {
+				glog.Error("remotetrack: set read deadline error: ", err)
 				return
-			default:
-				if err := t.track.SetReadDeadline(time.Now().Add(1 * time.Second)); err != nil {
-					glog.Error("remotetrack: set read deadline error: ", err)
-					return
-				}
+			}
 
-				rtp, _, readErr := t.track.ReadRTP()
-				if readErr == io.EOF {
-					glog.Info("remotetrack: track ended: ", t.track.ID())
-					return
-				}
+			p, _, readErr := t.track.ReadRTP()
+			if readErr == io.EOF {
+				glog.Info("remotetrack: track ended: ", t.track.ID())
+				return
+			}
 
-				if rtp != nil {
-					t.onRead(rtp)
+			if p != nil {
+				_ = t.packetBuffers.Add(copyRTPPacket(p))
 
-					if !t.IsRelay() {
-						go t.updateStats()
-					}
+				if !t.IsRelay() {
+					go t.updateStats()
 				}
 			}
 		}
+	}
+}
+
+func (t *remoteTrack) bufferLoop() {
+	ctx, cancel := context.WithCancel(t.context)
+	interval := t.packetBuffers.MinLatency()
+
+	ticker := time.NewTicker(interval)
+
+	defer func() {
+		t.packetBuffers.Clear()
+		ticker.Stop()
+		cancel()
 	}()
+
+	intervalResetTime := time.Now()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			pkts := t.packetBuffers.Flush()
+			if len(pkts) == 0 && interval < t.packetBuffers.MaxLatency() {
+				interval = interval * 105 / 100
+				glog.Warning("remotetrack: no packets in buffer, increasing interval: ", interval)
+				ticker.Reset(interval)
+				intervalResetTime = time.Now()
+				continue
+			} else if time.Since(intervalResetTime) > 10*time.Second && interval > t.packetBuffers.MinLatency() {
+				interval = interval * 95 / 100
+				glog.Warning("remotetrack: stable interval, try decreasing interval: ", interval)
+				ticker.Reset(interval)
+				intervalResetTime = time.Now()
+			}
+
+			for i := 0; i < len(pkts); i++ {
+				t.onRead(pkts[i])
+			}
+		}
+	}
 }
 
 func (t *remoteTrack) updateStats() {

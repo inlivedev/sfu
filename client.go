@@ -194,7 +194,9 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		panic(err)
 	}
 
+	// let the client knows that we're receiving simulcast tracks
 	RegisterSimulcastHeaderExtensions(m, webrtc.RTPCodecTypeVideo)
+
 	if opts.EnableVoiceDetection {
 		voiceactivedetector.RegisterAudioLevelHeaderExtension(m)
 	}
@@ -268,7 +270,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 	}
 
 	// Use the default set of Interceptors
-	if err := registerDefaultInterceptors(m, i); err != nil {
+	if err := registerInterceptors(m, i); err != nil {
 		panic(err)
 	}
 
@@ -1600,7 +1602,7 @@ func (c *Client) Tracks() []ITrack {
 	return c.tracks.GetTracks()
 }
 
-func registerDefaultInterceptors(m *webrtc.MediaEngine, interceptorRegistry *interceptor.Registry) error {
+func registerInterceptors(m *webrtc.MediaEngine, interceptorRegistry *interceptor.Registry) error {
 	// ConfigureNack will setup everything necessary for handling generating/responding to nack messages.
 	generator, err := nack.NewGeneratorInterceptor()
 	if err != nil {

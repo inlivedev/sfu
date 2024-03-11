@@ -10,7 +10,7 @@ import (
 )
 
 type iClientTrack interface {
-	push(rtp *rtp.Packet, quality QualityLevel)
+	push(rtp rtp.Packet, quality QualityLevel)
 	ID() string
 	Context() context.Context
 	Kind() webrtc.RTPCodecType
@@ -41,7 +41,7 @@ type clientTrack struct {
 func newClientTrack(c *Client, t *Track, isScreen bool) *clientTrack {
 	ctx, cancel := context.WithCancel(t.Context())
 	ct := &clientTrack{
-		id:          t.base.id,
+		id:          GenerateID(16),
 		context:     ctx,
 		cancel:      cancel,
 		mu:          sync.RWMutex{},
@@ -72,7 +72,7 @@ func (t *clientTrack) Kind() webrtc.RTPCodecType {
 	return t.remoteTrack.track.Kind()
 }
 
-func (t *clientTrack) push(rtp *rtp.Packet, _ QualityLevel) {
+func (t *clientTrack) push(p rtp.Packet, _ QualityLevel) {
 	if t.client.peerConnection.PC().ConnectionState() != webrtc.PeerConnectionStateConnected {
 		return
 	}
@@ -81,7 +81,7 @@ func (t *clientTrack) push(rtp *rtp.Packet, _ QualityLevel) {
 		// do something here with audio level
 	}
 
-	if err := t.localTrack.WriteRTP(rtp); err != nil {
+	if err := t.localTrack.WriteRTP(&p); err != nil {
 		glog.Error("clienttrack: error on write rtp", err)
 	}
 }

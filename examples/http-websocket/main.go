@@ -70,10 +70,11 @@ func main() {
 	flag.Set("stderrthreshold", "INFO")
 
 	ctx, cancel := context.WithCancel(context.Background())
+
 	defer cancel()
 
 	sfuOpts := sfu.DefaultOptions()
-	sfuOpts.EnableMux = false
+	sfuOpts.EnableMux = true
 	sfuOpts.EnableBandwidthEstimator = true
 
 	_, turnEnabled := os.LookupEnv("TURN_ENABLED")
@@ -102,8 +103,8 @@ func main() {
 
 	fakeClientCount := 0
 	localIp, _ := sfu.GetLocalIp()
-	turnServer := sfu.StartTurnServer(ctx, localIp.String())
-	defer turnServer.Close()
+	// turnServer := sfu.StartTurnServer(ctx, localIp.String())
+	// defer turnServer.Close()
 
 	iceServers := []webrtc.ICEServer{
 		{

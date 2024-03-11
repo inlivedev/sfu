@@ -58,7 +58,7 @@ func (m *Manager) AddExtension(extension IManagerExtension) {
 }
 
 func (m *Manager) CreateRoomID() string {
-	return GenerateID()
+	return GenerateID(16)
 }
 
 func (m *Manager) Name() string {

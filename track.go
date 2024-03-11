@@ -67,7 +67,7 @@ type ITrack interface {
 type Track struct {
 	context          context.Context
 	cancel           context.CancelFunc
-	mu               sync.Mutex
+	mu               sync.RWMutex
 	base             baseTrack
 	remoteTrack      *remoteTrack
 	onEndedCallbacks []func()
@@ -93,21 +93,20 @@ func newTrack(ctx context.Context, clientID string, trackRemote IRemoteTrack, pl
 	}
 
 	t := &Track{
-		mu:               sync.Mutex{},
+		mu:               sync.RWMutex{},
 		base:             baseTrack,
 		onReadCallbacks:  make([]func(*rtp.Packet, QualityLevel), 0),
 		onEndedCallbacks: make([]func(), 0),
 	}
 
 	onRead := func(p *rtp.Packet) {
-		// do
 		tracks := t.base.clientTracks.GetTracks()
 
 		for _, track := range tracks {
-			track.push(p, QualityHigh)
+			track.push(*p, QualityHigh)
 		}
 
-		go t.onRead(p, QualityHigh)
+		t.onRead(copyRTPPacket(p), QualityHigh)
 	}
 
 	t.remoteTrack = newRemoteTrack(ctx, trackRemote, pliInterval, onPLI, stats, onStatsUpdated, onRead)
@@ -272,6 +271,9 @@ func (t *Track) OnRead(callback func(*rtp.Packet, QualityLevel)) {
 }
 
 func (t *Track) onRead(p *rtp.Packet, quality QualityLevel) {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
 	for _, callback := range t.onReadCallbacks {
 		callback(p, quality)
 	}
@@ -466,10 +468,10 @@ func (t *SimulcastTrack) AddRemoteTrack(ctx context.Context, track IRemoteTrack,
 
 		tracks := t.base.clientTracks.GetTracks()
 		for _, track := range tracks {
-			track.push(p, quality)
+			track.push(*p, quality)
 		}
 
-		go t.onRead(p, quality)
+		t.onRead(copyRTPPacket(p), quality)
 
 	}
 

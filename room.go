@@ -127,7 +127,7 @@ func newRoom(id, name string, sfu *SFU, kind string, opts RoomOptions) *Room {
 		context:    localContext,
 		cancel:     cancel,
 		sfu:        sfu,
-		token:      GenerateID(),
+		token:      GenerateID(21),
 		stats:      make(map[string]*ClientStats),
 		state:      StateRoomOpen,
 		name:       name,
@@ -261,7 +261,7 @@ func (r *Room) AddClient(id, name string, opts ClientOptions) (*Client, error) {
 
 // Generate a unique client ID for this room
 func (r *Room) CreateClientID() string {
-	return GenerateID()
+	return GenerateID(21)
 }
 
 // Use this to get notified when a room is closed
