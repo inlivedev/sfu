@@ -1,10 +1,8 @@
 package sfu
 
 import (
-	"context"
 	"encoding/binary"
 	"errors"
-	"sync"
 
 	"github.com/golang/glog"
 	"github.com/pion/rtp"
@@ -17,20 +15,12 @@ var (
 )
 
 type clientTrackRed struct {
-	id           string
-	context      context.Context
-	cancel       context.CancelFunc
-	mu           sync.RWMutex
-	client       *Client
-	kind         webrtc.RTPCodecType
-	mimeType     string
-	localTrack   *webrtc.TrackLocalStaticRTP
-	remoteTrack  *remoteTrack
+	*clientTrack
 	isReceiveRed bool
 }
 
 func newClientTrackRed(c *Client, t *Track) *clientTrackRed {
-	ctx, cancel := context.WithCancel(t.Context())
+
 	mimeType := t.remoteTrack.track.Codec().MimeType
 	localTrack := t.createLocalTrack()
 
@@ -39,36 +29,16 @@ func newClientTrackRed(c *Client, t *Track) *clientTrackRed {
 		localTrack = t.createOpusLocalTrack()
 	}
 
+	ctBase := newClientTrack(c, t, false)
+	ctBase.mimeType = mimeType
+	ctBase.localTrack = localTrack
+
 	ct := &clientTrackRed{
-		id:           GenerateID(16),
-		context:      ctx,
-		cancel:       cancel,
-		mu:           sync.RWMutex{},
-		client:       c,
-		kind:         t.base.kind,
-		mimeType:     mimeType,
-		localTrack:   localTrack,
-		remoteTrack:  t.remoteTrack,
+		clientTrack:  ctBase,
 		isReceiveRed: c.receiveRED,
 	}
 
 	return ct
-}
-
-func (t *clientTrackRed) ID() string {
-	return t.id
-}
-
-func (t *clientTrackRed) Context() context.Context {
-	return t.context
-}
-
-func (t *clientTrackRed) Client() *Client {
-	return t.client
-}
-
-func (t *clientTrackRed) Kind() webrtc.RTPCodecType {
-	return t.remoteTrack.track.Kind()
 }
 
 func (t *clientTrackRed) push(p rtp.Packet, _ QualityLevel) {
@@ -85,49 +55,17 @@ func (t *clientTrackRed) push(p rtp.Packet, _ QualityLevel) {
 	}
 }
 
-func (t *clientTrackRed) LocalTrack() *webrtc.TrackLocalStaticRTP {
-	return t.localTrack
-}
-
-func (t *clientTrackRed) IsScreen() bool {
-	return false
-}
-
-func (t *clientTrackRed) SetSourceType(_ TrackType) {
-	// do nothing
-}
-
-func (t *clientTrackRed) IsSimulcast() bool {
-	return false
-}
-
-func (t *clientTrackRed) IsScaleable() bool {
-	return false
-}
-
-func (t *clientTrackRed) RequestPLI() {
-	t.remoteTrack.sendPLI()
-}
-
-func (t *clientTrackRed) SetMaxQuality(_ QualityLevel) {
-	// do nothing
-}
-
-func (t *clientTrackRed) MaxQuality() QualityLevel {
-	return QualityHigh
-}
-
-func (t *clientTrackRed) getPrimaryEncoding(rtp rtp.Packet) rtp.Packet {
-	payload, err := extractPrimaryEncodingForRED(rtp.Payload)
+func (t *clientTrackRed) getPrimaryEncoding(p rtp.Packet) rtp.Packet {
+	payload, err := extractPrimaryEncodingForRED(p.Payload)
 	if err != nil {
 		glog.Error("clienttrack: error on extract primary encoding for red", err)
-		return rtp
+		return p
 	}
 
-	rtp.Payload = payload
+	p.Payload = payload
 	// set to opus payload type
-	rtp.PayloadType = 111
-	return rtp
+	p.PayloadType = 111
+	return p
 }
 
 // // Credit to Livekit

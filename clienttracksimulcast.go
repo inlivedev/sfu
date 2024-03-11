@@ -11,11 +11,6 @@ import (
 	"github.com/pion/webrtc/v3"
 )
 
-type simulcastPacket struct {
-	packet  rtp.Packet
-	quality QualityLevel
-}
-
 type simulcastClientTrack struct {
 	id                      string
 	mu                      sync.RWMutex
@@ -35,6 +30,7 @@ type simulcastClientTrack struct {
 	isScreen                *atomic.Bool
 	isEnded                 *atomic.Bool
 	onTrackEndedCallbacks   []func()
+	packetPool              sync.Pool
 }
 
 func newSimulcastClientTrack(c *Client, t *SimulcastTrack) *simulcastClientTrack {
@@ -72,6 +68,11 @@ func newSimulcastClientTrack(c *Client, t *SimulcastTrack) *simulcastClientTrack
 		isScreen:                isScreen,
 		isEnded:                 &atomic.Bool{},
 		onTrackEndedCallbacks:   make([]func(), 0),
+		packetPool: sync.Pool{
+			New: func() interface{} {
+				return &rtp.Packet{}
+			},
+		},
 	}
 
 	ct.SetMaxQuality(QualityHigh)
@@ -304,4 +305,14 @@ func (t *simulcastClientTrack) rewritePacket(p *rtp.Packet, quality QualityLevel
 
 func (t *simulcastClientTrack) RequestPLI() {
 	t.remoteTrack.sendPLI(t.LastQuality())
+}
+
+func (t *simulcastClientTrack) ResetPacketPoolAllocation(localPacket *rtp.Packet) {
+	*localPacket = rtp.Packet{}
+	t.packetPool.Put(localPacket)
+}
+
+func (t *simulcastClientTrack) GetPacketAllocationFromPool() *rtp.Packet {
+	ipacket := t.packetPool.Get()
+	return ipacket.(*rtp.Packet) //nolint:forcetypeassert
 }

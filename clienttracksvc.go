@@ -1,13 +1,9 @@
 package sfu
 
 import (
-	"context"
-	"sync"
-
 	"github.com/golang/glog"
 	"github.com/pion/rtp"
 	"github.com/pion/rtp/codecs"
-	"github.com/pion/webrtc/v3"
 )
 
 type IQualityPreset interface {
@@ -78,21 +74,12 @@ func DefaultQualityPreset() QualityPreset {
 }
 
 type scaleableClientTrack struct {
-	id              string
-	context         context.Context
-	cancel          context.CancelFunc
-	mu              sync.RWMutex
-	client          *Client
-	kind            webrtc.RTPCodecType
-	mimeType        string
-	localTrack      *webrtc.TrackLocalStaticRTP
-	remoteTrack     *Track
+	*clientTrack
 	lastQuality     QualityLevel
 	maxQuality      QualityLevel
 	tid             uint8
 	sid             uint8
 	lastTimestamp   uint32
-	isScreen        bool
 	dropCounter     uint16
 	qualityPreset   QualityPreset
 	hasInterPicture bool
@@ -104,19 +91,9 @@ func newScaleableClientTrack(
 	t *Track,
 	qualityPreset QualityPreset,
 ) *scaleableClientTrack {
-	ctx, cancel := context.WithCancel(t.Context())
 
 	sct := &scaleableClientTrack{
-		context:       ctx,
-		cancel:        cancel,
-		mu:            sync.RWMutex{},
-		id:            GenerateID(16),
-		kind:          t.base.kind,
-		mimeType:      t.base.codec.MimeType,
-		client:        c,
-		localTrack:    t.createLocalTrack(),
-		remoteTrack:   t,
-		isScreen:      t.IsScreen(),
+		clientTrack:   newClientTrack(c, t, false),
 		qualityPreset: qualityPreset,
 		maxQuality:    QualityHigh,
 		lastQuality:   QualityHigh,
@@ -125,17 +102,6 @@ func newScaleableClientTrack(
 	}
 
 	return sct
-}
-
-func (t *scaleableClientTrack) Client() *Client {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-
-	return t.client
-}
-
-func (t *scaleableClientTrack) Context() context.Context {
-	return t.context
 }
 
 func (t *scaleableClientTrack) isKeyframe(vp9 *codecs.VP9Packet) bool {
@@ -160,7 +126,7 @@ func (t *scaleableClientTrack) isKeyframe(vp9 *codecs.VP9Packet) bool {
 func (t *scaleableClientTrack) push(p rtp.Packet, _ QualityLevel) {
 	// detect late packet
 	if IsRTPPacketLate(p.Header.SequenceNumber, t.lastSequence) {
-		glog.Warning("scalabletrack: packet SSRC ", t.RemoteTrack().track.SSRC(), " client ", t.client.ID(), " sequence ", p.SequenceNumber, " is late, last sequence ", t.lastSequence)
+		glog.Warning("scalabletrack: packet SSRC ", t.remoteTrack.track.SSRC(), " client ", t.client.ID(), " sequence ", p.SequenceNumber, " is late, last sequence ", t.lastSequence)
 		// return
 	}
 
@@ -278,26 +244,6 @@ func (t *scaleableClientTrack) send(p *rtp.Packet) {
 	}
 }
 
-func (t *scaleableClientTrack) RemoteTrack() *remoteTrack {
-	return t.remoteTrack.remoteTrack
-}
-
-func (t *scaleableClientTrack) ID() string {
-	return t.id
-}
-
-func (t *scaleableClientTrack) Kind() webrtc.RTPCodecType {
-	return t.kind
-}
-
-func (t *scaleableClientTrack) LocalTrack() *webrtc.TrackLocalStaticRTP {
-	return t.localTrack
-}
-
-func (t *scaleableClientTrack) IsScreen() bool {
-	return t.isScreen
-}
-
 func (t *scaleableClientTrack) SetSourceType(sourceType TrackType) {
 	t.isScreen = (sourceType == TrackTypeScreen)
 }
@@ -320,7 +266,7 @@ func (t *scaleableClientTrack) SetMaxQuality(quality QualityLevel) {
 	t.maxQuality = quality
 	t.mu.Unlock()
 
-	t.RemoteTrack().sendPLI()
+	t.RequestPLI()
 }
 
 func (t *scaleableClientTrack) MaxQuality() QualityLevel {
@@ -339,7 +285,7 @@ func (t *scaleableClientTrack) IsScaleable() bool {
 }
 
 func (t *scaleableClientTrack) RequestPLI() {
-	t.remoteTrack.remoteTrack.sendPLI()
+	t.remoteTrack.sendPLI()
 }
 
 func (t *scaleableClientTrack) getQuality() QualityLevel {

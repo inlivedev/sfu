@@ -30,6 +30,7 @@ type remoteTrack struct {
 	statsGetter           stats.Getter
 	onStatsUpdated        func(*stats.Stats)
 	packetBuffers         *packetBuffers
+	packetPool            sync.Pool
 }
 
 func newRemoteTrack(ctx context.Context, track IRemoteTrack, pliInterval time.Duration, onPLI func(), statsGetter stats.Getter, onStatsUpdated func(*stats.Stats), onRead func(*rtp.Packet)) *remoteTrack {
@@ -48,7 +49,12 @@ func newRemoteTrack(ctx context.Context, track IRemoteTrack, pliInterval time.Du
 		onStatsUpdated:        onStatsUpdated,
 		onPLI:                 onPLI,
 		onRead:                onRead,
-		packetBuffers:         newPacketBuffers(20*time.Millisecond, 100*time.Millisecond),
+		packetBuffers:         newPacketBuffers(0, 100*time.Millisecond),
+		packetPool: sync.Pool{
+			New: func() interface{} {
+				return &rtp.Packet{}
+			},
+		},
 	}
 
 	if pliInterval > 0 {
@@ -57,8 +63,6 @@ func newRemoteTrack(ctx context.Context, track IRemoteTrack, pliInterval time.Du
 
 	go rt.readRTP()
 
-	go rt.bufferLoop()
-
 	return rt
 }
 
@@ -66,7 +70,18 @@ func (t *remoteTrack) Context() context.Context {
 	return t.context
 }
 
+func (t *remoteTrack) ResetPacketPoolAllocation(localPacket *rtp.Packet) {
+	*localPacket = rtp.Packet{}
+	t.packetPool.Put(localPacket)
+}
+
+func (t *remoteTrack) GetPacketAllocationFromPool() *rtp.Packet {
+	ipacket := t.packetPool.Get()
+	return ipacket.(*rtp.Packet) //nolint:forcetypeassert
+}
+
 func (t *remoteTrack) readRTP() {
+
 	defer t.cancel()
 	for {
 		select {
@@ -85,51 +100,19 @@ func (t *remoteTrack) readRTP() {
 			}
 
 			if p != nil {
-				_ = t.packetBuffers.Add(copyRTPPacket(p))
+				packet := t.GetPacketAllocationFromPool()
+				*packet = *p
+				_ = t.packetBuffers.Add(packet)
 
 				if !t.IsRelay() {
 					go t.updateStats()
 				}
 			}
-		}
-	}
-}
 
-func (t *remoteTrack) bufferLoop() {
-	ctx, cancel := context.WithCancel(t.context)
-	interval := t.packetBuffers.MinLatency()
-
-	ticker := time.NewTicker(interval)
-
-	defer func() {
-		t.packetBuffers.Clear()
-		ticker.Stop()
-		cancel()
-	}()
-
-	intervalResetTime := time.Now()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
 			pkts := t.packetBuffers.Flush()
-			if len(pkts) == 0 && interval < t.packetBuffers.MaxLatency() {
-				interval = interval * 105 / 100
-				glog.Warning("remotetrack: no packets in buffer, increasing interval: ", interval)
-				ticker.Reset(interval)
-				intervalResetTime = time.Now()
-				continue
-			} else if time.Since(intervalResetTime) > 10*time.Second && interval > t.packetBuffers.MinLatency() {
-				interval = interval * 95 / 100
-				glog.Warning("remotetrack: stable interval, try decreasing interval: ", interval)
-				ticker.Reset(interval)
-				intervalResetTime = time.Now()
-			}
-
 			for i := 0; i < len(pkts); i++ {
 				t.onRead(pkts[i])
+				t.ResetPacketPoolAllocation(pkts[i])
 			}
 		}
 	}
