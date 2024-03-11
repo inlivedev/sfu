@@ -10,7 +10,10 @@ import (
 	"github.com/pion/rtp"
 )
 
-var ErrPacketTooLate = errors.New("packet is too late")
+var (
+	ErrPacketTooLate   = errors.New("packetbuffers: packet is too late")
+	ErrPacketDuplicate = errors.New("packetbuffers: packet is duplicate")
+)
 
 // buffer ring for cached packets
 type packetBuffers struct {
@@ -83,7 +86,7 @@ Loop:
 		if currentPkt.RTP.SequenceNumber == pkt.SequenceNumber {
 			glog.Warning("packet cache: packet sequence ", pkt.SequenceNumber, " already exists in the cache, will not adding the packet")
 
-			return nil
+			return ErrPacketDuplicate
 		}
 
 		if currentPkt.RTP.SequenceNumber < pkt.SequenceNumber && pkt.SequenceNumber-currentPkt.RTP.SequenceNumber < uint16SizeHalf {
