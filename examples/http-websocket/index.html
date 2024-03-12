@@ -186,8 +186,10 @@
                         await peerConnection.setLocalDescription(answer);
                         ws.send(JSON.stringify({type:'answer',data:answer.sdp}));
 						negotiationNeeded = false
-                    } else if (msg.type == 'answer') {
+						console.log("client send answer", answer)
+					} else if (msg.type == 'answer') {
                         await peerConnection.setRemoteDescription(msg.data);
+						console.log("client received answer",peerConnection.currentRemoteDescription)
 						negotiationNeeded = false
                     } else if (msg.type == 'candidate') {
                         await peerConnection.addIceCandidate(msg.data);

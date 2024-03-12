@@ -120,7 +120,8 @@ type Client struct {
 	internalDataChannel   *webrtc.DataChannel
 	dataChannels          *DataChannelList
 	estimator             cc.BandwidthEstimator
-	initialTracksCount    atomic.Uint32
+	initialReceiverCount  atomic.Uint32
+	initialSenderCount    atomic.Uint32
 	isInRenegotiation     *atomic.Bool
 	isInRemoteNegotiation *atomic.Bool
 	IsSubscribeAllTracks  *atomic.Bool
@@ -328,6 +329,17 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		vad:                            vad,
 	}
 
+	// make sure the exisiting data channels is created on new clients
+	s.createExistingDataChannels(client)
+
+	var internalDataChannel *webrtc.DataChannel
+
+	if internalDataChannel, err = client.createInternalDataChannel("internal", client.onInternalMessage); err != nil {
+		glog.Error("client: error create internal data channel ", err)
+	}
+
+	client.internalDataChannel = internalDataChannel
+
 	peerConnection.OnConnectionStateChange(func(connectionState webrtc.PeerConnectionState) {
 
 		glog.Info("client: connection state changed ", connectionState.String())
@@ -339,17 +351,6 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 			if client.state.Load() == ClientStateNew {
 				client.state.Store(ClientStateActive)
 				client.onJoined()
-
-				// make sure the exisiting data channels is created on new clients
-				s.createExistingDataChannels(client)
-
-				var internalDataChannel *webrtc.DataChannel
-
-				if internalDataChannel, err = client.createInternalDataChannel("internal", client.onInternalMessage); err != nil {
-					glog.Error("client: error create internal data channel ", err)
-				}
-
-				client.internalDataChannel = internalDataChannel
 
 				// trigger available tracks from other clients
 
@@ -379,14 +380,8 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 				}
 			}
 
-			var negotiated bool
-
 			if len(client.pendingReceivedTracks) > 0 {
 				client.processPendingTracks()
-				negotiated = true
-			}
-
-			if !negotiated {
 				client.renegotiate()
 			}
 
@@ -439,6 +434,11 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		remoteTrackID := strings.ReplaceAll(strings.ReplaceAll(remoteTrack.ID(), "{", ""), "}", "")
 
 		defer glog.Info("client: ", client.ID(), " new track ", remoteTrackID, " Kind:", remoteTrack.Kind(), " Codec: ", remoteTrack.Codec().MimeType, " RID: ", remoteTrack.RID(), " Direction: ", receiver.RTPTransceiver().Direction())
+
+		if remoteTrackID == "" {
+			glog.Error("client: error remote track id is empty")
+			return
+		}
 
 		onPLI := func() {
 			if client.peerConnection == nil || client.peerConnection.PC() == nil || client.peerConnection.PC().ConnectionState() != webrtc.PeerConnectionStateConnected {
@@ -632,7 +632,17 @@ func (c *Client) negotiateQueuOp(offer webrtc.SessionDescription) (*webrtc.Sessi
 		c.isInRemoteNegotiation.Store(false)
 	}()
 
-	currentTransceiverCount := len(c.peerConnection.PC().GetTransceivers())
+	currentReceiversCount := 0
+	currentSendersCount := 0
+	for _, trscv := range c.peerConnection.PC().GetTransceivers() {
+		if trscv.Receiver() != nil {
+			currentReceiversCount++
+		}
+
+		if trscv.Sender() != nil {
+			currentSendersCount++
+		}
+	}
 
 	if !c.receiveRED {
 		match, err := regexp.MatchString(`a=rtpmap:63`, offer.SDP)
@@ -642,10 +652,12 @@ func (c *Client) negotiateQueuOp(offer webrtc.SessionDescription) (*webrtc.Sessi
 			c.receiveRED = match
 		}
 	}
+
 	// Set the remote SessionDescription
 	err := c.peerConnection.PC().SetRemoteDescription(offer)
 	if err != nil {
 		glog.Error("client: error set remote description ", err)
+
 		return nil, err
 	}
 
@@ -675,8 +687,25 @@ func (c *Client) negotiateQueuOp(offer webrtc.SessionDescription) (*webrtc.Sessi
 		}
 	}
 
-	initialTrackCount := len(c.peerConnection.PC().GetTransceivers()) - currentTransceiverCount
-	c.initialTracksCount.Store(uint32(initialTrackCount))
+	newReceiversCount := 0
+	newSenderCount := 0
+	for _, trscv := range c.peerConnection.PC().GetTransceivers() {
+		if trscv.Receiver() != nil {
+			newReceiversCount++
+		}
+
+		if trscv.Sender() != nil {
+			newSenderCount++
+		}
+	}
+
+	initialReceiverCount := newReceiversCount - currentReceiversCount
+
+	c.initialReceiverCount.Store(uint32(initialReceiverCount))
+
+	initialSenderCount := newSenderCount - currentSendersCount
+
+	c.initialSenderCount.Store(uint32(initialSenderCount))
 
 	// send pending local candidates if any
 	go c.sendPendingLocalCandidates()

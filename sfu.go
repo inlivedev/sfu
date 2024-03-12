@@ -210,12 +210,13 @@ func (s *SFU) NewClient(id, name string, opts ClientOptions) *Client {
 		// don't publish track when not all the tracks are received
 		// TODO:
 		// 1. need to handle simulcast track because  it will be counted as single track
-		if client.Type() == ClientTypePeer && int(client.initialTracksCount.Load()) > client.pendingPublishedTracks.Length() {
-			glog.Info("sfu: client ", id, " pending published tracks: ", client.pendingPublishedTracks.Length(), " initial tracks count: ", client.initialTracksCount.Load())
+		initialReceiverCount := client.initialReceiverCount.Load()
+		if client.Type() == ClientTypePeer && int(initialReceiverCount) > client.pendingPublishedTracks.Length() {
+			glog.Info("sfu: client ", id, " pending published tracks: ", client.pendingPublishedTracks.Length(), " initial tracks count: ", initialReceiverCount)
 			return
 		}
 
-		glog.Info("sfu: client ", id, " publish tracks, initial tracks count: ", client.initialTracksCount.Load(), " pending published tracks: ", client.pendingPublishedTracks.Length())
+		glog.Info("sfu: client ", id, " publish tracks, initial tracks count: ", initialReceiverCount, " pending published tracks: ", client.pendingPublishedTracks.Length())
 
 		addedTracks := client.pendingPublishedTracks.GetTracks()
 
