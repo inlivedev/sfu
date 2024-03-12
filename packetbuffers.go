@@ -194,7 +194,12 @@ func (p *packetBuffers) Pop() *rtp.Packet {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
-	return p.fetch(p.buffers.Front())
+	frontElement := p.buffers.Front()
+	if frontElement == nil {
+		return nil
+	}
+
+	return p.fetch(frontElement)
 }
 
 func (p *packetBuffers) Flush() []*rtp.Packet {
