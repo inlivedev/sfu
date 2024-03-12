@@ -93,10 +93,10 @@ func (t *remoteTrack) readRTP() {
 				}
 			}
 
-			pkts := t.packetBuffers.Flush()
-			for i := 0; i < len(pkts); i++ {
-				t.onRead(pkts[i])
-				rtpPacketPool.ResetPacketPoolAllocation(pkts[i])
+			orderedPkt := t.packetBuffers.Pop()
+			if orderedPkt != nil {
+				t.onRead(orderedPkt)
+				rtpPacketPool.ResetPacketPoolAllocation(orderedPkt)
 			}
 		}
 	}

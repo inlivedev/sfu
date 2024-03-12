@@ -148,89 +148,53 @@ func (p *packetBuffers) flush() []*rtp.Packet {
 	packets := make([]*rtp.Packet, 0)
 Loop:
 	for e := p.buffers.Front(); p.buffers.Front() != nil; e = p.buffers.Front() {
-		currentPacket := e.Value.(*packet)
-		currentSeq := currentPacket.RTP.SequenceNumber
-		latency := time.Since(currentPacket.AddedTime)
-
-		if !p.init && latency > p.minLatency && e.Next() != nil && !IsRTPPacketLate(e.Next().Value.(*packet).RTP.SequenceNumber, currentSeq) {
-			// first packet to send, but make sure we have the packet in order
-			packets = append(packets, p.pop(e))
-			p.initSequence = currentSeq
-			p.init = true
-		} else if (p.lastSequenceNumber < currentSeq || p.lastSequenceNumber-currentSeq > uint16SizeHalf) && currentSeq-p.lastSequenceNumber == 1 &&
-			(time.Since(currentPacket.AddedTime) > p.minLatency || (p.oldestPacket != nil && time.Since(p.oldestPacket.AddedTime) > p.maxLatency)) {
-			// the current packet is in sequence with the last packet we popped and passed the min latency
-
-			packets = append(packets, p.pop(e))
-
+		pkt := p.fetch(e)
+		if pkt != nil {
+			packets = append(packets, pkt)
 		} else {
-			// there is a gap between the last packet we popped and the current packet
-			// we should wait for the next packet
-
-			// but check with the latency if there is a packet pass the max latency
-			packetLatency := time.Since(currentPacket.AddedTime)
-			// glog.Info("packet latency: ", packetLatency, " gap: ", gap, " currentSeq: ", currentSeq, " nextSeq: ", nextSeq)
-			if packetLatency > p.maxLatency {
-				// we have waited too long, we should send the packets
-				glog.Warning("packet cache: packet sequence ", currentPacket.RTP.SequenceNumber, " latency ", packetLatency, ", reached max latency ", p.maxLatency, ", will sending the packets")
-				packets = append(packets, p.pop(e))
-
-			} else {
-				// we should wait for the next packet
-				break Loop
-			}
+			break Loop
 		}
 	}
 
 	return packets
 }
 
-func (p *packetBuffers) Pop() *rtp.Packet {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
+func (p *packetBuffers) fetch(e *list.Element) *rtp.Packet {
+	currentPacket := e.Value.(*packet)
+	currentSeq := currentPacket.RTP.SequenceNumber
+	latency := time.Since(currentPacket.AddedTime)
 
-Loop:
-	for e := p.buffers.Front(); p.buffers.Front() != nil; e = p.buffers.Front() {
-		currentPacket := e.Value.(*packet)
-		currentSeq := currentPacket.RTP.SequenceNumber
+	if !p.init && latency > p.minLatency && e.Next() != nil && !IsRTPPacketLate(e.Next().Value.(*packet).RTP.SequenceNumber, currentSeq) {
+		// first packet to send, but make sure we have the packet in order
+		p.initSequence = currentSeq
+		p.init = true
+		return p.pop(e)
+	} else if (p.lastSequenceNumber < currentSeq || p.lastSequenceNumber-currentSeq > uint16SizeHalf) && currentSeq-p.lastSequenceNumber == 1 &&
+		(time.Since(currentPacket.AddedTime) > p.minLatency || (p.oldestPacket != nil && time.Since(p.oldestPacket.AddedTime) > p.maxLatency)) {
+		// the current packet is in sequence with the last packet we popped and passed the min latency
+		return p.pop(e)
+	} else {
+		// there is a gap between the last packet we popped and the current packet
+		// we should wait for the next packet
 
-		if !p.init {
-			// first packet to send, return immediately
-			latency := time.Since(currentPacket.AddedTime)
-			if latency > p.minLatency {
-				p.init = true
-
-				return p.pop(e)
-			}
-
-			break Loop
-		} else if (p.lastSequenceNumber < currentSeq || p.lastSequenceNumber-currentSeq > uint16SizeHalf) && currentSeq-p.lastSequenceNumber == 1 &&
-			(time.Since(currentPacket.AddedTime) > p.minLatency || (p.oldestPacket != nil && time.Since(p.oldestPacket.AddedTime) > p.maxLatency)) {
-			// the current packet is in sequence with the last packet we popped and passed the min latency
-
+		// but check with the latency if there is a packet pass the max latency
+		packetLatency := time.Since(currentPacket.AddedTime)
+		// glog.Info("packet latency: ", packetLatency, " gap: ", gap, " currentSeq: ", currentSeq, " nextSeq: ", nextSeq)
+		if packetLatency > p.maxLatency {
+			// we have waited too long, we should send the packets
+			glog.Warning("packet cache: packet sequence ", currentPacket.RTP.SequenceNumber, " latency ", packetLatency, ", reached max latency ", p.maxLatency, ", will sending the packets")
 			return p.pop(e)
-
-		} else {
-			// there is a gap between the last packet we popped and the current packet
-			// we should wait for the next packet
-
-			// but check with the latency if there is a packet pass the max latency
-			packetLatency := time.Since(currentPacket.AddedTime)
-			// glog.Info("packet latency: ", packetLatency, " gap: ", gap, " currentSeq: ", currentSeq, " nextSeq: ", nextSeq)
-			if packetLatency > p.maxLatency {
-				// we have waited too long, we should send the packets
-				glog.Warning("packet cache: packet sequence ", currentPacket.RTP.SequenceNumber, " latency ", packetLatency, ", reached max latency ", p.maxLatency, ", will sending the packets")
-				return p.pop(e)
-
-			} else {
-				// we should wait for the next packet
-				break Loop
-			}
-
 		}
 	}
 
 	return nil
+}
+
+func (p *packetBuffers) Pop() *rtp.Packet {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	return p.fetch(p.buffers.Front())
 }
 
 func (p *packetBuffers) Flush() []*rtp.Packet {
