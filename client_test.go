@@ -11,7 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestTracksManualSubscribe(t *testing.T) {
+func TestTracksSubscribe(t *testing.T) {
 	t.Parallel()
 
 	roomID := roomManager.CreateRoomID()
@@ -32,18 +32,6 @@ func TestTracksManualSubscribe(t *testing.T) {
 
 	for i := 0; i < peerCount; i++ {
 		pc, client, _, _ := CreatePeerPair(ctx, testRoom, DefaultTestIceServers(), fmt.Sprintf("peer-%d", i), true, false)
-		client.OnTracksAvailable(func(availableTracks []ITrack) {
-			tracksAvailableChan <- len(availableTracks)
-			tracksReq := make([]SubscribeTrackRequest, 0)
-			for _, track := range availableTracks {
-				tracksReq = append(tracksReq, SubscribeTrackRequest{
-					ClientID: track.ClientID(),
-					TrackID:  track.ID(),
-				})
-			}
-			err := client.SubscribeTracks(tracksReq)
-			require.NoError(t, err)
-		})
 
 		client.OnTracksAdded(func(addedTracks []ITrack) {
 			tracksAddedChan <- len(addedTracks)
@@ -88,64 +76,6 @@ Loop:
 	}
 
 	require.Equal(t, peerCount*2, tracksAdded)
-	require.Equal(t, expectedTracks, trackReceived)
-}
-
-func TestAutoSubscribeTracks(t *testing.T) {
-	t.Parallel()
-
-	roomID := roomManager.CreateRoomID()
-	roomName := "test-room"
-
-	peerCount := 5
-
-	// create new room
-	roomOpts := DefaultRoomOptions()
-	roomOpts.Codecs = []string{webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
-	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal, roomOpts)
-	require.NoError(t, err, "error creating room: %v", err)
-	ctx := testRoom.sfu.context
-
-	trackChan := make(chan bool)
-
-	for i := 0; i < peerCount; i++ {
-		pc, client, _, _ := CreatePeerPair(ctx, testRoom, DefaultTestIceServers(), fmt.Sprintf("peer-%d", i), true, false)
-		client.SubscribeAllTracks()
-
-		client.OnTracksAdded(func(addedTracks []ITrack) {
-			setTracks := make(map[string]TrackType, 0)
-			for _, track := range addedTracks {
-				setTracks[track.ID()] = TrackTypeMedia
-			}
-			client.SetTracksSourceType(setTracks)
-		})
-
-		pc.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
-			trackChan <- true
-		})
-	}
-
-	timeout, cancelTimeout := context.WithTimeout(ctx, 30*time.Second)
-	defer cancelTimeout()
-
-	trackReceived := 0
-	expectedTracks := (peerCount * 2) * (peerCount - 1)
-
-Loop:
-	for {
-		select {
-		case <-timeout.Done():
-			break Loop
-
-		case <-trackChan:
-			trackReceived++
-			if trackReceived == expectedTracks {
-				break Loop
-			}
-		}
-
-	}
-
 	require.Equal(t, expectedTracks, trackReceived)
 }
 
@@ -246,7 +176,7 @@ func TestClientDataChannel(t *testing.T) {
 	require.NoError(t, err, "error creating room: %v", err)
 	ctx := testRoom.sfu.context
 	dcChan := make(chan *webrtc.DataChannel)
-	_, _, _, _ = CreateDataPair(ctx, testRoom, roomManager.options.IceServers, "peer1", func(c *webrtc.DataChannel) {
+	pc, client, _, connChan := CreateDataPair(ctx, testRoom, roomManager.options.IceServers, "peer1", func(c *webrtc.DataChannel) {
 		dcChan <- c
 	})
 
@@ -257,6 +187,12 @@ func TestClientDataChannel(t *testing.T) {
 	select {
 	case <-timeout.Done():
 		t.Fatal("timeout waiting for data channel")
+	case state := <-connChan:
+		if state == webrtc.PeerConnectionStateConnected {
+			pc.CreateDataChannel("test", nil)
+
+			negotiate(pc, client)
+		}
 	case dc := <-dcChan:
 		require.Equal(t, "internal", dc.Label())
 	}

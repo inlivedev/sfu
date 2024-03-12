@@ -340,7 +340,7 @@ func (s *SFU) onTracksAvailable(clientId string, tracks []ITrack) {
 	defer s.mu.Unlock()
 
 	for _, client := range s.clients.GetClients() {
-		if client.ID() != clientId && !client.IsSubscribeAllTracks.Load() {
+		if client.ID() != clientId {
 			client.onTracksAvailable(tracks)
 			glog.Info("sfu: client ", client.ID(), " tracks available ", len(tracks))
 		}
@@ -363,7 +363,7 @@ func (s *SFU) broadcastTracksToAutoSubscribeClients(ownerID string, tracks []ITr
 	}
 
 	for _, client := range s.clients.GetClients() {
-		if ownerID != client.ID() && client.IsSubscribeAllTracks.Load() {
+		if ownerID != client.ID() {
 			if err := client.SubscribeTracks(trackReq); err != nil {
 				glog.Error("client: failed to subscribe tracks ", err)
 			}

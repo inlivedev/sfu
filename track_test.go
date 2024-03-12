@@ -70,8 +70,6 @@ func createPeerAudio(ctx context.Context, room *Room, iceServers []webrtc.ICESer
 
 	client, _ = room.AddClient(id, id, opts)
 
-	client.SubscribeAllTracks()
-
 	client.OnAllowedRemoteRenegotiation(func() {
 		glog.Info("allowed remote renegotiation")
 		negotiate(pc, client)

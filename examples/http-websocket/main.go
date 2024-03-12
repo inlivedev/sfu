@@ -121,7 +121,6 @@ func main() {
 	for i := 0; i < fakeClientCount; i++ {
 		// create a fake client
 		fc := fakeclient.Create(ctx, defaultRoom, iceServers, fmt.Sprintf("fake-client-%d", i), true)
-		fc.Client.SubscribeAllTracks()
 
 		fc.Client.OnTracksAdded(func(addedTracks []sfu.ITrack) {
 			setTracks := make(map[string]sfu.TrackType, 0)

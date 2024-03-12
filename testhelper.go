@@ -460,6 +460,27 @@ func CreatePeerPair(ctx context.Context, room *Room, iceServers []webrtc.ICEServ
 	id := room.CreateClientID()
 	client, _ = room.AddClient(id, id, DefaultClientOptions())
 
+	client.OnTracksAdded(func(addedTracks []ITrack) {
+		setTracks := make(map[string]TrackType, 0)
+		for _, track := range addedTracks {
+			setTracks[track.ID()] = TrackTypeMedia
+		}
+		client.SetTracksSourceType(setTracks)
+	})
+
+	client.OnTracksAvailable(func(availableTracks []ITrack) {
+		subTracks := make([]SubscribeTrackRequest, 0)
+
+		for _, t := range availableTracks {
+			subTracks = append(subTracks, SubscribeTrackRequest{
+				ClientID: t.ClientID(),
+				TrackID:  t.ID(),
+			})
+		}
+
+		_ = client.SubscribeTracks(subTracks)
+	})
+
 	client.OnRenegotiation(func(ctx context.Context, offer webrtc.SessionDescription) (answer webrtc.SessionDescription, e error) {
 		if client.state.Load() == ClientStateEnded {
 			glog.Info("test: renegotiation canceled because client has ended")

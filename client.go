@@ -124,7 +124,6 @@ type Client struct {
 	initialSenderCount    atomic.Uint32
 	isInRenegotiation     *atomic.Bool
 	isInRemoteNegotiation *atomic.Bool
-	IsSubscribeAllTracks  *atomic.Bool
 	idleTimeoutContext    context.Context
 	idleTimeoutCancel     context.CancelFunc
 	mu                    sync.RWMutex
@@ -305,7 +304,6 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		canAddCandidate:                &atomic.Bool{},
 		isInRenegotiation:              &atomic.Bool{},
 		isInRemoteNegotiation:          &atomic.Bool{},
-		IsSubscribeAllTracks:           &atomic.Bool{},
 		dataChannels:                   NewDataChannelList(),
 		mu:                             sync.RWMutex{},
 		negotiationNeeded:              &atomic.Bool{},
@@ -1309,12 +1307,6 @@ func (c *Client) SubscribeTracks(req []SubscribeTrackRequest) error {
 	}
 
 	return nil
-}
-
-func (c *Client) SubscribeAllTracks() {
-	c.IsSubscribeAllTracks.Store(true)
-
-	c.sfu.syncTrack(c)
 }
 
 // SetQuality method is to set the maximum quality of the video that will be sent to the client.

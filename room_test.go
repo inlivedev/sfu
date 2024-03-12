@@ -169,7 +169,6 @@ func TestRoomStats(t *testing.T) {
 	})
 
 	pc1, client1, statsGetter1, done1 := CreatePeerPair(ctx, testRoom, DefaultTestIceServers(), "peer1", false, false)
-	client1.SubscribeAllTracks()
 
 	client1.OnTracksAdded(func(addedTracks []ITrack) {
 		setTracks := make(map[string]TrackType, 0)
@@ -180,7 +179,6 @@ func TestRoomStats(t *testing.T) {
 	})
 
 	pc2, client2, statsGetter2, done2 := CreatePeerPair(ctx, testRoom, DefaultTestIceServers(), "peer2", false, false)
-	client2.SubscribeAllTracks()
 
 	client2.OnTracksAdded(func(addedTracks []ITrack) {
 		setTracks := make(map[string]TrackType, 0)
