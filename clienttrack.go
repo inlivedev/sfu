@@ -23,8 +23,6 @@ type iClientTrack interface {
 	RequestPLI()
 	SetMaxQuality(quality QualityLevel)
 	MaxQuality() QualityLevel
-	ResetPacketPoolAllocation(localPacket *rtp.Packet)
-	GetPacketAllocationFromPool() *rtp.Packet
 }
 
 type clientTrack struct {
@@ -44,7 +42,7 @@ type clientTrack struct {
 func newClientTrack(c *Client, t *Track, isScreen bool) *clientTrack {
 	ctx, cancel := context.WithCancel(t.Context())
 	ct := &clientTrack{
-		id:          GenerateID(16),
+		id:          t.ID(),
 		context:     ctx,
 		cancel:      cancel,
 		mu:          sync.RWMutex{},
@@ -54,11 +52,6 @@ func newClientTrack(c *Client, t *Track, isScreen bool) *clientTrack {
 		localTrack:  t.createLocalTrack(),
 		remoteTrack: t.remoteTrack,
 		isScreen:    isScreen,
-		packetPool: sync.Pool{
-			New: func() interface{} {
-				return &rtp.Packet{}
-			},
-		},
 	}
 
 	return ct
@@ -127,14 +120,4 @@ func (t *clientTrack) SetMaxQuality(_ QualityLevel) {
 
 func (t *clientTrack) MaxQuality() QualityLevel {
 	return QualityHigh
-}
-
-func (t *clientTrack) ResetPacketPoolAllocation(localPacket *rtp.Packet) {
-	*localPacket = rtp.Packet{}
-	t.packetPool.Put(localPacket)
-}
-
-func (t *clientTrack) GetPacketAllocationFromPool() *rtp.Packet {
-	ipacket := t.packetPool.Get()
-	return ipacket.(*rtp.Packet) //nolint:forcetypeassert
 }

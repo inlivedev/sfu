@@ -103,15 +103,21 @@ func newTrack(ctx context.Context, clientID string, trackRemote IRemoteTrack, pl
 		tracks := t.base.clientTracks.GetTracks()
 
 		for _, track := range tracks {
-			packet := track.GetPacketAllocationFromPool()
+			packet := rtpPacketPool.GetPacketAllocationFromPool()
 
 			*packet = *p
 
 			track.push(*packet, QualityHigh)
-			track.ResetPacketPoolAllocation(packet)
+			rtpPacketPool.ResetPacketPoolAllocation(packet)
 		}
 
-		t.onRead(copyRTPPacket(p), QualityHigh)
+		packet := rtpPacketPool.GetPacketAllocationFromPool()
+
+		*packet = *p
+
+		t.onRead(packet, QualityHigh)
+
+		rtpPacketPool.ResetPacketPoolAllocation(packet)
 	}
 
 	t.remoteTrack = newRemoteTrack(ctx, trackRemote, pliInterval, onPLI, stats, onStatsUpdated, onRead)

@@ -30,7 +30,6 @@ type remoteTrack struct {
 	statsGetter           stats.Getter
 	onStatsUpdated        func(*stats.Stats)
 	packetBuffers         *packetBuffers
-	packetPool            sync.Pool
 }
 
 func newRemoteTrack(ctx context.Context, track IRemoteTrack, pliInterval time.Duration, onPLI func(), statsGetter stats.Getter, onStatsUpdated func(*stats.Stats), onRead func(*rtp.Packet)) *remoteTrack {
@@ -50,11 +49,6 @@ func newRemoteTrack(ctx context.Context, track IRemoteTrack, pliInterval time.Du
 		onPLI:                 onPLI,
 		onRead:                onRead,
 		packetBuffers:         newPacketBuffers(0, 100*time.Millisecond),
-		packetPool: sync.Pool{
-			New: func() interface{} {
-				return &rtp.Packet{}
-			},
-		},
 	}
 
 	if pliInterval > 0 {
@@ -68,16 +62,6 @@ func newRemoteTrack(ctx context.Context, track IRemoteTrack, pliInterval time.Du
 
 func (t *remoteTrack) Context() context.Context {
 	return t.context
-}
-
-func (t *remoteTrack) ResetPacketPoolAllocation(localPacket *rtp.Packet) {
-	*localPacket = rtp.Packet{}
-	t.packetPool.Put(localPacket)
-}
-
-func (t *remoteTrack) GetPacketAllocationFromPool() *rtp.Packet {
-	ipacket := t.packetPool.Get()
-	return ipacket.(*rtp.Packet) //nolint:forcetypeassert
 }
 
 func (t *remoteTrack) readRTP() {
@@ -100,7 +84,7 @@ func (t *remoteTrack) readRTP() {
 			}
 
 			if p != nil {
-				packet := t.GetPacketAllocationFromPool()
+				packet := rtpPacketPool.GetPacketAllocationFromPool()
 				*packet = *p
 				_ = t.packetBuffers.Add(packet)
 
@@ -112,7 +96,7 @@ func (t *remoteTrack) readRTP() {
 			pkts := t.packetBuffers.Flush()
 			for i := 0; i < len(pkts); i++ {
 				t.onRead(pkts[i])
-				t.ResetPacketPoolAllocation(pkts[i])
+				rtpPacketPool.ResetPacketPoolAllocation(pkts[i])
 			}
 		}
 	}

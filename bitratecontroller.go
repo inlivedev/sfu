@@ -3,7 +3,6 @@ package sfu
 import (
 	"context"
 	"errors"
-	"math"
 	"sync"
 	"time"
 
@@ -16,14 +15,6 @@ var (
 	ErrAlreadyClaimed          = errors.New("bwcontroller: already claimed")
 	ErrorInsufficientBandwidth = errors.New("bwcontroller: bandwidth is insufficient")
 )
-
-const (
-	keepBitrate     = 0
-	increaseBitrate = 1
-	decreaseBitrate = -1
-)
-
-type bitrateAdjustment int
 
 type bitrateClaim struct {
 	mu               sync.RWMutex
@@ -50,34 +41,8 @@ func (c *bitrateClaim) Bitrate() uint32 {
 	return c.bitrate
 }
 
-func (c *bitrateClaim) isAllowToIncrease() bool {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-
-	if c.delayCounter > 0 && time.Since(c.lastIncreaseTime) < time.Duration(c.delayCounter)*10*time.Second {
-		glog.Info("clienttrack: delay increase,  delay counter ", c.delayCounter)
-
-		return false
-	}
-
-	return true
-}
-
 func (c *bitrateClaim) IsAdjustable() bool {
 	return c.track.IsSimulcast() || c.track.IsScaleable()
-}
-
-func (c *bitrateClaim) pushbackDelayCounter() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if c.delayCounter == 0 {
-		c.delayCounter = 1
-		return
-	}
-
-	c.delayCounter = int(math.Ceil(float64(c.delayCounter) * 1.5))
-	glog.Info("clienttrack: pushback delay counter to ", c.delayCounter)
 }
 
 type bitrateController struct {
@@ -85,19 +50,13 @@ type bitrateController struct {
 	lastBitrateAdjustmentTS time.Time
 	client                  *Client
 	claims                  map[string]*bitrateClaim
-	useBandwidthEstimation  bool
 }
 
-func newbitrateController(client *Client, intervalMonitor time.Duration, useBandwidthEstimation bool) *bitrateController {
+func newbitrateController(client *Client) *bitrateController {
 	bc := &bitrateController{
-		mu:                     sync.RWMutex{},
-		client:                 client,
-		claims:                 make(map[string]*bitrateClaim, 0),
-		useBandwidthEstimation: useBandwidthEstimation,
-	}
-
-	if !useBandwidthEstimation {
-		bc.start()
+		mu:     sync.RWMutex{},
+		client: client,
+		claims: make(map[string]*bitrateClaim, 0),
 	}
 
 	return bc
@@ -239,7 +198,7 @@ func (bc *bitrateController) addAudioClaims(clientTracks []iClientTrack) (leftTr
 				trackQuality = QualityAudio
 			}
 
-			_, err := bc.addClaim(clientTrack, trackQuality, true)
+			_, err := bc.addClaim(clientTrack, trackQuality)
 
 			if err != nil {
 				errors = append(errors, err)
@@ -308,7 +267,7 @@ func (bc *bitrateController) addClaims(clientTracks []iClientTrack) error {
 				clientTrack.(*scaleableClientTrack).lastQuality = trackQuality
 			}
 
-			_, err := bc.addClaim(clientTrack, trackQuality, true)
+			_, err := bc.addClaim(clientTrack, trackQuality)
 			if err != nil {
 				errors = append(errors, err)
 			}
@@ -323,7 +282,7 @@ func (bc *bitrateController) addClaims(clientTracks []iClientTrack) error {
 	return nil
 }
 
-func (bc *bitrateController) addClaim(clientTrack iClientTrack, quality QualityLevel, locked bool) (*bitrateClaim, error) {
+func (bc *bitrateController) addClaim(clientTrack iClientTrack, quality QualityLevel) (*bitrateClaim, error) {
 	bitrate := bc.client.sfu.QualityLevelToBitrate(quality)
 
 	bc.mu.Lock()
@@ -440,24 +399,6 @@ func (bc *bitrateController) totalSentBitrates() uint32 {
 	return total
 }
 
-func (bc *bitrateController) start() {
-	go func() {
-		context, cancel := context.WithCancel(bc.client.context)
-		defer cancel()
-
-		ticker := time.NewTicker(3 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-context.Done():
-				return
-			case <-ticker.C:
-				bc.checkAndAdjustBitrates()
-			}
-		}
-	}()
-}
-
 func (bc *bitrateController) canDecreaseBitrate() bool {
 	claims := bc.Claims()
 
@@ -569,140 +510,6 @@ func (bc *bitrateController) fitBitratesToBandwidth(bw uint32) {
 	}
 }
 
-// checkAndAdjustBitrates will check if the available bandwidth is enough to send the current bitrate
-// if not then it will try to reduce one by one of simulcast track quality until it fit the bandwidth
-// if the bandwidth is enough to send the current bitrate, then it will try to increase the bitrate
-// each time adjustment needed, it will only increase or decrese single track.
-func (bc *bitrateController) checkAndAdjustBitrates() {
-	currentLowestQuality := QualityLevel(QualityHigh)
-	currentHighestQuality := QualityLevel(QualityNone)
-
-	noneCount := 0
-	lowCount := 0
-	midCount := 0
-	highCount := 0
-	screenCount := 0
-
-	claims := bc.Claims()
-
-	for _, claim := range claims {
-		allActive, quality := bc.checkAllTrackActive(claim)
-		if !allActive {
-			bc.setQuality(claim.track.ID(), quality)
-		}
-
-		if claim.quality < currentLowestQuality {
-			currentLowestQuality = claim.quality
-		}
-
-		if claim.quality > currentHighestQuality {
-			currentHighestQuality = claim.quality
-		}
-
-		if claim.track.IsScreen() {
-			screenCount++
-		}
-
-		switch claim.quality {
-		case QualityNone:
-			noneCount++
-		case QualityLow:
-			lowCount++
-		case QualityMid:
-			midCount++
-		case QualityHigh:
-			highCount++
-		}
-
-	}
-
-	for _, claim := range claims {
-		if claim.IsAdjustable() {
-			maxQuality := claim.track.MaxQuality()
-			if claim.quality > claim.track.MaxQuality() {
-				bc.setQuality(claim.track.ID(), maxQuality)
-			}
-
-			bitrateAdjustment := bc.getBitrateAdjustment(claim)
-
-			if bitrateAdjustment == keepBitrate {
-				if (claim.track.IsSimulcast() && claim.track.(*simulcastClientTrack).remoteTrack.isTrackActive(claim.quality)) || claim.track.IsScaleable() {
-					continue
-				}
-
-				bitrateAdjustment = decreaseBitrate
-			}
-
-			if bitrateAdjustment == decreaseBitrate {
-				if (claim.track.IsSimulcast() || claim.track.IsScaleable()) && claim.quality > QualityLow {
-					reducedQuality := claim.quality - 1
-
-					if claim.quality == QualityLow && midCount+highCount > 0 {
-						continue
-					} else if claim.quality == QualityMid && highCount > 0 {
-						continue
-					}
-
-					if reducedQuality == QualityNone {
-						// never reduce track to none
-						// this could make the ontrack never triggered on the receiver
-						continue
-					} else if claim.track.IsScreen() && bc.isThereNonScreenCanDecrease(currentLowestQuality) {
-						// skip if there is a non screen track can be reduced
-						continue
-					}
-
-					if claim.track.IsSimulcast() {
-						claim.track.(*simulcastClientTrack).remoteTrack.sendPLI(reducedQuality)
-					} else {
-						claim.track.RequestPLI()
-					}
-
-					glog.Info("clienttrack: send pli for track ", claim.track.ID(), " quality ", reducedQuality, " changed from ", claim.quality)
-					bc.setQuality(claim.track.ID(), reducedQuality)
-
-					return
-				}
-
-			} else if bitrateAdjustment == increaseBitrate {
-				if claim.IsAdjustable() && claim.quality < claim.track.MaxQuality() {
-					increasedQuality := claim.quality + 1
-
-					if claim.quality == QualityMid && noneCount+lowCount > 0 {
-						continue
-					} else if claim.quality == QualityLow && noneCount > 0 {
-						continue
-					}
-
-					if !claim.track.IsScreen() && bc.isScreenNeedIncrease(currentHighestQuality) {
-						continue
-					}
-
-					if claim.track.IsSimulcast() {
-						claim.track.(*simulcastClientTrack).remoteTrack.sendPLI(increasedQuality)
-					} else {
-						claim.track.RequestPLI()
-					}
-
-					if bc.client.IsDebugEnabled() {
-						glog.Info("clienttrack: send pli for track ", claim.track.ID(), " quality ", increasedQuality, " changed from ", claim.quality)
-					}
-
-					// don't increase if the quality is higher than allowed max quality
-					if increasedQuality > claim.track.MaxQuality() {
-						continue
-					}
-
-					bc.setQuality(claim.track.ID(), increasedQuality)
-
-					return
-				}
-
-			}
-		}
-	}
-}
-
 func (bc *bitrateController) onRemoteViewedSizeChanged(videoSize videoSize) {
 	bc.mu.RLock()
 	defer bc.mu.RUnlock()
@@ -737,101 +544,6 @@ func (bc *bitrateController) onRemoteViewedSizeChanged(videoSize videoSize) {
 	}
 }
 
-// This bitrate adjuster use packet loss ratio to adjust the bitrate
-// It will check the sender packet loss and compare it with total sent packets to calculate the ratio
-// Ratio 2-10% considereed as good and will keep the bitrate
-// Ratio less than 2% will increase the bitrate
-// Ratio more than 10% will decrease the bitrate
-//
-// Reference
-// https://www.ietf.org/archive/id/draft-alvestrand-rtcweb-congestion-01.html#rfc.section.4
-// https://source.chromium.org/chromium/chromium/src/+/main:third_party/webrtc/modules/congestion_controller/goog_cc/send_side_bandwidth_estimation.cc;l=52
-//
-// TODO:
-// - need to check if the track is keep increase but then decrease again
-// - if it happen twice, then we need to delay when to increase the bitrate
-// - by adding keepBitrate delay counter
-// - each time the bitrate increase it will check the delay counter if not 0 then no increase but decrease the counter
-// - if the counter is 0 then increase the bitrate
-// - if the bitrate back to decrease then the delay counter will add 1.5x of the previous delay counter
-func (bc *bitrateController) getBitrateAdjustment(claim *bitrateClaim) bitrateAdjustment {
-	// don't adjust bitrates too fast
-	if time.Since(claim.lastDecreaseTime) < 2*time.Second || time.Since(claim.lastIncreaseTime) < 2*time.Second {
-		return keepBitrate
-	}
-
-	if claim.track.IsSimulcast() {
-		track := claim.track.(*simulcastClientTrack)
-		switch claim.quality {
-		case QualityHigh:
-			if track.remoteTrack.remoteTrackHigh == nil {
-				return decreaseBitrate
-			}
-		case QualityMid:
-			if track.remoteTrack.remoteTrackMid == nil {
-				return decreaseBitrate
-			}
-		case QualityLow:
-			if track.remoteTrack.remoteTrackLow == nil {
-				return increaseBitrate
-			}
-		}
-	}
-
-	if bc.useBandwidthEstimation {
-		availableBandwidth := bc.client.GetEstimatedBandwidth()
-		return bc.getBitrateBasedAdjustment(availableBandwidth, claim)
-	}
-
-	return bc.getLossBasedAdjustment(claim)
-}
-
-func (bc *bitrateController) getBitrateBasedAdjustment(bandwidth uint32, claim *bitrateClaim) bitrateAdjustment {
-	if claim.track.Kind() == webrtc.RTPCodecTypeAudio || !claim.IsAdjustable() {
-		return keepBitrate
-	}
-
-	totalBitrates := bc.totalSentBitrates()
-	if totalBitrates > bandwidth && claim.quality != QualityNone {
-		// if we got decrease after we increase within short time, then we need to delay the next increase
-		if time.Since(claim.lastIncreaseTime) < 10*time.Second {
-			if bc.client.IsDebugEnabled() {
-				glog.Info("bitrate: track ", claim.track.ID(), " decrease bitrate too fast, delay increase bitrate")
-			}
-			claim.pushbackDelayCounter()
-		}
-
-		if bc.client.IsDebugEnabled() {
-			glog.Info("bitrate: track ", claim.track.ID(), " decrease bitrate. Availabel bandwidth ", ThousandSeparator(int(bandwidth)), " total bitrate ", ThousandSeparator(int(totalBitrates)))
-		}
-
-		return decreaseBitrate
-	} else if totalBitrates < bandwidth && claim.quality != QualityHigh {
-		if !bc.useBandwidthEstimation && !claim.isAllowToIncrease() {
-			if bc.client.IsDebugEnabled() {
-				glog.Info("bitrate: track ", claim.track.ID(), " increase bitrate too fast, delay increase bitrate")
-			}
-			return keepBitrate
-		}
-
-		if !bc.isEnoughBandwidthToIncrase(bandwidth, claim) {
-			if bc.client.IsDebugEnabled() {
-				glog.Info("bitrate: track ", claim.track.ID(), " not enough bandwidth to increase bitrate")
-			}
-
-			return keepBitrate
-		}
-
-		if bc.client.IsDebugEnabled() {
-			glog.Info("bitrate: track ", claim.track.ID(), " increase bitrate. Availabel bandwidth ", ThousandSeparator(int(bandwidth)), " total bitrate ", ThousandSeparator(int(totalBitrates)))
-		}
-
-		return increaseBitrate
-	}
-
-	return keepBitrate
-}
-
 func (bc *bitrateController) isEnoughBandwidthToIncrase(bandwidthLeft uint32, claim *bitrateClaim) bool {
 	nextQuality := claim.Quality() + 1
 
@@ -845,49 +557,4 @@ func (bc *bitrateController) isEnoughBandwidthToIncrase(bandwidthLeft uint32, cl
 	bandwidthGap := nextBitrate - currentBitrate
 
 	return bandwidthGap < bandwidthLeft
-}
-
-func (bc *bitrateController) getLossBasedAdjustment(claim *bitrateClaim) bitrateAdjustment {
-	sender, err := bc.client.stats.GetSender(claim.track.ID())
-	if err != nil {
-		glog.Error("bitrate: track ", claim.track.ID(), " is not exists")
-		return keepBitrate
-	}
-
-	lostSentRatio := sender.RemoteInboundRTPStreamStats.FractionLost
-
-	if lostSentRatio < 0.02 && claim.quality != QualityHigh {
-		if bc.client.IsDebugEnabled() {
-			glog.Info("bitrate: track ", claim.track.ID(), " lost ratio ", lostSentRatio, " can increase bitrate")
-		}
-
-		if !bc.useBandwidthEstimation && !claim.isAllowToIncrease() {
-			if bc.client.IsDebugEnabled() {
-				glog.Info("bitrate: track ", claim.track.ID(), " increase bitrate too fast, delay increase bitrate")
-			}
-			return keepBitrate
-		}
-
-		return increaseBitrate
-	} else if lostSentRatio > 0.1 && claim.quality != QualityNone {
-		if bc.client.IsDebugEnabled() {
-			glog.Info("bitrate: track ", claim.track.ID(), " lost ratio ", lostSentRatio, " need to decrease bitrate")
-		}
-
-		if bc.client.IsDebugEnabled() {
-			glog.Info("last increase time ", time.Since(claim.lastIncreaseTime).Milliseconds(), " ms")
-		}
-
-		// if we got decrease after we increase within short time, then we need to delay the next increase
-		if time.Since(claim.lastIncreaseTime) < 10*time.Second {
-			if bc.client.IsDebugEnabled() {
-				glog.Info("bitrate: track ", claim.track.ID(), " decrease bitrate too fast, delay increase bitrate")
-			}
-			claim.pushbackDelayCounter()
-		}
-
-		return decreaseBitrate
-	}
-
-	return keepBitrate
 }

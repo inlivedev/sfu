@@ -306,13 +306,3 @@ func (t *simulcastClientTrack) rewritePacket(p *rtp.Packet, quality QualityLevel
 func (t *simulcastClientTrack) RequestPLI() {
 	t.remoteTrack.sendPLI(t.LastQuality())
 }
-
-func (t *simulcastClientTrack) ResetPacketPoolAllocation(localPacket *rtp.Packet) {
-	*localPacket = rtp.Packet{}
-	t.packetPool.Put(localPacket)
-}
-
-func (t *simulcastClientTrack) GetPacketAllocationFromPool() *rtp.Packet {
-	ipacket := t.packetPool.Get()
-	return ipacket.(*rtp.Packet) //nolint:forcetypeassert
-}

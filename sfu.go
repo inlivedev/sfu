@@ -117,7 +117,6 @@ type SFU struct {
 	mux                       *UDPMux
 	onStop                    func()
 	pliInterval               time.Duration
-	enableBandwidthEstimator  bool
 	qualityRef                QualityPreset
 	portStart                 uint16
 	portEnd                   uint16
@@ -134,17 +133,16 @@ type PublishedTrack struct {
 }
 
 type sfuOptions struct {
-	IceServers               []webrtc.ICEServer
-	Mux                      *UDPMux
-	PortStart                uint16
-	PortEnd                  uint16
-	Bitrates                 BitrateConfigs
-	QualityPreset            QualityPreset
-	Codecs                   []string
-	PLIInterval              time.Duration
-	EnableBandwidthEstimator bool
-	PublicIP                 string
-	NAT1To1IPsCandidateType  webrtc.ICECandidateType
+	IceServers              []webrtc.ICEServer
+	Mux                     *UDPMux
+	PortStart               uint16
+	PortEnd                 uint16
+	Bitrates                BitrateConfigs
+	QualityPreset           QualityPreset
+	Codecs                  []string
+	PLIInterval             time.Duration
+	PublicIP                string
+	NAT1To1IPsCandidateType webrtc.ICECandidateType
 }
 
 // @Param muxPort: port for udp mux
@@ -161,7 +159,6 @@ func New(ctx context.Context, opts sfuOptions) *SFU {
 		iceServers:                opts.IceServers,
 		mux:                       opts.Mux,
 		bitrateConfigs:            opts.Bitrates,
-		enableBandwidthEstimator:  opts.EnableBandwidthEstimator,
 		pliInterval:               opts.PLIInterval,
 		qualityRef:                opts.QualityPreset,
 		publicIP:                  opts.PublicIP,
@@ -344,6 +341,7 @@ func (s *SFU) onTracksAvailable(clientId string, tracks []ITrack) {
 	for _, client := range s.clients.GetClients() {
 		if client.ID() != clientId && !client.IsSubscribeAllTracks.Load() {
 			client.onTracksAvailable(tracks)
+			glog.Info("sfu: client ", client.ID(), " tracks available ", len(tracks))
 		}
 	}
 

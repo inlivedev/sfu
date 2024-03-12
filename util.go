@@ -478,19 +478,6 @@ func ThousandSeparator(n int) string {
 	return p.Sprintf("%d", n)
 }
 
-func bitrateAdjustmentToString(adjustment bitrateAdjustment) string {
-	switch adjustment {
-	case 0:
-		return "keep"
-	case 1:
-		return "increase"
-	case -1:
-		return "decrease"
-	default:
-		return "none"
-	}
-}
-
 func IsRTPPacketLate(packetSeqNum uint16, lastSeqNum uint16) bool {
 	return lastSeqNum > packetSeqNum && lastSeqNum-packetSeqNum < uint16SizeHalf
 }

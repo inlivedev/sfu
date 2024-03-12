@@ -58,7 +58,6 @@ var (
 )
 
 type ClientOptions struct {
-	Direction            webrtc.RTPTransceiverDirection
 	IdleTimeout          time.Duration
 	Type                 string
 	EnableVoiceDetection bool
@@ -172,7 +171,6 @@ type Client struct {
 
 func DefaultClientOptions() ClientOptions {
 	return ClientOptions{
-		Direction:            webrtc.RTPTransceiverDirectionSendrecv,
 		IdleTimeout:          5 * time.Minute,
 		Type:                 ClientTypePeer,
 		EnableVoiceDetection: false,
@@ -233,33 +231,31 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 
 	estimatorChan := make(chan cc.BandwidthEstimator, 1)
 
-	if s.enableBandwidthEstimator {
-		// Create a Congestion Controller. This analyzes inbound and outbound data and provides
-		// suggestions on how much we should be sending.
-		//
-		// Passing `nil` means we use the default Estimation Algorithm which is Google Congestion Control.
-		// You can use the other ones that Pion provides, or write your own!
-		congestionController, err := cc.NewInterceptor(func() (cc.BandwidthEstimator, error) {
-			// if bw below 100_000, somehow the estimator will struggle to probe the bandwidth and will stuck there. So we set the min to 100_000
-			// TODO: we need to use packet loss based bandwidth adjuster when the bandwidth is below 100_000
-			return gcc.NewSendSideBWE(
-				gcc.SendSideBWEInitialBitrate(int(s.bitrateConfigs.InitialBandwidth)),
-				gcc.SendSideBWEPacer(gcc.NewNoOpPacer()),
-			)
-		})
-		if err != nil {
-			panic(err)
-		}
+	// Create a Congestion Controller. This analyzes inbound and outbound data and provides
+	// suggestions on how much we should be sending.
+	//
+	// Passing `nil` means we use the default Estimation Algorithm which is Google Congestion Control.
+	// You can use the other ones that Pion provides, or write your own!
+	congestionController, err := cc.NewInterceptor(func() (cc.BandwidthEstimator, error) {
+		// if bw below 100_000, somehow the estimator will struggle to probe the bandwidth and will stuck there. So we set the min to 100_000
+		// TODO: we need to use packet loss based bandwidth adjuster when the bandwidth is below 100_000
+		return gcc.NewSendSideBWE(
+			gcc.SendSideBWEInitialBitrate(int(s.bitrateConfigs.InitialBandwidth)),
+			gcc.SendSideBWEPacer(gcc.NewNoOpPacer()),
+		)
+	})
+	if err != nil {
+		panic(err)
+	}
 
-		congestionController.OnNewPeerConnection(func(id string, estimator cc.BandwidthEstimator) {
-			estimatorChan <- estimator
-		})
+	congestionController.OnNewPeerConnection(func(id string, estimator cc.BandwidthEstimator) {
+		estimatorChan <- estimator
+	})
 
-		i.Add(congestionController)
+	i.Add(congestionController)
 
-		if err = webrtc.ConfigureTWCCHeaderExtensionSender(m, i); err != nil {
-			panic(err)
-		}
+	if err = webrtc.ConfigureTWCCHeaderExtensionSender(m, i); err != nil {
+		panic(err)
 	}
 
 	if opts.EnablePlayoutDelay {
@@ -423,19 +419,17 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 
 	client.stats = newClientStats(client)
 
-	client.bitrateController = newbitrateController(client, s.pliInterval, s.enableBandwidthEstimator)
+	client.bitrateController = newbitrateController(client)
 
-	if s.enableBandwidthEstimator {
-		go func() {
-			estimator := <-estimatorChan
-			client.mu.Lock()
-			defer client.mu.Unlock()
+	go func() {
+		estimator := <-estimatorChan
+		client.mu.Lock()
+		defer client.mu.Unlock()
 
-			client.estimator = estimator
+		client.estimator = estimator
 
-			client.bitrateController.MonitorBandwidth(estimator)
-		}()
-	}
+		client.bitrateController.MonitorBandwidth(estimator)
+	}()
 
 	// Set a handler for when a new remote track starts, this just distributes all our packets
 	// to connected peers
@@ -852,7 +846,7 @@ func (c *Client) setClientTrack(t ITrack) iClientTrack {
 
 	localTrack := outputTrack.LocalTrack()
 
-	senderTcv, err := c.peerConnection.PC().AddTransceiverFromTrack(localTrack, webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionSendrecv})
+	senderTcv, err := c.peerConnection.PC().AddTransceiverFromTrack(localTrack, webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionSendonly})
 	if err != nil {
 		glog.Error("client: error on adding track ", err)
 		return nil
@@ -885,7 +879,10 @@ func (c *Client) setClientTrack(t ITrack) iClientTrack {
 			return
 		}
 
-		_ = sender.Stop()
+		err = senderTcv.Stop()
+		if err != nil {
+			glog.Error("client: error stop sender ", err)
+		}
 
 		if err := c.peerConnection.PC().RemoveTrack(sender); err != nil {
 			glog.Error("client: error remove track ", err)
@@ -1209,6 +1206,7 @@ func (c *Client) SetTracksSourceType(trackTypes map[string]TrackType) {
 
 	if len(availableTracks) > 0 {
 		// broadcast to other clients available tracks from this client
+		glog.Info("client: ", c.ID(), " set source tracks ", len(availableTracks))
 		c.sfu.onTracksAvailable(c.ID(), availableTracks)
 	}
 }
