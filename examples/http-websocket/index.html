@@ -130,6 +130,8 @@
 
         let red = true
 
+		let negotiationNeeded = false
+
         peerConnection.ondatachannel = function(e) {
             console.log("ondatachannel: ",e.channel.label);
             if (e.channel.label == "internal") {
@@ -183,8 +185,10 @@
                         var answer = await peerConnection.createAnswer();
                         await peerConnection.setLocalDescription(answer);
                         ws.send(JSON.stringify({type:'answer',data:answer.sdp}));
+						negotiationNeeded = false
                     } else if (msg.type == 'answer') {
                         await peerConnection.setRemoteDescription(msg.data);
+						negotiationNeeded = false
                     } else if (msg.type == 'candidate') {
                         await peerConnection.addIceCandidate(msg.data);
 					} else if (msg.type == 'tracks_added') {
@@ -219,7 +223,7 @@
                         ws.send(JSON.stringify({type:'subscribe_tracks',data:subTracks}));
                     } else if(msg.type =='allow_renegotiation'){
                         const isAllowRenegotiation = msg.data
-                        if (isAllowRenegotiation){
+                        if (isAllowRenegotiation && negotiationNeeded){
                             negotiate()
                         }
                     } else if(msg.type =='track_stats'){
@@ -310,6 +314,7 @@
 
             peerConnection.ontrack = function(e) {
                 e.receiver.playoutDelayHint = 0.1;
+					
                 e.streams.forEach((stream) => {
                     console.log("ontrack", stream, e.track);
 					const streamid = stream.id.replace('{','').replace('}','');
@@ -364,6 +369,7 @@
 							videoObserver.unobserve(remoteVideo)
 						}
                     };
+
                 });
                 
             };
@@ -525,6 +531,7 @@
             await peerConnection.setLocalDescription(offer)
 
             ws.send(JSON.stringify({type:'offer',data:offer.sdp}));
+			console.log("browser send")
 
             peerConnection.onicecandidate = function(e) {
                 if (e.candidate!=null) {
@@ -910,6 +917,7 @@
 
         const isAllowRenegotiation = ()=>{
             ws.send(JSON.stringify({type:'is_allow_renegotiation'}));
+			negotiationNeeded = true
         }
 
         const negotiate = async () => {
