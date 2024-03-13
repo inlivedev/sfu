@@ -107,9 +107,31 @@ func (m *Manager) NewRoom(id, name, roomType string, opts RoomOptions) (*Room, e
 		}
 	})
 
-	room.OnClientLeft(func(client *Client) {
-		// TODO: should check if the room is empty and close it if it is
+	var emptyRoomTimeout context.Context
 
+	var emptyRoomCancel context.CancelFunc
+
+	room.OnClientLeft(func(client *Client) {
+		if room.SFU().clients.Length() == 0 {
+			emptyRoomTimeout, emptyRoomCancel = context.WithTimeout(m.context, room.options.EmptyRoomTimeout)
+			go func() {
+				<-emptyRoomTimeout.Done()
+				if emptyRoomTimeout.Err() == context.DeadlineExceeded {
+					m.mutex.Lock()
+					defer m.mutex.Unlock()
+					room.Close()
+					delete(m.rooms, room.id)
+					emptyRoomCancel = nil
+					emptyRoomTimeout = nil
+				}
+			}()
+		}
+	})
+
+	room.OnClientJoined(func(client *Client) {
+		if emptyRoomTimeout != nil && emptyRoomCancel != nil {
+			emptyRoomCancel()
+		}
 	})
 
 	m.rooms[room.id] = room
