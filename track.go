@@ -74,7 +74,7 @@ type Track struct {
 	onReadCallbacks  []func(*rtp.Packet, QualityLevel)
 }
 
-func newTrack(ctx context.Context, clientID string, trackRemote IRemoteTrack, pliInterval time.Duration, onPLI func(), stats stats.Getter, onStatsUpdated func(*stats.Stats)) ITrack {
+func newTrack(ctx context.Context, clientID string, trackRemote IRemoteTrack, minWait, maxWait, pliInterval time.Duration, onPLI func(), stats stats.Getter, onStatsUpdated func(*stats.Stats)) ITrack {
 	ctList := newClientTrackList()
 
 	remoteTrackID := strings.ReplaceAll(strings.ReplaceAll(trackRemote.ID(), "{", ""), "}", "")
@@ -120,7 +120,7 @@ func newTrack(ctx context.Context, clientID string, trackRemote IRemoteTrack, pl
 		rtpPacketPool.ResetPacketPoolAllocation(packet)
 	}
 
-	t.remoteTrack = newRemoteTrack(ctx, trackRemote, pliInterval, onPLI, stats, onStatsUpdated, onRead)
+	t.remoteTrack = newRemoteTrack(ctx, trackRemote, minWait, maxWait, pliInterval, onPLI, stats, onStatsUpdated, onRead)
 
 	t.context, t.cancel = context.WithCancel(t.remoteTrack.Context())
 
@@ -335,7 +335,7 @@ type SimulcastTrack struct {
 	onPLI                       func()
 }
 
-func newSimulcastTrack(ctx context.Context, clientid string, track IRemoteTrack, pliInterval time.Duration, onPLI func(), stats stats.Getter, onStatsUpdated func(*stats.Stats)) ITrack {
+func newSimulcastTrack(ctx context.Context, clientid string, track IRemoteTrack, minWait, maxWait, pliInterval time.Duration, onPLI func(), stats stats.Getter, onStatsUpdated func(*stats.Stats)) ITrack {
 	t := &SimulcastTrack{
 		mu: sync.RWMutex{},
 		base: &baseTrack{
@@ -361,7 +361,7 @@ func newSimulcastTrack(ctx context.Context, clientid string, track IRemoteTrack,
 		onPLI:                       onPLI,
 	}
 
-	rt := t.AddRemoteTrack(ctx, track, stats, onStatsUpdated)
+	rt := t.AddRemoteTrack(ctx, track, minWait, maxWait, stats, onStatsUpdated)
 	t.context, t.cancel = context.WithCancel(rt.Context())
 
 	go func() {
@@ -440,7 +440,7 @@ func (t *SimulcastTrack) Kind() webrtc.RTPCodecType {
 	return t.base.kind
 }
 
-func (t *SimulcastTrack) AddRemoteTrack(ctx context.Context, track IRemoteTrack, stats stats.Getter, onStatsUpdated func(*stats.Stats)) *remoteTrack {
+func (t *SimulcastTrack) AddRemoteTrack(ctx context.Context, track IRemoteTrack, minWait, maxWait time.Duration, stats stats.Getter, onStatsUpdated func(*stats.Stats)) *remoteTrack {
 	var remoteTrack *remoteTrack
 
 	quality := RIDToQuality(track.RID())
@@ -486,7 +486,7 @@ func (t *SimulcastTrack) AddRemoteTrack(ctx context.Context, track IRemoteTrack,
 
 	}
 
-	remoteTrack = newRemoteTrack(ctx, track, t.pliInterval, t.onPLI, stats, onStatsUpdated, onRead)
+	remoteTrack = newRemoteTrack(ctx, track, minWait, maxWait, t.pliInterval, t.onPLI, stats, onStatsUpdated, onRead)
 
 	switch quality {
 	case QualityHigh:

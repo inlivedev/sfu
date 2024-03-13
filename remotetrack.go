@@ -33,8 +33,9 @@ type remoteTrack struct {
 	packetBuffers         *packetBuffers
 }
 
-func newRemoteTrack(ctx context.Context, track IRemoteTrack, pliInterval time.Duration, onPLI func(), statsGetter stats.Getter, onStatsUpdated func(*stats.Stats), onRead func(*rtp.Packet)) *remoteTrack {
+func newRemoteTrack(ctx context.Context, track IRemoteTrack, minWait, maxWait, pliInterval time.Duration, onPLI func(), statsGetter stats.Getter, onStatsUpdated func(*stats.Stats), onRead func(*rtp.Packet)) *remoteTrack {
 	localctx, cancel := context.WithCancel(ctx)
+
 	rt := &remoteTrack{
 		context:               localctx,
 		cancel:                cancel,
@@ -49,7 +50,7 @@ func newRemoteTrack(ctx context.Context, track IRemoteTrack, pliInterval time.Du
 		onStatsUpdated:        onStatsUpdated,
 		onPLI:                 onPLI,
 		onRead:                onRead,
-		packetBuffers:         newPacketBuffers(0, 100*time.Millisecond),
+		packetBuffers:         newPacketBuffers(minWait, maxWait),
 	}
 
 	if pliInterval > 0 {

@@ -73,7 +73,11 @@ type ClientOptions struct {
 	// 0 ms: Certain gaming scenarios (likely without audio) where we will want to play the frame as soon as possible. Also, for remote desktop without audio where rendering a frame asap makes sense
 	// 100/150/200 ms: These could be the max target latency for interactive streaming use cases depending on the actual application (gaming, remoting with audio, interactive scenarios)
 	// 400 ms: Application that want to ensure a network glitch has very little chance of causing a freeze can start with a minimum delay target that is high enough to deal with network issues. Video streaming is one example.
-	MaxPlayoutDelay uint16
+	MaxPlayoutDelay     uint16
+	JitterBufferMinWait time.Duration
+	JitterBufferMaxWait time.Duration
+	// disable this will turn off the adaptive stream and jitter buffer. It just forward all received packets
+	EnableAdaptiveStream bool
 }
 
 type internalDataMessage struct {
@@ -177,6 +181,9 @@ func DefaultClientOptions() ClientOptions {
 		EnablePlayoutDelay:   true,
 		MinPlayoutDelay:      100,
 		MaxPlayoutDelay:      200,
+		JitterBufferMinWait:  0 * time.Millisecond,
+		JitterBufferMaxWait:  150 * time.Millisecond,
+		EnableAdaptiveStream: true,
 	}
 }
 
@@ -460,7 +467,10 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		if remoteTrack.RID() == "" {
 			// not simulcast
 
-			track = newTrack(client.context, client.id, remoteTrack, s.pliInterval, onPLI, client.statsGetter, onStatsUpdated)
+			minWait := opts.JitterBufferMinWait
+			maxWait := opts.JitterBufferMaxWait
+
+			track = newTrack(client.context, client.id, remoteTrack, minWait, maxWait, s.pliInterval, onPLI, client.statsGetter, onStatsUpdated)
 
 			go func() {
 				ctx, cancel := context.WithCancel(track.Context())
@@ -486,7 +496,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 
 			if err != nil {
 				// if track not found, add it
-				track = newSimulcastTrack(client.context, client.id, remoteTrack, s.pliInterval, onPLI, client.statsGetter, onStatsUpdated)
+				track = newSimulcastTrack(client.context, client.id, remoteTrack, opts.JitterBufferMinWait, opts.JitterBufferMaxWait, s.pliInterval, onPLI, client.statsGetter, onStatsUpdated)
 				if err := client.tracks.Add(track); err != nil {
 					glog.Error("client: error add track ", err)
 				}
@@ -503,7 +513,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 				}
 
 			} else if simulcast, ok = track.(*SimulcastTrack); ok {
-				simulcast.AddRemoteTrack(simulcast.context, remoteTrack, client.statsGetter, onStatsUpdated)
+				simulcast.AddRemoteTrack(simulcast.context, remoteTrack, opts.JitterBufferMinWait, opts.JitterBufferMaxWait, client.statsGetter, onStatsUpdated)
 			}
 
 			// only process track when the lowest quality is available
