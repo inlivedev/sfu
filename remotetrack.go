@@ -11,6 +11,7 @@ import (
 	"github.com/golang/glog"
 	"github.com/pion/interceptor/pkg/stats"
 	"github.com/pion/rtp"
+	"github.com/pion/webrtc/v3"
 )
 
 type remoteTrack struct {
@@ -83,20 +84,28 @@ func (t *remoteTrack) readRTP() {
 				return
 			}
 
-			if p != nil {
-				packet := rtpPacketPool.GetPacketAllocationFromPool()
-				*packet = *p
-				_ = t.packetBuffers.Add(packet)
+			if t.Track().Kind() == webrtc.RTPCodecTypeVideo {
+				// video needs to be reordered
+				if p != nil {
+					packet := rtpPacketPool.GetPacketAllocationFromPool()
+					*packet = *p
+					_ = t.packetBuffers.Add(packet)
 
-				if !t.IsRelay() {
-					go t.updateStats()
+					if !t.IsRelay() {
+						go t.updateStats()
+					}
 				}
-			}
 
-			orderedPkt := t.packetBuffers.Pop()
-			if orderedPkt != nil {
-				t.onRead(orderedPkt)
-				rtpPacketPool.ResetPacketPoolAllocation(orderedPkt)
+				orderedPkt := t.packetBuffers.Pop()
+				if orderedPkt != nil {
+					t.onRead(orderedPkt)
+					rtpPacketPool.ResetPacketPoolAllocation(orderedPkt)
+				}
+			} else {
+				// audio doesn't need to be reordered
+				if p != nil {
+					t.onRead(p)
+				}
 			}
 		}
 	}
