@@ -115,6 +115,10 @@ func (t *remoteTrack) loop() {
 	ctx, cancel := context.WithCancel(t.context)
 	defer cancel()
 
+	waitTimeMs := 1
+	lastAdjusted := time.Now()
+	nillCount := 0
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -122,9 +126,20 @@ func (t *remoteTrack) loop() {
 		default:
 			orderedPkt := t.packetBuffers.Pop()
 			if orderedPkt == nil {
-				glog.Info("remotetrack: ordered packet is nil")
-				time.Sleep(1 * time.Millisecond)
+				if nillCount > 5 {
+					waitTimeMs++
+					nillCount = 0
+					lastAdjusted = time.Now()
+					glog.Info("remotetrack: ordered packet is nil, increasing wait time to ", waitTimeMs, "ms")
+				}
+
+				time.Sleep(time.Duration(waitTimeMs) * time.Millisecond)
 				continue
+			}
+
+			if time.Since(lastAdjusted).Seconds() > 30 && waitTimeMs > 1 {
+				waitTimeMs--
+				glog.Info("remotetrack: packet pop quite stable, decreasing wait time to ", waitTimeMs, "ms")
 			}
 
 			t.onRead(orderedPkt)
