@@ -181,7 +181,7 @@ func DefaultClientOptions() ClientOptions {
 		EnablePlayoutDelay:   true,
 		MinPlayoutDelay:      100,
 		MaxPlayoutDelay:      200,
-		JitterBufferMinWait:  0 * time.Millisecond,
+		JitterBufferMinWait:  20 * time.Millisecond,
 		JitterBufferMaxWait:  150 * time.Millisecond,
 		EnableAdaptiveStream: true,
 	}
