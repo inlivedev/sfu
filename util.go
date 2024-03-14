@@ -25,7 +25,7 @@ import (
 
 const (
 	SdesRepairRTPStreamIDURI = "urn:ietf:params:rtp-hdrext:sdes:repaired-rtp-stream-id"
-	uint16SizeHalf           = 1 << 15
+	uint16SizeHalf           = uint16(1 << 15)
 )
 
 var customChars = [62]byte{

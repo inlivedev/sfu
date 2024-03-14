@@ -59,6 +59,10 @@ func newRemoteTrack(ctx context.Context, track IRemoteTrack, minWait, maxWait, p
 
 	go rt.readRTP()
 
+	if rt.Track().Kind() == webrtc.RTPCodecTypeVideo {
+		go rt.loop()
+	}
+
 	return rt
 }
 
@@ -85,6 +89,10 @@ func (t *remoteTrack) readRTP() {
 				return
 			}
 
+			if !t.IsRelay() {
+				go t.updateStats()
+			}
+
 			if t.Track().Kind() == webrtc.RTPCodecTypeVideo {
 				// video needs to be reordered
 				if p != nil {
@@ -92,15 +100,6 @@ func (t *remoteTrack) readRTP() {
 					*packet = *p
 					_ = t.packetBuffers.Add(packet)
 
-					if !t.IsRelay() {
-						go t.updateStats()
-					}
-				}
-
-				orderedPkt := t.packetBuffers.Pop()
-				if orderedPkt != nil {
-					t.onRead(orderedPkt)
-					rtpPacketPool.ResetPacketPoolAllocation(orderedPkt)
 				}
 			} else {
 				// audio doesn't need to be reordered
@@ -110,6 +109,29 @@ func (t *remoteTrack) readRTP() {
 			}
 		}
 	}
+}
+
+func (t *remoteTrack) loop() {
+	ctx, cancel := context.WithCancel(t.context)
+	defer cancel()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			orderedPkt := t.packetBuffers.Pop()
+			if orderedPkt == nil {
+				glog.Info("remotetrack: ordered packet is nil")
+				time.Sleep(1 * time.Millisecond)
+				continue
+			}
+
+			t.onRead(orderedPkt)
+			rtpPacketPool.ResetPacketPoolAllocation(orderedPkt)
+		}
+	}
+
 }
 
 func (t *remoteTrack) updateStats() {
