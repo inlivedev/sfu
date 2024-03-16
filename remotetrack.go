@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 
 	"github.com/golang/glog"
+	"github.com/inlivedev/sfu/pkg/rtppool"
 	"github.com/pion/interceptor/pkg/stats"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v3"
@@ -139,11 +140,15 @@ func (t *remoteTrack) loop() {
 				waitTimeMs--
 				glog.Info("remotetrack: packet pop quite stable, decreasing wait time to ", waitTimeMs, "ms")
 			}
+			copyPkt := rtppool.GetPacketAllocationFromPool()
 
-			t.onRead(&rtp.Packet{
-				Header:  *orderedPkt.Header(),
-				Payload: orderedPkt.Payload(),
-			})
+			copyPkt.Header = *orderedPkt.Header()
+
+			copyPkt.Payload = append(copyPkt.Payload, orderedPkt.Payload()...)
+
+			t.onRead(copyPkt)
+
+			rtppool.ResetPacketPoolAllocation(copyPkt)
 
 			orderedPkt.Release()
 		}
