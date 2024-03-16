@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/golang/glog"
+	"github.com/inlivedev/sfu/pkg/rtppool"
 	"github.com/pion/rtp"
 )
 
@@ -25,14 +26,9 @@ type packetBuffers struct {
 	minLatency time.Duration
 	// max duration to wait before sending
 	maxLatency   time.Duration
-	oldestPacket *packet
+	oldestPacket *rtppool.RetainablePacket
 	initSequence uint16
 	packetCount  uint64
-}
-
-type packet struct {
-	RTP       *rtp.Packet
-	AddedTime time.Time
 }
 
 func newPacketBuffers(minLatency, maxLatency time.Duration) *packetBuffers {
@@ -67,38 +63,33 @@ func (p *packetBuffers) Add(pkt *rtp.Packet) error {
 		return ErrPacketTooLate
 	}
 
-	newPacket := packet{
-		RTP:       pkt,
-		AddedTime: time.Now(),
-	}
-
-	var currentPkt *packet
+	newPacket := rtppool.NewPacket(&pkt.Header, pkt.Payload)
 
 	if p.buffers.Len() == 0 {
-		p.buffers.PushBack(&newPacket)
+		p.buffers.PushBack(newPacket)
 
 		return nil
 	}
 	// add packet in order
 Loop:
 	for e := p.buffers.Back(); e != nil; e = e.Prev() {
-		currentPkt = e.Value.(*packet)
-		if currentPkt.RTP.SequenceNumber == pkt.SequenceNumber {
-			glog.Warning("packet cache: packet sequence ", pkt.SequenceNumber, " already exists in the cache, will not adding the packet")
+		currentPkt := e.Value.(*rtppool.RetainablePacket)
+		if currentPkt.Header().SequenceNumber == pkt.SequenceNumber {
+			// glog.Warning("packet cache: packet sequence ", pkt.SequenceNumber, " already exists in the cache, will not adding the packet")
 
 			return ErrPacketDuplicate
 		}
 
-		if currentPkt.RTP.SequenceNumber < pkt.SequenceNumber && pkt.SequenceNumber-currentPkt.RTP.SequenceNumber < uint16SizeHalf {
-			p.buffers.InsertAfter(&newPacket, e)
+		if currentPkt.Header().SequenceNumber < pkt.SequenceNumber && pkt.SequenceNumber-currentPkt.Header().SequenceNumber < uint16SizeHalf {
+			p.buffers.InsertAfter(newPacket, e)
 
 			break Loop
-		} else if currentPkt.RTP.SequenceNumber-pkt.SequenceNumber > uint16SizeHalf {
-			p.buffers.InsertAfter(&newPacket, e)
+		} else if currentPkt.Header().SequenceNumber-pkt.SequenceNumber > uint16SizeHalf {
+			p.buffers.InsertAfter(newPacket, e)
 
 			break Loop
 		} else if e.Prev() == nil {
-			p.buffers.PushFront(&newPacket)
+			p.buffers.PushFront(newPacket)
 
 			break Loop
 		}
@@ -107,28 +98,28 @@ Loop:
 	return nil
 }
 
-func (p *packetBuffers) pop(el *list.Element) *rtp.Packet {
-	pkt := el.Value.(*packet)
+func (p *packetBuffers) pop(el *list.Element) *rtppool.RetainablePacket {
+	pkt := el.Value.(*rtppool.RetainablePacket)
 
 	// make sure packet is not late
-	if IsRTPPacketLate(pkt.RTP.SequenceNumber, p.lastSequenceNumber) {
-		glog.Warning("packet cache: packet sequence ", pkt.RTP.SequenceNumber, " is too late, last sent was ", p.lastSequenceNumber)
+	if IsRTPPacketLate(pkt.Header().SequenceNumber, p.lastSequenceNumber) {
+		glog.Warning("packet cache: packet sequence ", pkt.Header().SequenceNumber, " is too late, last sent was ", p.lastSequenceNumber)
 	}
 
-	if p.init && pkt.RTP.SequenceNumber > p.lastSequenceNumber && pkt.RTP.SequenceNumber-p.lastSequenceNumber > 1 {
+	if p.init && pkt.Header().SequenceNumber > p.lastSequenceNumber && pkt.Header().SequenceNumber-p.lastSequenceNumber > 1 {
 		// make sure packet has no gap
-		glog.Warning("packet cache: packet sequence ", pkt.RTP.SequenceNumber, " has a gap with last sent ", p.lastSequenceNumber)
+		glog.Warning("packet cache: packet sequence ", pkt.Header().SequenceNumber, " has a gap with last sent ", p.lastSequenceNumber)
 	}
 
-	p.lastSequenceNumber = pkt.RTP.SequenceNumber
+	p.lastSequenceNumber = pkt.Header().SequenceNumber
 	p.packetCount++
 
-	if p.oldestPacket == nil || p.oldestPacket.RTP.SequenceNumber == pkt.RTP.SequenceNumber {
+	if p.oldestPacket == nil || p.oldestPacket.Header().SequenceNumber == pkt.Header().SequenceNumber {
 		// oldest packet will be remove, find the next oldest packet in the list
 		p.oldestPacket = nil
 		for e := el.Next(); e != nil; e = e.Next() {
-			packet := e.Value.(*packet)
-			if p.oldestPacket == nil || packet.AddedTime.Before(p.oldestPacket.AddedTime) {
+			packet := e.Value.(*rtppool.RetainablePacket)
+			if p.oldestPacket == nil || packet.AddedTime().Before(p.oldestPacket.AddedTime()) {
 				p.oldestPacket = packet
 			}
 		}
@@ -138,14 +129,14 @@ func (p *packetBuffers) pop(el *list.Element) *rtp.Packet {
 	// remove the packets from the cache
 	p.buffers.Remove(el)
 
-	return pkt.RTP
+	return pkt
 }
 
-func (p *packetBuffers) flush() []*rtp.Packet {
+func (p *packetBuffers) flush() []*rtppool.RetainablePacket {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	packets := make([]*rtp.Packet, 0)
+	packets := make([]*rtppool.RetainablePacket, 0)
 Loop:
 	for e := p.buffers.Front(); p.buffers.Front() != nil; e = p.buffers.Front() {
 		pkt := p.fetch(e)
@@ -159,18 +150,19 @@ Loop:
 	return packets
 }
 
-func (p *packetBuffers) fetch(e *list.Element) *rtp.Packet {
-	currentPacket := e.Value.(*packet)
-	currentSeq := currentPacket.RTP.SequenceNumber
-	latency := time.Since(currentPacket.AddedTime)
+func (p *packetBuffers) fetch(e *list.Element) *rtppool.RetainablePacket {
+	currentPacket := e.Value.(*rtppool.RetainablePacket)
 
-	if !p.init && latency > p.minLatency && e.Next() != nil && !IsRTPPacketLate(e.Next().Value.(*packet).RTP.SequenceNumber, currentSeq) {
+	currentSeq := currentPacket.Header().SequenceNumber
+	latency := time.Since(currentPacket.AddedTime())
+
+	if !p.init && latency > p.minLatency && e.Next() != nil && !IsRTPPacketLate(e.Next().Value.(*rtppool.RetainablePacket).Header().SequenceNumber, currentSeq) {
 		// first packet to send, but make sure we have the packet in order
 		p.initSequence = currentSeq
 		p.init = true
 		return p.pop(e)
 	} else if (p.lastSequenceNumber < currentSeq || p.lastSequenceNumber-currentSeq > uint16SizeHalf) && currentSeq-p.lastSequenceNumber == 1 &&
-		(time.Since(currentPacket.AddedTime) > p.minLatency || (p.oldestPacket != nil && time.Since(p.oldestPacket.AddedTime) > p.maxLatency)) {
+		(time.Since(currentPacket.AddedTime()) > p.minLatency || (p.oldestPacket != nil && time.Since(p.oldestPacket.AddedTime()) > p.maxLatency)) {
 		// the current packet is in sequence with the last packet we popped and passed the min latency
 		return p.pop(e)
 	} else {
@@ -178,11 +170,11 @@ func (p *packetBuffers) fetch(e *list.Element) *rtp.Packet {
 		// we should wait for the next packet
 
 		// but check with the latency if there is a packet pass the max latency
-		packetLatency := time.Since(currentPacket.AddedTime)
+		packetLatency := time.Since(currentPacket.AddedTime())
 		// glog.Info("packet latency: ", packetLatency, " gap: ", gap, " currentSeq: ", currentSeq, " nextSeq: ", nextSeq)
 		if packetLatency > p.maxLatency {
 			// we have waited too long, we should send the packets
-			glog.Warning("packet cache: packet sequence ", currentPacket.RTP.SequenceNumber, " latency ", packetLatency, ", reached max latency ", p.maxLatency, ", will sending the packets")
+			glog.Warning("packet cache: packet sequence ", currentPacket.Header().SequenceNumber, " latency ", packetLatency, ", reached max latency ", p.maxLatency, ", will sending the packets")
 			return p.pop(e)
 		}
 	}
@@ -190,7 +182,7 @@ func (p *packetBuffers) fetch(e *list.Element) *rtp.Packet {
 	return nil
 }
 
-func (p *packetBuffers) Pop() *rtp.Packet {
+func (p *packetBuffers) Pop() *rtppool.RetainablePacket {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
@@ -202,11 +194,11 @@ func (p *packetBuffers) Pop() *rtp.Packet {
 	return p.fetch(frontElement)
 }
 
-func (p *packetBuffers) Flush() []*rtp.Packet {
+func (p *packetBuffers) Flush() []*rtppool.RetainablePacket {
 	return p.flush()
 }
 
-func (p *packetBuffers) Last() *packet {
+func (p *packetBuffers) Last() *rtppool.RetainablePacket {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
@@ -214,7 +206,7 @@ func (p *packetBuffers) Last() *packet {
 		return nil
 	}
 
-	return p.buffers.Back().Value.(*packet)
+	return p.buffers.Back().Value.(*rtppool.RetainablePacket)
 }
 
 func (p *packetBuffers) Len() int {
@@ -229,9 +221,10 @@ func (p *packetBuffers) Clear() {
 	defer p.mu.Unlock()
 
 	for e := p.buffers.Front(); e != nil; e = e.Next() {
-		packet := e.Value.(*packet)
-		packet.RTP = nil
+		packet := e.Value.(*rtppool.RetainablePacket)
+		packet.Release()
 		p.buffers.Remove(e)
+
 	}
 
 	p.buffers.Init()

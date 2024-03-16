@@ -9,7 +9,6 @@ import (
 	"sync/atomic"
 
 	"github.com/golang/glog"
-	"github.com/inlivedev/sfu/pkg/rtppool"
 	"github.com/pion/interceptor/pkg/stats"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v3"
@@ -97,9 +96,7 @@ func (t *remoteTrack) readRTP() {
 			if t.Track().Kind() == webrtc.RTPCodecTypeVideo {
 				// video needs to be reordered
 				if p != nil {
-					packet := rtppool.RTPPacketPool.GetPacketAllocationFromPool()
-					packet = p
-					_ = t.packetBuffers.Add(packet)
+					_ = t.packetBuffers.Add(p)
 
 				}
 			} else {
@@ -143,8 +140,12 @@ func (t *remoteTrack) loop() {
 				glog.Info("remotetrack: packet pop quite stable, decreasing wait time to ", waitTimeMs, "ms")
 			}
 
-			t.onRead(orderedPkt)
-			rtppool.RTPPacketPool.ResetPacketPoolAllocation(orderedPkt)
+			t.onRead(&rtp.Packet{
+				Header:  *orderedPkt.Header(),
+				Payload: orderedPkt.Payload(),
+			})
+
+			orderedPkt.Release()
 		}
 	}
 

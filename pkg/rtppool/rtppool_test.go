@@ -15,10 +15,10 @@ func BenchmarkSlicePool(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		p := RTPPacketPool.GetPacketAllocationFromPool()
+		p := GetPacketAllocationFromPool()
 
 		p = testPacket
 
-		RTPPacketPool.ResetPacketPoolAllocation(p)
+		ResetPacketPoolAllocation(p)
 	}
 }

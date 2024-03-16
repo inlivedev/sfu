@@ -105,23 +105,31 @@ func newTrack(ctx context.Context, clientID string, trackRemote IRemoteTrack, mi
 
 		for _, track := range tracks {
 			//nolint:ineffassign,staticcheck // packet is from the pool
-			packet := rtppool.RTPPacketPool.GetPacketAllocationFromPool()
+			packet := rtppool.NewPacket(&p.Header, p.Payload)
 
-			packet = p
+			copyPacket := rtppool.GetPacketAllocationFromPool()
+			copyPacket.Header = *packet.Header()
+			copyPacket.Payload = packet.Payload()
 
-			track.push(*packet, QualityHigh)
+			track.push(copyPacket, QualityHigh)
 
-			rtppool.RTPPacketPool.ResetPacketPoolAllocation(packet)
+			rtppool.ResetPacketPoolAllocation(copyPacket)
+
+			packet.Release()
 		}
 
 		//nolint:ineffassign // this is required
-		packet := rtppool.RTPPacketPool.GetPacketAllocationFromPool()
+		packet := rtppool.NewPacket(&p.Header, p.Payload)
 
-		packet = p
+		copyPacket := rtppool.GetPacketAllocationFromPool()
+		copyPacket.Header = *packet.Header()
+		copyPacket.Payload = packet.Payload()
 
-		t.onRead(packet, QualityHigh)
+		t.onRead(copyPacket, QualityHigh)
 
-		rtppool.RTPPacketPool.ResetPacketPoolAllocation(packet)
+		rtppool.ResetPacketPoolAllocation(copyPacket)
+
+		packet.Release()
 	}
 
 	t.remoteTrack = newRemoteTrack(ctx, trackRemote, minWait, maxWait, pliInterval, onPLI, stats, onStatsUpdated, onRead)
@@ -290,7 +298,11 @@ func (t *Track) onRead(p *rtp.Packet, quality QualityLevel) {
 	defer t.mu.RUnlock()
 
 	for _, callback := range t.onReadCallbacks {
+		copyPacket := rtppool.GetPacketAllocationFromPool()
+		copyPacket.Header = p.Header
+		copyPacket.Payload = p.Payload
 		callback(p, quality)
+		rtppool.ResetPacketPoolAllocation(copyPacket)
 	}
 }
 
@@ -483,10 +495,32 @@ func (t *SimulcastTrack) AddRemoteTrack(ctx context.Context, track IRemoteTrack,
 
 		tracks := t.base.clientTracks.GetTracks()
 		for _, track := range tracks {
-			track.push(*p, quality)
+			//nolint:ineffassign,staticcheck // packet is from the pool
+			packet := rtppool.NewPacket(&p.Header, p.Payload)
+
+			copyPacket := rtppool.GetPacketAllocationFromPool()
+			copyPacket.Header = *packet.Header()
+			copyPacket.Payload = packet.Payload()
+
+			track.push(copyPacket, quality)
+
+			rtppool.ResetPacketPoolAllocation(copyPacket)
+
+			packet.Release()
 		}
 
-		t.onRead(copyRTPPacket(p), quality)
+		//nolint:ineffassign // this is required
+		packet := rtppool.NewPacket(&p.Header, p.Payload)
+
+		copyPacket := rtppool.GetPacketAllocationFromPool()
+		copyPacket.Header = *packet.Header()
+		copyPacket.Payload = packet.Payload()
+
+		t.onRead(copyPacket, quality)
+
+		rtppool.ResetPacketPoolAllocation(copyPacket)
+
+		packet.Release()
 
 	}
 

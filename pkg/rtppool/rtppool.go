@@ -7,27 +7,37 @@ import (
 )
 
 type rtpPool struct {
-	pool sync.Pool
+	pool          sync.Pool
+	packetManager *packetManager
 }
 
-var RTPPacketPool = &rtpPool{
+var rtpPacetPool = &rtpPool{
 	pool: sync.Pool{
 		New: func() interface{} {
-			return &rtp.Packet{
-				Header:  rtp.Header{},
-				Payload: make([]byte, 1500),
-			}
+			return &rtp.Packet{}
 		},
 	},
+	packetManager: newPacketManager(),
 }
 
-func (p *rtpPool) ResetPacketPoolAllocation(localPacket *rtp.Packet) {
+func ResetPacketPoolAllocation(localPacket *rtp.Packet) {
+
 	localPacket.Header = rtp.Header{}
-	localPacket.Payload = localPacket.Payload[0:0]
-	p.pool.Put(localPacket)
+	localPacket.Payload = localPacket.Payload[:0]
+
+	rtpPacetPool.pool.Put(localPacket)
 }
 
-func (p *rtpPool) GetPacketAllocationFromPool() *rtp.Packet {
-	ipacket := p.pool.Get()
+func GetPacketAllocationFromPool() *rtp.Packet {
+	ipacket := rtpPacetPool.pool.Get()
 	return ipacket.(*rtp.Packet) //nolint:forcetypeassert
+}
+
+func NewPacket(header *rtp.Header, payload []byte) *RetainablePacket {
+	pkt, err := rtpPacetPool.packetManager.NewPacket(header, payload)
+	if err != nil {
+		return nil
+	}
+
+	return pkt
 }

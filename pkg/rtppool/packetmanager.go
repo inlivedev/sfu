@@ -1,0 +1,130 @@
+// this code is from pion nack interceptor
+// https://github.com/pion/interceptor/blob/master/pkg/nack/retainable_packet.go
+package rtppool
+
+import (
+	"errors"
+	"io"
+	"sync"
+	"time"
+
+	"github.com/pion/rtp"
+)
+
+var (
+	errPacketReleased          = errors.New("packet has been released")
+	errFailedToCastHeaderPool  = errors.New("failed to cast header pool")
+	errFailedToCastPayloadPool = errors.New("failed to cast payload pool")
+)
+
+const maxPayloadLen = 1460
+
+type packetManager struct {
+	headerPool  *sync.Pool
+	payloadPool *sync.Pool
+}
+
+func newPacketManager() *packetManager {
+	return &packetManager{
+		headerPool: &sync.Pool{
+			New: func() interface{} {
+				return &rtp.Header{}
+			},
+		},
+		payloadPool: &sync.Pool{
+			New: func() interface{} {
+				buf := make([]byte, maxPayloadLen)
+				return &buf
+			},
+		},
+	}
+}
+
+func (m *packetManager) NewPacket(header *rtp.Header, payload []byte) (*RetainablePacket, error) {
+	if len(payload) > maxPayloadLen {
+		return nil, io.ErrShortBuffer
+	}
+
+	p := &RetainablePacket{
+		onRelease: m.releasePacket,
+		// new packets have retain count of 1
+		count:     1,
+		addedTime: time.Now(),
+	}
+
+	var ok bool
+	p.header, ok = m.headerPool.Get().(*rtp.Header)
+	if !ok {
+		return nil, errFailedToCastHeaderPool
+	}
+
+	*p.header = header.Clone()
+
+	if payload != nil {
+		p.buffer, ok = m.payloadPool.Get().(*[]byte)
+		if !ok {
+			return nil, errFailedToCastPayloadPool
+		}
+
+		size := copy(*p.buffer, payload)
+		p.payload = (*p.buffer)[:size]
+	}
+
+	return p, nil
+}
+
+func (m *packetManager) releasePacket(header *rtp.Header, payload *[]byte) {
+	m.headerPool.Put(header)
+	if payload != nil {
+		m.payloadPool.Put(payload)
+	}
+}
+
+type RetainablePacket struct {
+	onRelease func(*rtp.Header, *[]byte)
+
+	countMu sync.Mutex
+	count   int
+
+	header    *rtp.Header
+	buffer    *[]byte
+	payload   []byte
+	addedTime time.Time
+}
+
+func (p *RetainablePacket) Header() *rtp.Header {
+	return p.header
+}
+
+func (p *RetainablePacket) Payload() []byte {
+	return p.payload
+}
+
+func (p *RetainablePacket) AddedTime() time.Time {
+	return p.addedTime
+}
+
+func (p *RetainablePacket) Retain() error {
+	p.countMu.Lock()
+	defer p.countMu.Unlock()
+	if p.count == 0 {
+		// already released
+		return errPacketReleased
+	}
+	p.count++
+	return nil
+}
+
+func (p *RetainablePacket) Release() {
+	p.countMu.Lock()
+	defer p.countMu.Unlock()
+	p.count--
+
+	if p.count == 0 {
+		// release back to pool
+		p.onRelease(p.header, p.buffer)
+		p.header = nil
+		p.buffer = nil
+		p.payload = nil
+	}
+}

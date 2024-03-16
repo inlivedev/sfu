@@ -156,6 +156,10 @@ func (v *VoiceDetector) onVoiceDetected(activity VoiceActivity) {
 }
 
 func (v *VoiceDetector) OnVoiceDetected(callback func(VoiceActivity)) {
+	if v == nil {
+		return
+	}
+
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 	v.callbacks = append(v.callbacks, callback)

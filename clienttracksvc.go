@@ -123,7 +123,7 @@ func (t *scaleableClientTrack) isKeyframe(vp9 *codecs.VP9Packet) bool {
 	return (vp9.Payload[0]&0x6) == 0 && true
 }
 
-func (t *scaleableClientTrack) push(p rtp.Packet, _ QualityLevel) {
+func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 	// detect late packet
 	if IsRTPPacketLate(p.Header.SequenceNumber, t.lastSequence) {
 		glog.Warning("scalabletrack: packet SSRC ", t.remoteTrack.track.SSRC(), " client ", t.client.ID(), " sequence ", p.SequenceNumber, " is late, last sequence ", t.lastSequence)
@@ -136,7 +136,7 @@ func (t *scaleableClientTrack) push(p rtp.Packet, _ QualityLevel) {
 
 	vp9Packet := &codecs.VP9Packet{}
 	if _, err := vp9Packet.Unmarshal(p.Payload); err != nil {
-		t.send(&p)
+		t.send(p)
 		return
 	}
 
@@ -222,7 +222,7 @@ func (t *scaleableClientTrack) push(p rtp.Packet, _ QualityLevel) {
 		p.Marker = true
 	}
 
-	t.send(&p)
+	t.send(p)
 }
 
 // functiont to normalize the sequence number in case the sequence is rollover
