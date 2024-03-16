@@ -10,6 +10,7 @@ import (
 
 	"github.com/golang/glog"
 	"github.com/inlivedev/sfu/pkg/interceptors/voiceactivedetector"
+	"github.com/inlivedev/sfu/pkg/rtppool"
 	"github.com/pion/interceptor/pkg/stats"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v3"
@@ -103,21 +104,24 @@ func newTrack(ctx context.Context, clientID string, trackRemote IRemoteTrack, mi
 		tracks := t.base.clientTracks.GetTracks()
 
 		for _, track := range tracks {
-			packet := rtpPacketPool.GetPacketAllocationFromPool()
+			//nolint:ineffassign,staticcheck // packet is from the pool
+			packet := rtppool.RTPPacketPool.GetPacketAllocationFromPool()
 
-			*packet = *p
+			packet = p
 
 			track.push(*packet, QualityHigh)
-			rtpPacketPool.ResetPacketPoolAllocation(packet)
+
+			rtppool.RTPPacketPool.ResetPacketPoolAllocation(packet)
 		}
 
-		packet := rtpPacketPool.GetPacketAllocationFromPool()
+		//nolint:ineffassign // this is required
+		packet := rtppool.RTPPacketPool.GetPacketAllocationFromPool()
 
-		*packet = *p
+		packet = p
 
 		t.onRead(packet, QualityHigh)
 
-		rtpPacketPool.ResetPacketPoolAllocation(packet)
+		rtppool.RTPPacketPool.ResetPacketPoolAllocation(packet)
 	}
 
 	t.remoteTrack = newRemoteTrack(ctx, trackRemote, minWait, maxWait, pliInterval, onPLI, stats, onStatsUpdated, onRead)

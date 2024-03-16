@@ -1,4 +1,4 @@
-package sfu
+package rtppool
 
 import (
 	"sync"
@@ -10,16 +10,20 @@ type rtpPool struct {
 	pool sync.Pool
 }
 
-var rtpPacketPool = &rtpPool{
+var RTPPacketPool = &rtpPool{
 	pool: sync.Pool{
 		New: func() interface{} {
-			return &rtp.Packet{}
+			return &rtp.Packet{
+				Header:  rtp.Header{},
+				Payload: make([]byte, 1500),
+			}
 		},
 	},
 }
 
 func (p *rtpPool) ResetPacketPoolAllocation(localPacket *rtp.Packet) {
-	*localPacket = rtp.Packet{}
+	localPacket.Header = rtp.Header{}
+	localPacket.Payload = localPacket.Payload[0:0]
 	p.pool.Put(localPacket)
 }
 

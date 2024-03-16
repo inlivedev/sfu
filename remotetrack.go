@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 
 	"github.com/golang/glog"
+	"github.com/inlivedev/sfu/pkg/rtppool"
 	"github.com/pion/interceptor/pkg/stats"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v3"
@@ -96,8 +97,8 @@ func (t *remoteTrack) readRTP() {
 			if t.Track().Kind() == webrtc.RTPCodecTypeVideo {
 				// video needs to be reordered
 				if p != nil {
-					packet := rtpPacketPool.GetPacketAllocationFromPool()
-					*packet = *p
+					packet := rtppool.RTPPacketPool.GetPacketAllocationFromPool()
+					packet = p
 					_ = t.packetBuffers.Add(packet)
 
 				}
@@ -143,7 +144,7 @@ func (t *remoteTrack) loop() {
 			}
 
 			t.onRead(orderedPkt)
-			rtpPacketPool.ResetPacketPoolAllocation(orderedPkt)
+			rtppool.RTPPacketPool.ResetPacketPoolAllocation(orderedPkt)
 		}
 	}
 
