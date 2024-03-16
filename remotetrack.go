@@ -144,7 +144,7 @@ func (t *remoteTrack) loop() {
 
 			copyPkt.Header = *orderedPkt.Header()
 
-			copyPkt.Payload = append(copyPkt.Payload, orderedPkt.Payload()...)
+			copyPkt.Payload = orderedPkt.Payload()
 
 			t.onRead(copyPkt)
 

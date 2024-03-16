@@ -109,7 +109,7 @@ func newTrack(ctx context.Context, clientID string, trackRemote IRemoteTrack, mi
 
 			copyPacket := rtppool.GetPacketAllocationFromPool()
 			copyPacket.Header = *packet.Header()
-			copyPacket.Payload = append(copyPacket.Payload, packet.Payload()...)
+			copyPacket.Payload = packet.Payload()
 
 			track.push(copyPacket, QualityHigh)
 
