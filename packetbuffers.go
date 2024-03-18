@@ -25,18 +25,27 @@ type packetBuffers struct {
 	// min duration to wait before sending
 	minLatency time.Duration
 	// max duration to wait before sending
-	maxLatency   time.Duration
-	oldestPacket *rtppool.RetainablePacket
-	initSequence uint16
-	packetCount  uint64
+	maxLatency           time.Duration
+	oldestPacket         *rtppool.RetainablePacket
+	initSequence         uint16
+	packetCount          uint64
+	waitTimeMu           sync.RWMutex
+	waitTimes            []time.Duration
+	lastSequenceWaitTime uint16
+	waitTimeResetCounter uint16
 }
+
+const waitTimeSize = 5000
 
 func newPacketBuffers(minLatency, maxLatency time.Duration) *packetBuffers {
 	return &packetBuffers{
-		mu:         sync.RWMutex{},
-		buffers:    list.New(),
-		minLatency: minLatency,
-		maxLatency: maxLatency,
+		mu:                   sync.RWMutex{},
+		buffers:              list.New(),
+		minLatency:           minLatency,
+		maxLatency:           maxLatency,
+		waitTimeMu:           sync.RWMutex{},
+		waitTimes:            make([]time.Duration, waitTimeSize),
+		lastSequenceWaitTime: 0,
 	}
 }
 
@@ -99,6 +108,10 @@ Loop:
 }
 
 func (p *packetBuffers) pop(el *list.Element) *rtppool.RetainablePacket {
+	defer func() {
+		go p.checkWaitTimeAdjuster()
+	}()
+
 	pkt := el.Value.(*rtppool.RetainablePacket)
 
 	// make sure packet is not late
@@ -156,27 +169,41 @@ func (p *packetBuffers) fetch(e *list.Element) *rtppool.RetainablePacket {
 	currentSeq := currentPacket.Header().SequenceNumber
 	latency := time.Since(currentPacket.AddedTime())
 
+	if p.oldestPacket != nil && time.Since(p.oldestPacket.AddedTime()) > p.maxLatency {
+		// we have waited too long, we should send the packets
+		return p.pop(e)
+	}
+
 	if !p.init && latency > p.minLatency && e.Next() != nil && !IsRTPPacketLate(e.Next().Value.(*rtppool.RetainablePacket).Header().SequenceNumber, currentSeq) {
 		// first packet to send, but make sure we have the packet in order
 		p.initSequence = currentSeq
 		p.init = true
 		return p.pop(e)
-	} else if (p.lastSequenceNumber < currentSeq || p.lastSequenceNumber-currentSeq > uint16SizeHalf) && currentSeq-p.lastSequenceNumber == 1 &&
-		(time.Since(currentPacket.AddedTime()) > p.minLatency || (p.oldestPacket != nil && time.Since(p.oldestPacket.AddedTime()) > p.maxLatency)) {
-		// the current packet is in sequence with the last packet we popped and passed the min latency
-		return p.pop(e)
-	} else {
-		// there is a gap between the last packet we popped and the current packet
-		// we should wait for the next packet
+	}
 
-		// but check with the latency if there is a packet pass the max latency
-		packetLatency := time.Since(currentPacket.AddedTime())
-		// glog.Info("packet latency: ", packetLatency, " gap: ", gap, " currentSeq: ", currentSeq, " nextSeq: ", nextSeq)
-		if packetLatency > p.maxLatency {
-			// we have waited too long, we should send the packets
-			glog.Warning("packet cache: packet sequence ", currentPacket.Header().SequenceNumber, " latency ", packetLatency, ", reached max latency ", p.maxLatency, ", will sending the packets")
+	if (p.lastSequenceNumber < currentSeq || p.lastSequenceNumber-currentSeq > uint16SizeHalf) && currentSeq-p.lastSequenceNumber == 1 {
+		// the current packet is in sequence with the last packet we popped
+
+		// we record the wait time the packet getting reordered
+		p.recordWaitTime(e)
+
+		if time.Since(currentPacket.AddedTime()) > p.minLatency {
+			// passed the min latency
 			return p.pop(e)
 		}
+
+	}
+
+	// there is a gap between the last packet we popped and the current packet
+	// we should wait for the next packet
+
+	// but check with the latency if there is a packet pass the max latency
+	packetLatency := time.Since(currentPacket.AddedTime())
+	// glog.Info("packet latency: ", packetLatency, " gap: ", gap, " currentSeq: ", currentSeq, " nextSeq: ", nextSeq)
+	if packetLatency > p.maxLatency {
+		// we have waited too long, we should send the packets
+		glog.Warning("packet cache: packet sequence ", currentPacket.Header().SequenceNumber, " latency ", packetLatency, ", reached max latency ", p.maxLatency, ", will sending the packets")
+		return p.pop(e)
 	}
 
 	return nil
@@ -230,4 +257,55 @@ func (p *packetBuffers) Clear() {
 	p.buffers.Init()
 
 	p.oldestPacket = nil
+}
+
+func (p *packetBuffers) recordWaitTime(el *list.Element) {
+	p.waitTimeMu.Lock()
+	defer p.waitTimeMu.Unlock()
+
+	pkt := el.Value.(*rtppool.RetainablePacket)
+
+	if p.lastSequenceWaitTime == pkt.Header().SequenceNumber || IsRTPPacketLate(pkt.Header().SequenceNumber, p.lastSequenceWaitTime) {
+		// don't record late packet or already recorded packet
+		return
+	}
+
+	p.lastSequenceWaitTime = pkt.Header().SequenceNumber
+
+	// remove oldest packet from the wait times if more than 500
+	if uint16(len(p.waitTimes)+1) > waitTimeSize {
+		p.waitTimes = p.waitTimes[1:]
+	}
+
+	p.waitTimes = append(p.waitTimes, time.Since(pkt.AddedTime()))
+
+}
+
+func (p *packetBuffers) checkWaitTimeAdjuster() {
+	if p.waitTimeResetCounter > waitTimeSize {
+		p.waitTimeMu.Lock()
+		defer p.waitTimeMu.Unlock()
+
+		// calculate the average wait time
+		var totalWaitTime time.Duration
+		for _, wt := range p.waitTimes {
+			totalWaitTime += wt
+		}
+
+		averageWaitTime := totalWaitTime / time.Duration(len(p.waitTimes))
+
+		if averageWaitTime > p.minLatency {
+			// increase the min latency
+			p.minLatency = averageWaitTime
+			glog.Info("packet cache: average wait time ", averageWaitTime, ", increasing min latency to ", p.minLatency)
+		} else if averageWaitTime < p.minLatency {
+			// decrease the min latency
+			p.minLatency = averageWaitTime
+			glog.Info("packet cache: average wait time ", averageWaitTime, ", decreasing min latency to ", p.minLatency)
+		}
+
+		p.waitTimeResetCounter = 0
+	} else {
+		p.waitTimeResetCounter++
+	}
 }
