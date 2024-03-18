@@ -15,6 +15,7 @@ import (
 	"github.com/golang/glog"
 	"github.com/inlivedev/sfu/pkg/interceptors/playoutdelay"
 	"github.com/inlivedev/sfu/pkg/interceptors/voiceactivedetector"
+	"github.com/inlivedev/sfu/pkg/pacer"
 	"github.com/pion/interceptor"
 	"github.com/pion/interceptor/pkg/cc"
 	"github.com/pion/interceptor/pkg/gcc"
@@ -248,7 +249,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		// TODO: we need to use packet loss based bandwidth adjuster when the bandwidth is below 100_000
 		return gcc.NewSendSideBWE(
 			gcc.SendSideBWEInitialBitrate(int(s.bitrateConfigs.InitialBandwidth)),
-			gcc.SendSideBWEPacer(gcc.NewNoOpPacer()),
+			gcc.SendSideBWEPacer(pacer.NewLeakyBucketPacer(int(s.bitrateConfigs.InitialBandwidth))),
 		)
 	})
 	if err != nil {

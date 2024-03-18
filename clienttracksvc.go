@@ -124,14 +124,6 @@ func (t *scaleableClientTrack) isKeyframe(vp9 *codecs.VP9Packet) bool {
 }
 
 func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
-	// detect late packet
-	if IsRTPPacketLate(p.Header.SequenceNumber, t.lastSequence) {
-		glog.Warning("scalabletrack: packet SSRC ", t.remoteTrack.track.SSRC(), " client ", t.client.ID(), " sequence ", p.SequenceNumber, " is late, last sequence ", t.lastSequence)
-		// return
-	}
-
-	t.lastSequence = p.Header.SequenceNumber
-
 	var qualityPreset IQualityPreset
 
 	vp9Packet := &codecs.VP9Packet{}
@@ -235,9 +227,17 @@ func normalizeSequenceNumber(sequence, drop uint16) uint16 {
 }
 
 func (t *scaleableClientTrack) send(p *rtp.Packet) {
-	p.SequenceNumber = normalizeSequenceNumber(p.SequenceNumber, t.dropCounter)
+	p.Header.SequenceNumber = normalizeSequenceNumber(p.SequenceNumber, t.dropCounter)
 
 	t.lastTimestamp = p.Timestamp
+
+	// detect late packet
+	if IsRTPPacketLate(p.Header.SequenceNumber, t.lastSequence) {
+		glog.Warning("scalabletrack: packet SSRC ", t.remoteTrack.track.SSRC(), " client ", t.client.ID(), " sequence ", p.SequenceNumber, " is late, last sequence ", t.lastSequence)
+		// return
+	}
+
+	t.lastSequence = p.Header.SequenceNumber
 
 	if err := t.localTrack.WriteRTP(p); err != nil {
 		glog.Error("scaleabletrack: error on write rtp", err)
