@@ -72,8 +72,8 @@ func (t *remoteTrack) Context() context.Context {
 }
 
 func (t *remoteTrack) readRTP() {
-
 	defer t.cancel()
+
 	for {
 		select {
 		case <-t.context.Done():
@@ -97,9 +97,10 @@ func (t *remoteTrack) readRTP() {
 			if t.Track().Kind() == webrtc.RTPCodecTypeVideo {
 				// video needs to be reordered
 				if p != nil {
-					_ = t.packetBuffers.Add(p)
 
+					_ = t.packetBuffers.Add(p)
 				}
+
 			} else {
 				// audio doesn't need to be reordered
 				if p != nil {
@@ -110,47 +111,63 @@ func (t *remoteTrack) readRTP() {
 	}
 }
 
+func (t *remoteTrack) popRead() {
+	// pkts := t.packetBuffers.Flush()
+	// for _, orderedPkt := range pkts {
+	orderedPkt := t.packetBuffers.Pop()
+	if orderedPkt != nil {
+		copyPkt := rtppool.GetPacketAllocationFromPool()
+
+		copyPkt.Header = *orderedPkt.Header()
+
+		copyPkt.Payload = orderedPkt.Payload()
+
+		t.onRead(copyPkt)
+
+		rtppool.ResetPacketPoolAllocation(copyPkt)
+
+		orderedPkt.Release()
+	}
+}
+
 func (t *remoteTrack) loop() {
 	ctx, cancel := context.WithCancel(t.context)
 	defer cancel()
-
-	waitTimeMs := 1
-	lastAdjusted := time.Now()
-	nillCount := 0
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		default:
-			orderedPkt := t.packetBuffers.Pop()
-			if orderedPkt == nil {
-				if nillCount > 5 {
-					waitTimeMs++
-					nillCount = 0
-					lastAdjusted = time.Now()
-					glog.Info("remotetrack: ordered packet is nil, increasing wait time to ", waitTimeMs, "ms")
-				}
+			t.packetBuffers.WaitAvailablePacket()
 
-				time.Sleep(time.Duration(waitTimeMs) * time.Millisecond)
-				continue
+			packetSent := 0
+			for orderedPkt := t.packetBuffers.Pop(); orderedPkt != nil; orderedPkt = t.packetBuffers.Pop() {
+
+				copyPkt := rtppool.GetPacketAllocationFromPool()
+
+				copyPkt.Header = *orderedPkt.Header()
+
+				copyPkt.Payload = orderedPkt.Payload()
+
+				t.onRead(copyPkt)
+
+				rtppool.ResetPacketPoolAllocation(copyPkt)
+
+				orderedPkt.Release()
+				packetSent++
 			}
 
-			if time.Since(lastAdjusted).Seconds() > 30 && waitTimeMs > 1 {
-				waitTimeMs--
-				glog.Info("remotetrack: packet pop quite stable, decreasing wait time to ", waitTimeMs, "ms")
-			}
-			copyPkt := rtppool.GetPacketAllocationFromPool()
+			// if t.packetBuffers.buffers.Len() > 0 {
+			// 	glog.Info("remotetrack: loop end after ", packetSent, " packet sent, buffer length ", t.packetBuffers.buffers.Len())
+			// 	bufferSeqs := make([]uint16, 0)
+			// 	for e := t.packetBuffers.buffers.Front(); e != nil; e = e.Next() {
+			// 		bufferSeqs = append(bufferSeqs, e.Value.(*rtppool.RetainablePacket).Header().SequenceNumber)
+			// 	}
 
-			copyPkt.Header = *orderedPkt.Header()
+			// 	glog.Info("remotetrack: buffer seqs: ", bufferSeqs)
+			// }
 
-			copyPkt.Payload = orderedPkt.Payload()
-
-			t.onRead(copyPkt)
-
-			rtppool.ResetPacketPoolAllocation(copyPkt)
-
-			orderedPkt.Release()
 		}
 	}
 
