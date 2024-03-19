@@ -136,11 +136,12 @@ func (p *LeakyBucketPacer) Run() {
 			for {
 				emptyQueueCount := 0
 
+				if len(p.queues) == 0 {
+					break Loop
+				}
+
 				for _, queue := range p.queues {
-					queue.mu.RLock()
-					queueSize := queue.Len()
-					queue.mu.RUnlock()
-					if queueSize == 0 {
+					if queue.Len() == 0 {
 						emptyQueueCount++
 
 						if emptyQueueCount == len(p.queues) {
@@ -156,6 +157,7 @@ func (p *LeakyBucketPacer) Run() {
 
 					if !ok {
 						glog.Warningf("failed to access leaky bucket pacer queue, cast failed")
+						emptyQueueCount++
 						continue
 					}
 
@@ -179,6 +181,7 @@ func (p *LeakyBucketPacer) Run() {
 
 					next.packet.Release()
 				}
+
 			}
 
 		}
