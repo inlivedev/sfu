@@ -60,7 +60,9 @@ func (l *clientTrackList) GetTracks() []iClientTrack {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 
-	return l.tracks
+	tracks := make([]iClientTrack, len(l.tracks))
+	tracks = append(tracks, l.tracks...)
+	return tracks
 }
 
 func newClientTrackList() *clientTrackList {
