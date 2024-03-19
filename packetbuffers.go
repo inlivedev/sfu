@@ -39,7 +39,7 @@ type packetBuffers struct {
 	packetAvailableWait  *sync.Cond
 }
 
-const waitTimeSize = 5000
+const waitTimeSize = 2500
 
 func newPacketBuffers(minLatency, maxLatency time.Duration) *packetBuffers {
 	return &packetBuffers{
@@ -368,12 +368,6 @@ func (p *packetBuffers) checkWaitTimeAdjuster() {
 
 		sortedWaitTimes := make([]time.Duration, len(p.waitTimes))
 		copy(sortedWaitTimes, p.waitTimes)
-		totalTimes := 0
-		for _, wt := range sortedWaitTimes {
-			totalTimes += int(wt)
-		}
-
-		avgTime := time.Duration(totalTimes / len(sortedWaitTimes))
 
 		sort.Slice(sortedWaitTimes, func(i, j int) bool {
 
@@ -387,15 +381,13 @@ func (p *packetBuffers) checkWaitTimeAdjuster() {
 
 		percentile := sortedWaitTimes[percentileIndex]
 
-		glog.Info("packet cache: avg wait time ", avgTime, ", percentile wait time ", percentile)
-
 		if percentile > p.minLatency && percentile < p.maxLatency {
 			// increase the min latency
 			glog.Info("packet cache: set min latency ", percentile, ", increasing min latency from ", p.minLatency)
 			p.latencyMu.Lock()
 			p.minLatency = percentile
 			p.latencyMu.Unlock()
-		} else if percentile < p.minLatency {
+		} else if percentile < p.minLatency && percentile > 0 {
 			// decrease the min latency
 			glog.Info("packet cache: set min latency ", percentile, ", decreasing min latency from ", p.minLatency)
 			p.latencyMu.Lock()
