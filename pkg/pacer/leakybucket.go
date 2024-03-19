@@ -67,7 +67,10 @@ func (p *LeakyBucketPacer) AddStream(ssrc uint32, writer interceptor.RTPWriter) 
 	defer p.qLock.Unlock()
 
 	p.ssrcToWriter[ssrc] = writer
-	p.queues[ssrc] = &queue{}
+	p.queues[ssrc] = &queue{
+		List: list.List{},
+		mu:   sync.RWMutex{},
+	}
 }
 
 // SetTargetBitrate updates the target bitrate at which the pacer is allowed to
@@ -117,17 +120,6 @@ func (p *LeakyBucketPacer) Write(header *rtp.Header, payload []byte, attributes 
 	return header.MarshalSize() + len(payload), nil
 }
 
-func (p *LeakyBucketPacer) Queues() map[uint32]*queue {
-	p.qLock.RLock()
-	defer p.qLock.RUnlock()
-	queues := make(map[uint32]*queue, len(p.queues))
-	for k, v := range p.queues {
-		queues[k] = v
-	}
-
-	return p.queues
-}
-
 // Run starts the LeakyBucketPacer
 func (p *LeakyBucketPacer) Run() {
 	ticker := time.NewTicker(p.pacingInterval)
@@ -144,10 +136,11 @@ func (p *LeakyBucketPacer) Run() {
 			for {
 				emptyQueueCount := 0
 
-				queues := p.Queues()
-
-				for _, queue := range queues {
-					if queue.Len() == 0 {
+				for _, queue := range p.queues {
+					queue.mu.RLock()
+					queueSize := queue.Len()
+					queue.mu.RUnlock()
+					if queueSize == 0 {
 						emptyQueueCount++
 
 						if emptyQueueCount == len(p.queues) {

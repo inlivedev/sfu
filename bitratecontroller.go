@@ -448,7 +448,7 @@ func (bc *bitrateController) MonitorBandwidth(estimator cc.BandwidthEstimator) {
 			return
 		}
 
-		glog.Info("bitratecontroller: available bandwidth ", ThousandSeparator(int(bw)), " total bitrate ", ThousandSeparator(int(totalSendBitrates)))
+		// glog.Info("bitratecontroller: available bandwidth ", ThousandSeparator(int(bw)), " total bitrate ", ThousandSeparator(int(totalSendBitrates)))
 
 		bc.fitBitratesToBandwidth(uint32(bw))
 
@@ -470,7 +470,7 @@ func (bc *bitrateController) fitBitratesToBandwidth(bw uint32) {
 				if claim.IsAdjustable() &&
 					claim.Quality() == QualityLevel(i) {
 
-					glog.Info("bitratecontroller: reduce bitrate for track ", claim.track.ID(), " from ", claim.Quality(), " to ", claim.Quality()-1)
+					// glog.Info("bitratecontroller: reduce bitrate for track ", claim.track.ID(), " from ", claim.Quality(), " to ", claim.Quality()-1)
 					bc.setQuality(claim.track.ID(), claim.Quality()-1)
 
 					claim.track.RequestPLI()
@@ -478,7 +478,7 @@ func (bc *bitrateController) fitBitratesToBandwidth(bw uint32) {
 
 					// check if the reduced bitrate is fit to the available bandwidth
 					if totalSentBitrates <= bw {
-						glog.Info("bitratecontroller: total sent bitrates ", ThousandSeparator(int(totalSentBitrates)), " available bandwidth ", ThousandSeparator(int(bw)))
+						// glog.Info("bitratecontroller: total sent bitrates ", ThousandSeparator(int(totalSentBitrates)), " available bandwidth ", ThousandSeparator(int(bw)))
 						return
 					}
 				}
@@ -499,7 +499,7 @@ func (bc *bitrateController) fitBitratesToBandwidth(bw uint32) {
 						return
 					}
 
-					glog.Info("bitratecontroller: increase bitrate for track ", claim.track.ID(), " from ", claim.Quality(), " to ", claim.Quality()+1)
+					// glog.Info("bitratecontroller: increase bitrate for track ", claim.track.ID(), " from ", claim.Quality(), " to ", claim.Quality()+1)
 					bc.setQuality(claim.track.ID(), claim.Quality()+1)
 					// update current total bitrates
 					totalSentBitrates = bc.totalSentBitrates()
