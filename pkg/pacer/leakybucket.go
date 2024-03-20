@@ -149,6 +149,7 @@ func (p *LeakyBucketPacer) Run() {
 
 						if emptyQueueCount == len(p.queues) {
 							queue.mu.RUnlock()
+							p.qLock.RUnlock()
 							break Loop
 						}
 						queue.mu.RUnlock()
@@ -163,6 +164,7 @@ func (p *LeakyBucketPacer) Run() {
 					if !ok {
 						glog.Warningf("failed to access leaky bucket pacer queue, cast failed")
 						emptyQueueCount++
+
 						continue
 					}
 
@@ -173,6 +175,7 @@ func (p *LeakyBucketPacer) Run() {
 					if !ok {
 						glog.Warningf("no writer found for ssrc: %v", next.packet.Header().SSRC)
 						next.packet.Release()
+
 						continue
 					}
 
