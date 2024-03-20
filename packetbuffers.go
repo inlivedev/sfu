@@ -296,9 +296,12 @@ func (p *packetBuffers) Close() {
 	p.packetAvailableWait.Broadcast()
 }
 func (p *packetBuffers) WaitAvailablePacket() {
+	p.mu.RLock()
 	if p.buffers.Len() == 0 {
+		p.mu.RUnlock()
 		return
 	}
+	p.mu.RUnlock()
 
 	p.packetAvailableWait.L.Lock()
 	defer p.packetAvailableWait.L.Unlock()

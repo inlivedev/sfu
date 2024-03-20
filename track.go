@@ -101,6 +101,9 @@ func newTrack(ctx context.Context, clientID string, trackRemote IRemoteTrack, mi
 	}
 
 	onRead := func(p *rtp.Packet) {
+		t.base.clientTracks.mu.RLock()
+		defer t.base.clientTracks.mu.RUnlock()
+
 		tracks := t.base.clientTracks.GetTracks()
 
 		for _, track := range tracks {

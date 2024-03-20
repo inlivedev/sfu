@@ -136,20 +136,25 @@ func (p *LeakyBucketPacer) Run() {
 			for {
 				emptyQueueCount := 0
 
+				p.qLock.RLock()
 				if len(p.queues) == 0 {
+					p.qLock.RUnlock()
 					break Loop
 				}
 
 				for _, queue := range p.queues {
+					queue.mu.RLock()
 					if queue.Len() == 0 {
 						emptyQueueCount++
 
 						if emptyQueueCount == len(p.queues) {
+							queue.mu.RUnlock()
 							break Loop
 						}
-
+						queue.mu.RUnlock()
 						continue
 					}
+					queue.mu.RUnlock()
 
 					queue.mu.Lock()
 					next, ok := queue.Remove(queue.Front()).(*item)
@@ -181,6 +186,7 @@ func (p *LeakyBucketPacer) Run() {
 
 					next.packet.Release()
 				}
+				p.qLock.RUnlock()
 
 			}
 
