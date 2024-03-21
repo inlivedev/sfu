@@ -107,6 +107,9 @@ func newTrack(ctx context.Context, clientID string, trackRemote IRemoteTrack, mi
 		tracks := t.base.clientTracks.GetTracks()
 
 		for _, track := range tracks {
+			if p == nil {
+				return
+			}
 			//nolint:ineffassign,staticcheck // packet is from the pool
 			packet := rtppool.NewPacket(&p.Header, p.Payload)
 

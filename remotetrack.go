@@ -12,7 +12,6 @@ import (
 	"github.com/inlivedev/sfu/pkg/rtppool"
 	"github.com/pion/interceptor/pkg/stats"
 	"github.com/pion/rtp"
-	"github.com/pion/webrtc/v3"
 )
 
 type remoteTrack struct {
@@ -60,9 +59,9 @@ func newRemoteTrack(ctx context.Context, track IRemoteTrack, minWait, maxWait, p
 
 	go rt.readRTP()
 
-	if rt.Track().Kind() == webrtc.RTPCodecTypeVideo {
-		go rt.loop()
-	}
+	// if rt.Track().Kind() == webrtc.RTPCodecTypeVideo {
+	// 	go rt.loop()
+	// }
 
 	return rt
 }
@@ -94,19 +93,21 @@ func (t *remoteTrack) readRTP() {
 				go t.updateStats()
 			}
 
-			if t.Track().Kind() == webrtc.RTPCodecTypeVideo {
-				// video needs to be reordered
-				if p != nil {
+			// if t.Track().Kind() == webrtc.RTPCodecTypeVideo {
+			// 	// video needs to be reordered
+			// 	if p != nil {
 
-					_ = t.packetBuffers.Add(p)
-				}
+			// 		_ = t.packetBuffers.Add(p)
+			// 	}
 
-			} else {
-				// audio doesn't need to be reordered
-				if p != nil {
-					t.onRead(p)
-				}
-			}
+			// } else {
+			// 	// audio doesn't need to be reordered
+			// 	if p != nil {
+			// 		t.onRead(p)
+			// 	}
+			// }
+
+			t.onRead(p)
 		}
 	}
 }

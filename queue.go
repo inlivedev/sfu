@@ -3,6 +3,7 @@ package sfu
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 
 	"github.com/golang/glog"
@@ -14,6 +15,7 @@ var (
 )
 
 type queue struct {
+	mutex  sync.Mutex
 	opChan chan interface{}
 	IsOpen *atomic.Bool
 }
@@ -38,6 +40,7 @@ func NewQueue(ctx context.Context) *queue {
 	isOpen.Store(true)
 
 	q := &queue{
+		mutex:  sync.Mutex{},
 		IsOpen: &isOpen,
 		opChan: make(chan interface{}, 10),
 	}
@@ -49,6 +52,9 @@ func NewQueue(ctx context.Context) *queue {
 
 func (q *queue) Push(item interface{}) {
 	go func() {
+		q.mutex.Lock()
+		defer q.mutex.Unlock()
+
 		if !q.IsOpen.Load() {
 			glog.Warning("sfu: queue is closed when push renegotiation")
 			return
@@ -61,6 +67,8 @@ func (q *queue) Push(item interface{}) {
 func (q *queue) run(ctx context.Context) {
 	ctxx, cancel := context.WithCancel(ctx)
 	defer func() {
+		q.mutex.Lock()
+		defer q.mutex.Unlock()
 		q.IsOpen.Store(false)
 		close(q.opChan)
 		cancel()

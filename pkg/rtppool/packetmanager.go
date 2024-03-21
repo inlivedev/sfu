@@ -52,6 +52,9 @@ func (m *packetManager) NewPacket(header *rtp.Header, payload []byte) (*Retainab
 		addedTime: time.Now(),
 	}
 
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
 	var ok bool
 	p.header, ok = m.headerPool.Get().(*rtp.Header)
 	if !ok {
@@ -82,9 +85,8 @@ func (m *packetManager) releasePacket(header *rtp.Header, payload *[]byte) {
 
 type RetainablePacket struct {
 	onRelease func(*rtp.Header, *[]byte)
-
-	countMu sync.Mutex
-	count   int
+	mu        sync.RWMutex
+	count     int
 
 	header    *rtp.Header
 	buffer    *[]byte
@@ -93,20 +95,29 @@ type RetainablePacket struct {
 }
 
 func (p *RetainablePacket) Header() *rtp.Header {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
 	return p.header
 }
 
 func (p *RetainablePacket) Payload() []byte {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
 	return p.payload
 }
 
 func (p *RetainablePacket) AddedTime() time.Time {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
 	return p.addedTime
 }
 
 func (p *RetainablePacket) Retain() error {
-	p.countMu.Lock()
-	defer p.countMu.Unlock()
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	if p.count == 0 {
 		// already released
 		return errPacketReleased
@@ -116,8 +127,8 @@ func (p *RetainablePacket) Retain() error {
 }
 
 func (p *RetainablePacket) Release() {
-	p.countMu.Lock()
-	defer p.countMu.Unlock()
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.count--
 
 	if p.count == 0 {
