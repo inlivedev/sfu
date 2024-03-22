@@ -51,7 +51,7 @@ func newRemoteTrack(ctx context.Context, track IRemoteTrack, minWait, maxWait, p
 		onStatsUpdated:        onStatsUpdated,
 		onPLI:                 onPLI,
 		onRead:                onRead,
-		packetBuffers:         newPacketBuffers(minWait, maxWait),
+		packetBuffers:         newPacketBuffers(minWait, maxWait, false),
 	}
 
 	if pliInterval > 0 {
@@ -252,4 +252,11 @@ func (t *remoteTrack) enableIntervalPLI(interval time.Duration) {
 func (t *remoteTrack) IsRelay() bool {
 	_, ok := t.track.(*RelayTrack)
 	return ok
+}
+
+func (t *remoteTrack) Buffer() *packetBuffers {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
+	return t.packetBuffers
 }

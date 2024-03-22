@@ -30,7 +30,6 @@ type simulcastClientTrack struct {
 	isScreen                *atomic.Bool
 	isEnded                 *atomic.Bool
 	onTrackEndedCallbacks   []func()
-	packetPool              sync.Pool
 }
 
 func newSimulcastClientTrack(c *Client, t *SimulcastTrack) *simulcastClientTrack {
@@ -68,11 +67,6 @@ func newSimulcastClientTrack(c *Client, t *SimulcastTrack) *simulcastClientTrack
 		isScreen:                isScreen,
 		isEnded:                 &atomic.Bool{},
 		onTrackEndedCallbacks:   make([]func(), 0),
-		packetPool: sync.Pool{
-			New: func() interface{} {
-				return &rtp.Packet{}
-			},
-		},
 	}
 
 	ct.SetMaxQuality(QualityHigh)

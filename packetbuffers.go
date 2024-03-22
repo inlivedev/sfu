@@ -37,11 +37,13 @@ type packetBuffers struct {
 	lastSequenceWaitTime uint16
 	waitTimeResetCounter uint16
 	packetAvailableWait  *sync.Cond
+	enableDynamicLatency bool
+	ended                bool
 }
 
 const waitTimeSize = 2500
 
-func newPacketBuffers(minLatency, maxLatency time.Duration) *packetBuffers {
+func newPacketBuffers(minLatency, maxLatency time.Duration, dynamicLatency bool) *packetBuffers {
 	return &packetBuffers{
 		mu:                   sync.RWMutex{},
 		buffers:              list.New(),
@@ -52,6 +54,7 @@ func newPacketBuffers(minLatency, maxLatency time.Duration) *packetBuffers {
 		waitTimes:            make([]time.Duration, waitTimeSize),
 		lastSequenceWaitTime: 0,
 		packetAvailableWait:  sync.NewCond(&sync.Mutex{}),
+		enableDynamicLatency: dynamicLatency,
 	}
 }
 
@@ -70,8 +73,11 @@ func (p *packetBuffers) MinLatency() time.Duration {
 func (p *packetBuffers) Add(pkt *rtp.Packet) error {
 	p.mu.Lock()
 	defer func() {
-		p.checkOrderedPacketAndRecordTimes()
-		p.checkWaitTimeAdjuster()
+		if p.enableDynamicLatency {
+			p.checkOrderedPacketAndRecordTimes()
+			p.checkWaitTimeAdjuster()
+		}
+
 		p.mu.Unlock()
 	}()
 
@@ -290,6 +296,10 @@ func (p *packetBuffers) Close() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	p.packetAvailableWait.L.Lock()
+	p.ended = true
+	p.packetAvailableWait.L.Unlock()
+
 	p.Clear()
 
 	// make sure we don't have any waiters
@@ -305,6 +315,10 @@ func (p *packetBuffers) WaitAvailablePacket() {
 
 	p.packetAvailableWait.L.Lock()
 	defer p.packetAvailableWait.L.Unlock()
+
+	if p.ended {
+		return
+	}
 
 	p.packetAvailableWait.Wait()
 }
