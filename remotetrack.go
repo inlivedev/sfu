@@ -51,7 +51,7 @@ func newRemoteTrack(ctx context.Context, track IRemoteTrack, minWait, maxWait, p
 		onStatsUpdated:        onStatsUpdated,
 		onPLI:                 onPLI,
 		onRead:                onRead,
-		packetBuffers:         newPacketBuffers(minWait, maxWait, false),
+		packetBuffers:         newPacketBuffers(minWait, maxWait, true),
 	}
 
 	if pliInterval > 0 {

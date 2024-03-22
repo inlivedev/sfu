@@ -73,8 +73,8 @@ func (p *packetBuffers) MinLatency() time.Duration {
 func (p *packetBuffers) Add(pkt *rtp.Packet) error {
 	p.mu.Lock()
 	defer func() {
+		p.checkOrderedPacketAndRecordTimes()
 		if p.enableDynamicLatency {
-			p.checkOrderedPacketAndRecordTimes()
 			p.checkWaitTimeAdjuster()
 		}
 
