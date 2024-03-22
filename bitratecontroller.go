@@ -527,9 +527,10 @@ func (bc *bitrateController) onRemoteViewedSizeChanged(videoSize videoSize) {
 
 	glog.Info("bitrate: track ", videoSize.TrackID, " video size changed ", videoSize.Width, "x", videoSize.Height, "=", videoSize.Width*videoSize.Height, " pixels")
 
+	// TODO: check if it is necessary to set max quality to none
 	if videoSize.Width == 0 || videoSize.Height == 0 {
-		glog.Info("bitrate: track ", videoSize.TrackID, " video size is 0, set max quality to none")
-		claim.track.SetMaxQuality(QualityNone)
+		glog.Info("bitrate: track ", videoSize.TrackID, " video size is 0, set max quality to low")
+		claim.track.SetMaxQuality(QualityLow)
 	}
 
 	if videoSize.Width*videoSize.Height <= bc.client.sfu.bitrateConfigs.VideoLowPixels {

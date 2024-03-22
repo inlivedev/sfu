@@ -36,7 +36,6 @@ type clientTrack struct {
 	localTrack  *webrtc.TrackLocalStaticRTP
 	remoteTrack *remoteTrack
 	isScreen    bool
-	packetPool  sync.Pool
 }
 
 func newClientTrack(c *Client, t *Track, isScreen bool) *clientTrack {

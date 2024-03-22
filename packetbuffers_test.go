@@ -31,7 +31,7 @@ func TestAdd(t *testing.T) {
 	minLatency := 10 * time.Millisecond
 	maxLatency := 100 * time.Millisecond
 
-	caches := newPacketBuffers(minLatency, maxLatency)
+	caches := newPacketBuffers(minLatency, maxLatency, false)
 
 	for i, pkt := range packets {
 		err := caches.Add(pkt)
@@ -66,7 +66,7 @@ func TestAddLost(t *testing.T) {
 	minLatency := 10 * time.Millisecond
 	maxLatency := 100 * time.Millisecond
 
-	caches := newPacketBuffers(minLatency, maxLatency)
+	caches := newPacketBuffers(minLatency, maxLatency, false)
 
 	for i, pkt := range packets {
 		if pkt.SequenceNumber == 65533 {
@@ -110,7 +110,7 @@ func TestDuplicateAdd(t *testing.T) {
 	minLatency := 10 * time.Millisecond
 	maxLatency := 100 * time.Millisecond
 
-	caches := newPacketBuffers(minLatency, maxLatency)
+	caches := newPacketBuffers(minLatency, maxLatency, false)
 
 	for i, pkt := range packets {
 		if i == 9 {
@@ -156,7 +156,7 @@ func TestFlush(t *testing.T) {
 	minLatency := 10 * time.Millisecond
 	maxLatency := 100 * time.Millisecond
 
-	caches := newPacketBuffers(minLatency, maxLatency)
+	caches := newPacketBuffers(minLatency, maxLatency, false)
 
 	for i, pkt := range packets {
 		err := caches.Add(pkt)
@@ -194,7 +194,7 @@ func TestFlushBetweenAdded(t *testing.T) {
 	minLatency := 10 * time.Millisecond
 	maxLatency := 100 * time.Millisecond
 
-	caches := newPacketBuffers(minLatency, maxLatency)
+	caches := newPacketBuffers(minLatency, maxLatency, false)
 
 	sorted := make([]*rtppool.RetainablePacket, 0)
 
@@ -238,7 +238,7 @@ func TestLatency(t *testing.T) {
 	minLatency := 50 * time.Millisecond
 	maxLatency := 100 * time.Millisecond
 
-	caches := newPacketBuffers(minLatency, maxLatency)
+	caches := newPacketBuffers(minLatency, maxLatency, false)
 
 	sorted := make([]*rtppool.RetainablePacket, 0)
 	seqs := make([]uint16, 0)
@@ -306,7 +306,7 @@ func BenchmarkPushPool(b *testing.B) {
 		}
 	}
 
-	packetBuffers := newPacketBuffers(10*time.Millisecond, 100*time.Millisecond)
+	packetBuffers := newPacketBuffers(10*time.Millisecond, 100*time.Millisecond, false)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -316,7 +316,7 @@ func BenchmarkPushPool(b *testing.B) {
 }
 
 func BenchmarkPopPool(b *testing.B) {
-	packetBuffers := newPacketBuffers(10*time.Millisecond, 100*time.Millisecond)
+	packetBuffers := newPacketBuffers(10*time.Millisecond, 100*time.Millisecond, false)
 
 	for i := 0; i < b.N; i++ {
 		packetBuffers.Add(&rtp.Packet{
