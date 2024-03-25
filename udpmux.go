@@ -19,6 +19,7 @@ func NewUDPMux(ctx context.Context, port int) *UDPMux {
 	opts := []ice.UDPMuxFromPortOption{
 		ice.UDPMuxFromPortWithReadBufferSize(25_000_000),
 		ice.UDPMuxFromPortWithWriteBufferSize(25_000_000),
+		ice.UDPMuxFromPortWithNetworks(ice.NetworkTypeUDP4),
 	}
 
 	mux, err := ice.NewMultiUDPMuxFromPort(port, opts...)
