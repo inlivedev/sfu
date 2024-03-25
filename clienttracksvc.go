@@ -181,18 +181,6 @@ func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 	currentTID := t.tid
 	currentSID := t.sid
 
-	var err error
-
-	if isLatePacket {
-		glog.Info("scalabletrack: packet ", p.SequenceNumber, " is late")
-		currentBaseSequence, currentSID, currentTID, err = t.packetCaches.GetDecision(p.SequenceNumber, currentBaseSequence, currentSID, currentTID)
-		if err != nil &&
-			(!vp9Packet.P && vp9Packet.B && currentSID < vp9Packet.SID && vp9Packet.SID <= targetSID) ||
-			(currentSID > targetSID && vp9Packet.E) {
-			t.RequestPLI()
-		}
-	}
-
 	// check if possible to scale up/down temporal layer
 	if t.tid < targetTID && !isLatePacket {
 		if vp9Packet.U && vp9Packet.B && currentTID < vp9Packet.TID && vp9Packet.TID <= targetTID {

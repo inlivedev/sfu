@@ -1,6 +1,7 @@
 package sfu
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -18,6 +19,9 @@ var unsortedNumbers = []uint16{65526, 65527, 65527, 65526, 65532, 65531, 65533, 
 func TestAdd(t *testing.T) {
 	t.Parallel()
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	packets := make([]*rtp.Packet, len(unsortedNumbers))
 
 	for i, seq := range unsortedNumbers {
@@ -31,7 +35,7 @@ func TestAdd(t *testing.T) {
 	minLatency := 10 * time.Millisecond
 	maxLatency := 100 * time.Millisecond
 
-	caches := newPacketBuffers(minLatency, maxLatency, false)
+	caches := newPacketBuffers(ctx, minLatency, maxLatency, false)
 
 	for i, pkt := range packets {
 		err := caches.Add(pkt)
@@ -66,7 +70,10 @@ func TestAddLost(t *testing.T) {
 	minLatency := 10 * time.Millisecond
 	maxLatency := 100 * time.Millisecond
 
-	caches := newPacketBuffers(minLatency, maxLatency, false)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	caches := newPacketBuffers(ctx, minLatency, maxLatency, false)
 
 	for i, pkt := range packets {
 		if pkt.SequenceNumber == 65533 {
@@ -110,7 +117,10 @@ func TestDuplicateAdd(t *testing.T) {
 	minLatency := 10 * time.Millisecond
 	maxLatency := 100 * time.Millisecond
 
-	caches := newPacketBuffers(minLatency, maxLatency, false)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	caches := newPacketBuffers(ctx, minLatency, maxLatency, false)
 
 	for i, pkt := range packets {
 		if i == 9 {
@@ -156,7 +166,10 @@ func TestFlush(t *testing.T) {
 	minLatency := 10 * time.Millisecond
 	maxLatency := 100 * time.Millisecond
 
-	caches := newPacketBuffers(minLatency, maxLatency, false)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	caches := newPacketBuffers(ctx, minLatency, maxLatency, false)
 
 	for i, pkt := range packets {
 		err := caches.Add(pkt)
@@ -194,7 +207,10 @@ func TestFlushBetweenAdded(t *testing.T) {
 	minLatency := 10 * time.Millisecond
 	maxLatency := 100 * time.Millisecond
 
-	caches := newPacketBuffers(minLatency, maxLatency, false)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	caches := newPacketBuffers(ctx, minLatency, maxLatency, false)
 
 	sorted := make([]*rtppool.RetainablePacket, 0)
 
@@ -238,7 +254,10 @@ func TestLatency(t *testing.T) {
 	minLatency := 50 * time.Millisecond
 	maxLatency := 100 * time.Millisecond
 
-	caches := newPacketBuffers(minLatency, maxLatency, false)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	caches := newPacketBuffers(ctx, minLatency, maxLatency, false)
 
 	sorted := make([]*rtppool.RetainablePacket, 0)
 	seqs := make([]uint16, 0)
@@ -298,6 +317,8 @@ func TestLatency(t *testing.T) {
 }
 
 func BenchmarkPushPool(b *testing.B) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	testPackets := make([]*rtp.Packet, b.N)
 	for i := 0; i < b.N; i++ {
 		testPackets[i] = &rtp.Packet{
@@ -306,7 +327,7 @@ func BenchmarkPushPool(b *testing.B) {
 		}
 	}
 
-	packetBuffers := newPacketBuffers(10*time.Millisecond, 100*time.Millisecond, false)
+	packetBuffers := newPacketBuffers(ctx, 10*time.Millisecond, 100*time.Millisecond, false)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -316,7 +337,9 @@ func BenchmarkPushPool(b *testing.B) {
 }
 
 func BenchmarkPopPool(b *testing.B) {
-	packetBuffers := newPacketBuffers(10*time.Millisecond, 100*time.Millisecond, false)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	packetBuffers := newPacketBuffers(ctx, 10*time.Millisecond, 100*time.Millisecond, false)
 
 	for i := 0; i < b.N; i++ {
 		packetBuffers.Add(&rtp.Packet{

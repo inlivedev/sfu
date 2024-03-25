@@ -457,11 +457,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 				&rtcp.PictureLossIndication{MediaSSRC: uint32(remoteTrack.SSRC())},
 			}); err != nil {
 				glog.Error("client: error write pli ", err)
-				return
 			}
-
-			glog.Info("client: ", client.ID(), " send PLI to ", remoteTrackID, " RID: ", remoteTrack.RID())
-
 		}
 
 		onStatsUpdated := func(stats *stats.Stats) {
