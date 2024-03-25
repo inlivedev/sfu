@@ -107,7 +107,7 @@ type RoomOptions struct {
 	PLIInterval time.Duration `json:"pli_interval"`
 	// Configure the mapping of spatsial and temporal layers to quality level
 	// Use this to use scalable video coding (SVC) to control the bitrate level of the video
-	QualityPreset QualityPreset `json:"quality_preset"`
+	QualityPresets QualityPresets `json:"quality_presets"`
 	// Configure the timeout when the room is empty it will close after the timeout exceeded
 	EmptyRoomTimeout time.Duration `json:"empty_room_timeout"`
 }
@@ -115,7 +115,7 @@ type RoomOptions struct {
 func DefaultRoomOptions() RoomOptions {
 	return RoomOptions{
 		Bitrates:         DefaultBitrates(),
-		QualityPreset:    DefaultQualityPreset(),
+		QualityPresets:   DefaultQualityPresets(),
 		Codecs:           []string{webrtc.MimeTypeVP9, webrtc.MimeTypeH264, webrtc.MimeTypeVP8, "audio/red", webrtc.MimeTypeOpus},
 		PLIInterval:      0,
 		EmptyRoomTimeout: 1 * time.Minute,

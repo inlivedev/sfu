@@ -117,7 +117,7 @@ type SFU struct {
 	mux                       *UDPMux
 	onStop                    func()
 	pliInterval               time.Duration
-	qualityRef                QualityPreset
+	qualityRef                QualityPresets
 	portStart                 uint16
 	portEnd                   uint16
 	publicIP                  string
@@ -138,7 +138,7 @@ type sfuOptions struct {
 	PortStart               uint16
 	PortEnd                 uint16
 	Bitrates                BitrateConfigs
-	QualityPreset           QualityPreset
+	QualityPresets          QualityPresets
 	Codecs                  []string
 	PLIInterval             time.Duration
 	PublicIP                string
@@ -160,7 +160,7 @@ func New(ctx context.Context, opts sfuOptions) *SFU {
 		mux:                       opts.Mux,
 		bitrateConfigs:            opts.Bitrates,
 		pliInterval:               opts.PLIInterval,
-		qualityRef:                opts.QualityPreset,
+		qualityRef:                opts.QualityPresets,
 		publicIP:                  opts.PublicIP,
 		relayTracks:               make(map[string]ITrack),
 		portStart:                 opts.PortStart,
@@ -507,7 +507,7 @@ func (s *SFU) PLIInterval() time.Duration {
 	return s.pliInterval
 }
 
-func (s *SFU) QualityPreset() QualityPreset {
+func (s *SFU) QualityPresets() QualityPresets {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

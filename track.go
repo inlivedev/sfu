@@ -245,7 +245,7 @@ func (t *Track) subscribe(c *Client) iClientTrack {
 	var ct iClientTrack
 
 	if t.MimeType() == webrtc.MimeTypeVP9 {
-		ct = newScaleableClientTrack(c, t, c.SFU().QualityPreset())
+		ct = newScaleableClientTrack(c, t, c.SFU().QualityPresets())
 	} else if t.Kind() == webrtc.RTPCodecTypeAudio && t.PayloadType() == 63 {
 		glog.Info("track: red enabled", c.receiveRED)
 

@@ -86,7 +86,7 @@ func (m *Manager) NewRoom(id, name, roomType string, opts RoomOptions) (*Room, e
 		PortEnd:                 m.options.PortEnd,
 		Codecs:                  opts.Codecs,
 		PLIInterval:             opts.PLIInterval,
-		QualityPreset:           opts.QualityPreset,
+		QualityPresets:          opts.QualityPresets,
 		PublicIP:                m.options.PublicIP,
 		NAT1To1IPsCandidateType: m.options.NAT1To1IPsCandidateType,
 	}

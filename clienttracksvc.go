@@ -11,62 +11,36 @@ type IQualityPreset interface {
 	GetTID() uint8
 }
 
-type QualityHighPreset struct {
-	SID uint8
-	TID uint8
-}
-
-func (q QualityHighPreset) GetSID() uint8 {
-	return q.SID
-}
-
-func (q QualityHighPreset) GetTID() uint8 {
-	return q.TID
-}
-
-type QualityMidPreset struct {
-	SID uint8
-	TID uint8
-}
-
-func (q QualityMidPreset) GetSID() uint8 {
-	return q.SID
-}
-
-func (q QualityMidPreset) GetTID() uint8 {
-	return q.TID
-}
-
-type QualityLowPreset struct {
-	SID uint8
-	TID uint8
-}
-
-func (q QualityLowPreset) GetSID() uint8 {
-	return q.SID
-}
-
-func (q QualityLowPreset) GetTID() uint8 {
-	return q.TID
-}
-
 type QualityPreset struct {
-	High QualityHighPreset
-	Mid  QualityMidPreset
-	Low  QualityLowPreset
+	SID uint8 `json:"sid"`
+	TID uint8 `json:"tid"`
 }
 
-func DefaultQualityPreset() QualityPreset {
-	return QualityPreset{
-		High: QualityHighPreset{
+func (q QualityPreset) GetSID() uint8 {
+	return q.SID
+}
+
+func (q QualityPreset) GetTID() uint8 {
+	return q.TID
+}
+
+type QualityPresets struct {
+	High QualityPreset `json:"high"`
+	Mid  QualityPreset `json:"mid"`
+	Low  QualityPreset `json:"low"`
+}
+
+func DefaultQualityPresets() QualityPresets {
+	return QualityPresets{
+		High: QualityPreset{
 			SID: 2,
 			TID: 2,
 		},
-		Mid: QualityMidPreset{
+		Mid: QualityPreset{
 			SID: 1,
 			TID: 1,
 		},
-		Low: QualityLowPreset{
+		Low: QualityPreset{
 			SID: 0,
 			TID: 0,
 		},
@@ -82,7 +56,7 @@ type scaleableClientTrack struct {
 	lastTimestamp   uint32
 	lastSequence    uint16
 	baseSequence    uint16
-	qualityPreset   QualityPreset
+	qualityPresets  QualityPresets
 	hasInterPicture bool
 	init            bool
 	packetCaches    *packetCaches
@@ -91,17 +65,17 @@ type scaleableClientTrack struct {
 func newScaleableClientTrack(
 	c *Client,
 	t *Track,
-	qualityPreset QualityPreset,
+	qualityPresets QualityPresets,
 ) *scaleableClientTrack {
 
 	sct := &scaleableClientTrack{
-		clientTrack:   newClientTrack(c, t, false),
-		qualityPreset: qualityPreset,
-		maxQuality:    QualityHigh,
-		lastQuality:   QualityHigh,
-		tid:           qualityPreset.High.TID,
-		sid:           qualityPreset.High.SID,
-		packetCaches:  newPacketCaches(),
+		clientTrack:    newClientTrack(c, t, false),
+		qualityPresets: qualityPresets,
+		maxQuality:     QualityHigh,
+		lastQuality:    QualityHigh,
+		tid:            qualityPresets.High.TID,
+		sid:            qualityPresets.High.SID,
+		packetCaches:   newPacketCaches(),
 	}
 
 	return sct
@@ -153,11 +127,11 @@ func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 
 	switch quality {
 	case QualityHigh:
-		qualityPreset = t.qualityPreset.High
+		qualityPreset = t.qualityPresets.High
 	case QualityMid:
-		qualityPreset = t.qualityPreset.Mid
+		qualityPreset = t.qualityPresets.Mid
 	case QualityLow:
-		qualityPreset = t.qualityPreset.Low
+		qualityPreset = t.qualityPresets.Low
 	}
 
 	targetSID := qualityPreset.GetSID()
