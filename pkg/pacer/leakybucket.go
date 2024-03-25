@@ -239,7 +239,6 @@ func (p *LeakyBucketPacer) Run() {
 	defer ticker.Stop()
 
 	lastSent := time.Now()
-
 	for {
 		select {
 		case <-p.done:

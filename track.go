@@ -354,17 +354,23 @@ type SimulcastTrack struct {
 	onAddedRemoteTrackCallbacks []func(*remoteTrack)
 	onReadCallbacks             []func(*rtp.Packet, QualityLevel)
 	pliInterval                 time.Duration
-	onPLI                       func()
+	onPLIHigh                   func()
+	onPLIMid                    func()
+	onPLILow                    func()
 }
 
 func newSimulcastTrack(ctx context.Context, clientid string, track IRemoteTrack, minWait, maxWait, pliInterval time.Duration, onPLI func(), stats stats.Getter, onStatsUpdated func(*stats.Stats)) ITrack {
+	remoteTrackID := strings.ReplaceAll(strings.ReplaceAll(track.ID(), "{", ""), "}", "")
+	streamID := strings.ReplaceAll(strings.ReplaceAll(track.StreamID(), "{", ""), "}", "")
+	msid := strings.ReplaceAll(strings.ReplaceAll(track.Msid(), "{", ""), "}", "")
+
 	t := &SimulcastTrack{
 		mu: sync.RWMutex{},
 		base: &baseTrack{
-			id:           track.ID(),
+			id:           remoteTrackID,
 			isScreen:     &atomic.Bool{},
-			msid:         track.Msid(),
-			streamid:     track.StreamID(),
+			msid:         msid,
+			streamid:     streamID,
 			clientid:     clientid,
 			kind:         track.Kind(),
 			codec:        track.Codec(),
@@ -380,10 +386,9 @@ func newSimulcastTrack(ctx context.Context, clientid string, track IRemoteTrack,
 		onAddedRemoteTrackCallbacks: make([]func(*remoteTrack), 0),
 		onReadCallbacks:             make([]func(*rtp.Packet, QualityLevel), 0),
 		pliInterval:                 pliInterval,
-		onPLI:                       onPLI,
 	}
 
-	rt := t.AddRemoteTrack(ctx, track, minWait, maxWait, stats, onStatsUpdated)
+	rt := t.AddRemoteTrack(ctx, track, minWait, maxWait, stats, onStatsUpdated, onPLI)
 	t.context, t.cancel = context.WithCancel(rt.Context())
 
 	go func() {
@@ -462,7 +467,7 @@ func (t *SimulcastTrack) Kind() webrtc.RTPCodecType {
 	return t.base.kind
 }
 
-func (t *SimulcastTrack) AddRemoteTrack(ctx context.Context, track IRemoteTrack, minWait, maxWait time.Duration, stats stats.Getter, onStatsUpdated func(*stats.Stats)) *remoteTrack {
+func (t *SimulcastTrack) AddRemoteTrack(ctx context.Context, track IRemoteTrack, minWait, maxWait time.Duration, stats stats.Getter, onStatsUpdated func(*stats.Stats), onPLI func()) *remoteTrack {
 	var remoteTrack *remoteTrack
 
 	quality := RIDToQuality(track.RID())
@@ -530,7 +535,7 @@ func (t *SimulcastTrack) AddRemoteTrack(ctx context.Context, track IRemoteTrack,
 
 	}
 
-	remoteTrack = newRemoteTrack(ctx, track, minWait, maxWait, t.pliInterval, t.onPLI, stats, onStatsUpdated, onRead)
+	remoteTrack = newRemoteTrack(ctx, track, minWait, maxWait, t.pliInterval, onPLI, stats, onStatsUpdated, onRead)
 
 	switch quality {
 	case QualityHigh:
@@ -719,23 +724,26 @@ func (t *SimulcastTrack) isTrackActive(quality QualityLevel) bool {
 	return false
 }
 
-func (t *SimulcastTrack) sendPLI(quality QualityLevel) {
+func (t *SimulcastTrack) sendPLI() {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
-	switch quality {
-	case QualityHigh:
-		if t.remoteTrackHigh != nil {
-			t.remoteTrackHigh.sendPLI()
-		}
-	case QualityMid:
-		if t.remoteTrackMid != nil {
-			t.remoteTrackMid.sendPLI()
-		}
-	case QualityLow:
-		if t.remoteTrackLow != nil {
-			t.remoteTrackLow.sendPLI()
-		}
+	if t.remoteTrackHigh != nil {
+		t.remoteTrackHigh.sendPLI()
+	} else {
+		glog.Warning("track: remote track high is nil")
+	}
+
+	if t.remoteTrackMid != nil {
+		t.remoteTrackMid.sendPLI()
+	} else {
+		glog.Warning("track: remote track mid is nil")
+	}
+
+	if t.remoteTrackLow != nil {
+		t.remoteTrackLow.sendPLI()
+	} else {
+		glog.Warning("track: remote track low is nil")
 	}
 }
 

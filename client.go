@@ -250,6 +250,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		return gcc.NewSendSideBWE(
 			gcc.SendSideBWEInitialBitrate(int(s.bitrateConfigs.InitialBandwidth)),
 			gcc.SendSideBWEPacer(pacer.NewLeakyBucketPacer(int(s.bitrateConfigs.InitialBandwidth))),
+			// gcc.SendSideBWEPacer(gcc.NewNoOpPacer()),
 		)
 	})
 	if err != nil {
@@ -435,6 +436,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 	// Set a handler for when a new remote track starts, this just distributes all our packets
 	// to connected peers
 	peerConnection.OnTrack(func(remoteTrack *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
+
 		var track ITrack
 
 		remoteTrackID := strings.ReplaceAll(strings.ReplaceAll(remoteTrack.ID(), "{", ""), "}", "")
@@ -455,7 +457,11 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 				&rtcp.PictureLossIndication{MediaSSRC: uint32(remoteTrack.SSRC())},
 			}); err != nil {
 				glog.Error("client: error write pli ", err)
+				return
 			}
+
+			glog.Info("client: ", client.ID(), " send PLI to ", remoteTrackID, " RID: ", remoteTrack.RID())
+
 		}
 
 		onStatsUpdated := func(stats *stats.Stats) {
@@ -514,7 +520,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 				}
 
 			} else if simulcast, ok = track.(*SimulcastTrack); ok {
-				simulcast.AddRemoteTrack(simulcast.context, remoteTrack, opts.JitterBufferMinWait, opts.JitterBufferMaxWait, client.statsGetter, onStatsUpdated)
+				simulcast.AddRemoteTrack(simulcast.context, remoteTrack, opts.JitterBufferMinWait, opts.JitterBufferMaxWait, client.statsGetter, onStatsUpdated, onPLI)
 			}
 
 			// only process track when the lowest quality is available
@@ -920,11 +926,6 @@ func (c *Client) setClientTrack(t ITrack) iClientTrack {
 		err = senderTcv.Stop()
 		if err != nil {
 			glog.Error("client: error stop sender ", err)
-		}
-
-		if err := c.peerConnection.PC().RemoveTrack(sender); err != nil {
-			glog.Error("client: error remove track ", err)
-			return
 		}
 	}()
 
@@ -1334,7 +1335,7 @@ func (c *Client) SetQuality(quality QualityLevel) {
 	c.quality.Store(uint32(quality))
 	for _, claim := range c.bitrateController.Claims() {
 		if claim.track.IsSimulcast() {
-			claim.track.(*simulcastClientTrack).remoteTrack.sendPLI(quality)
+			claim.track.(*simulcastClientTrack).remoteTrack.sendPLI()
 		} else if claim.track.IsScaleable() {
 			claim.track.RequestPLI()
 		}
