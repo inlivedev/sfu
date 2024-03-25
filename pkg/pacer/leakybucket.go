@@ -14,7 +14,14 @@ import (
 	"github.com/pion/rtp"
 )
 
-var errNoQueueFound = errors.New("no queue found for ssrc")
+var (
+	ErrNoQueueFound = errors.New("no queue found for ssrc")
+	ErrDuplicate    = errors.New("packet sequence already exists in the queue")
+)
+
+const (
+	uint16SizeHalf = uint16(1 << 15)
+)
 
 type item struct {
 	packet     *rtppool.RetainablePacket
@@ -26,6 +33,54 @@ type queue struct {
 	list.List
 	mu sync.RWMutex
 }
+
+// func (q *queue) Front() *list.Element {
+// 	q.mu.RLock()
+// 	defer q.mu.RUnlock()
+// 	return q.List.Front()
+// }
+
+// func (q *queue) Back() *list.Element {
+// 	q.mu.RLock()
+// 	defer q.mu.RUnlock()
+// 	return q.List.Back()
+// }
+
+// func (q *queue) Len() int {
+// 	q.mu.RLock()
+// 	defer q.mu.RUnlock()
+// 	return q.List.Len()
+// }
+
+// func (q *queue) PushBack(v *item) {
+// 	q.mu.Lock()
+// 	defer q.mu.Unlock()
+// 	q.List.PushBack(v)
+// }
+
+// func (q *queue) PushFront(v *item) {
+// 	q.mu.Lock()
+// 	defer q.mu.Unlock()
+// 	q.List.PushFront(v)
+// }
+
+func (q *queue) Remove(e *list.Element) *item {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+
+	i, ok := q.List.Remove(e).(*item)
+	if !ok {
+		return nil
+	}
+
+	return i
+}
+
+// func (q *queue) InsertAfter(v *item, mark *list.Element) {
+// 	q.mu.Lock()
+// 	defer q.mu.Unlock()
+// 	q.List.InsertAfter(v, mark)
+// }
 
 // LeakyBucketPacer implements a leaky bucket pacing algorithm
 type LeakyBucketPacer struct {
@@ -62,15 +117,15 @@ func NewLeakyBucketPacer(initialBitrate int) *LeakyBucketPacer {
 // AddStream adds a new stream and its corresponding writer to the pacer
 func (p *LeakyBucketPacer) AddStream(ssrc uint32, writer interceptor.RTPWriter) {
 	p.writerLock.Lock()
-	defer p.writerLock.Unlock()
-	p.qLock.Lock()
-	defer p.qLock.Unlock()
-
 	p.ssrcToWriter[ssrc] = writer
+	p.writerLock.Unlock()
+
+	p.qLock.Lock()
 	p.queues[ssrc] = &queue{
 		List: list.List{},
 		mu:   sync.RWMutex{},
 	}
+	p.qLock.Unlock()
 }
 
 // SetTargetBitrate updates the target bitrate at which the pacer is allowed to
@@ -88,34 +143,92 @@ func (p *LeakyBucketPacer) getTargetBitrate() int {
 	return p.targetBitrate
 }
 
+func (p *LeakyBucketPacer) getWriter(ssrc uint32) interceptor.RTPWriter {
+	p.writerLock.RLock()
+	defer p.writerLock.RUnlock()
+
+	writer, ok := p.ssrcToWriter[ssrc]
+
+	if !ok {
+		glog.Warningf("no writer found for ssrc: %v", ssrc)
+		return nil
+	}
+
+	return writer
+}
+
+func (p *LeakyBucketPacer) getQueue(ssrc uint32) *queue {
+	p.qLock.RLock()
+	defer p.qLock.RUnlock()
+	queue, ok := p.queues[ssrc]
+	if !ok {
+		return nil
+	}
+	return queue
+
+}
+
 // Write sends a packet with header and payload the a previously registered
 // stream.
 func (p *LeakyBucketPacer) Write(header *rtp.Header, payload []byte, attributes interceptor.Attributes) (int, error) {
 	pkt := rtppool.NewPacket(header, payload)
+	err := pkt.Retain()
+	if err != nil {
+		glog.Warning("failed to retain packet: ", err)
+		return 0, err
+	}
 
-	p.qLock.RLock()
-	queue, ok := p.queues[header.SSRC]
-	p.qLock.RUnlock()
-
-	// could be that the queue was cleaned up for closing the pacer
+	queue := p.getQueue(header.SSRC)
 	if queue == nil {
-		return 0, nil
-	}
-
-	queue.mu.Lock()
-
-	if !ok {
 		glog.Error("no queue found for ssrc: ", header.SSRC)
-		return 0, errNoQueueFound
+
+		return 0, ErrNoQueueFound
 	}
 
-	queue.PushBack(&item{
+	newItem := &item{
 		packet:     pkt,
 		size:       len(payload),
 		attributes: attributes,
-	})
+	}
 
-	queue.mu.Unlock()
+	// queue.PushBack(newItem)
+	queue.mu.Lock()
+	defer queue.mu.Unlock()
+	if queue.Len() == 0 {
+		queue.PushBack(newItem)
+
+		return header.MarshalSize() + len(payload), nil
+	}
+
+Loop:
+	for e := queue.Back(); e != nil; e = e.Prev() {
+
+		currentCache, _ := e.Value.(*item)
+
+		if currentCache.packet.Header().SequenceNumber == pkt.Header().SequenceNumber {
+			glog.Warning("packet cache: packet sequence ", pkt.Header().SequenceNumber, " already exists in the cache, will not adding the packet")
+
+			return 0, ErrDuplicate
+		}
+
+		if currentCache.packet.Header().SequenceNumber < pkt.Header().SequenceNumber && pkt.Header().SequenceNumber-currentCache.packet.Header().SequenceNumber < uint16SizeHalf {
+			queue.InsertAfter(newItem, e)
+
+			break Loop
+		}
+
+		if currentCache.packet.Header().SequenceNumber-pkt.Header().SequenceNumber > uint16SizeHalf {
+			queue.InsertAfter(newItem, e)
+
+			break Loop
+		}
+
+		if e.Prev() == nil {
+			queue.PushFront(newItem)
+
+			break Loop
+		}
+	}
 
 	return header.MarshalSize() + len(payload), nil
 }
@@ -145,40 +258,37 @@ func (p *LeakyBucketPacer) Run() {
 				for _, queue := range p.queues {
 					queue.mu.RLock()
 					if queue.Len() == 0 {
+						queue.mu.RUnlock()
 						emptyQueueCount++
 
 						if emptyQueueCount == len(p.queues) {
-							queue.mu.RUnlock()
 							p.qLock.RUnlock()
 							break Loop
 						}
-						queue.mu.RUnlock()
+
 						continue
 					}
+
+					front := queue.Front()
 					queue.mu.RUnlock()
 
-					queue.mu.Lock()
-					next, ok := queue.Remove(queue.Front()).(*item)
-					queue.mu.Unlock()
-
-					if !ok {
+					next := queue.Remove(front)
+					if next == nil {
 						glog.Warningf("failed to access leaky bucket pacer queue, cast failed")
 						emptyQueueCount++
 
 						continue
 					}
 
-					p.writerLock.RLock()
-					writer, ok := p.ssrcToWriter[next.packet.Header().SSRC]
-					p.writerLock.RUnlock()
-
-					if !ok {
+					writer := p.getWriter(next.packet.Header().SSRC)
+					if writer == nil {
 						glog.Warningf("no writer found for ssrc: %v", next.packet.Header().SSRC)
 						next.packet.Release()
 
 						continue
 					}
 
+					// glog.Info("sending packet SSRC ", next.packet.Header().SSRC, ": ", next.packet.Header().SequenceNumber)
 					n, err := writer.Write(next.packet.Header(), next.packet.Payload(), next.attributes)
 					if err != nil {
 						glog.Error("failed to write packet: ", err)
@@ -202,15 +312,23 @@ func (p *LeakyBucketPacer) Close() error {
 	p.qLock.Lock()
 	defer p.qLock.Unlock()
 	for ssrc, queue := range p.queues {
-		queue.mu.Lock()
 		for e := queue.Front(); e != nil; e = e.Next() {
-			packet := e.Value.(*item).packet
-			packet.Release()
+			i, ok := e.Value.(*item)
+			if !ok {
+				continue
+			}
+
+			writer := p.getWriter(ssrc)
+			if writer != nil {
+				_, _ = writer.Write(i.packet.Header(), i.packet.Payload(), nil)
+			}
+
+			i.packet.Release()
 		}
 
 		queue.Init()
 		delete(p.queues, ssrc)
-		queue.mu.Unlock()
+
 	}
 
 	close(p.done)

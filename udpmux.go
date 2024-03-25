@@ -28,9 +28,10 @@ func NewUDPMux(ctx context.Context, port int) *UDPMux {
 	}
 
 	go func() {
+		defer mux.Close()
 		<-localCtx.Done()
 		cancel()
-		mux.Close()
+
 	}()
 
 	return &UDPMux{

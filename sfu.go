@@ -547,7 +547,7 @@ func (s *SFU) AddRelayTrack(ctx context.Context, id, streamid, rid, clientid str
 			s.relayTracks[relayTrack.ID()] = track
 
 		} else if simulcast, ok = track.(*SimulcastTrack); ok {
-			simulcast.AddRemoteTrack(simulcast.context, relayTrack, 0, 0, nil, nil)
+			simulcast.AddRemoteTrack(simulcast.context, relayTrack, 0, 0, nil, nil, onPLI)
 		}
 		s.mu.Unlock()
 	}

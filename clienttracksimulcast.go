@@ -4,7 +4,6 @@ import (
 	"context"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/golang/glog"
 	"github.com/pion/rtp"
@@ -71,9 +70,7 @@ func newSimulcastClientTrack(c *Client, t *SimulcastTrack) *simulcastClientTrack
 
 	ct.SetMaxQuality(QualityHigh)
 
-	ct.remoteTrack.sendPLI(QualityHigh)
-	ct.remoteTrack.sendPLI(QualityMid)
-	ct.remoteTrack.sendPLI(QualityLow)
+	ct.remoteTrack.sendPLI()
 
 	return ct
 }
@@ -92,17 +89,14 @@ func (t *simulcastClientTrack) isFirstKeyframePacket(p *rtp.Packet) bool {
 	return isKeyframe && t.lastTimestamp.Load() != p.Timestamp
 }
 
-func (t *simulcastClientTrack) send(p *rtp.Packet, quality QualityLevel, lastQuality QualityLevel) {
+func (t *simulcastClientTrack) send(p *rtp.Packet, quality QualityLevel) {
 	t.lastTimestamp.Store(p.Timestamp)
-
-	if lastQuality != quality {
-		t.lastQuality.Store(uint32(quality))
-	}
 
 	t.rewritePacket(p, quality)
 
-	t.writeRTP(p)
+	// glog.Info("track: ", t.id, " send packet with quality ", quality, " and sequence number ", p.SequenceNumber)
 
+	t.writeRTP(p)
 }
 
 func (t *simulcastClientTrack) writeRTP(p *rtp.Packet) {
@@ -112,67 +106,52 @@ func (t *simulcastClientTrack) writeRTP(p *rtp.Packet) {
 }
 
 func (t *simulcastClientTrack) push(p *rtp.Packet, quality QualityLevel) {
-	var trackQuality QualityLevel
+	t.mu.Lock()
+	defer t.mu.Unlock()
 
-	lastQuality := t.LastQuality()
+	currentQuality := t.LastQuality()
+
+	targetQuality := t.getQuality()
 
 	if !t.client.bitrateController.exists(t.ID()) {
 		// do nothing if the bitrate claim is not exist
 		return
 	}
 
-	isFirstKeyframePacket := t.isFirstKeyframePacket(p)
+	isKeyframe := IsKeyframe(t.mimeType, p)
 
 	// check if it's a first packet to send
-	if lastQuality == QualityNone && t.sequenceNumber.Load() == 0 {
+	if currentQuality == QualityNone && t.sequenceNumber.Load() == 0 {
 		// we try to send the low quality first	if the track is active and fallback to upper quality if not
 		if t.remoteTrack.getRemoteTrack(QualityLow) != nil && quality == QualityLow {
-			trackQuality = QualityLow
 			t.lastQuality.Store(uint32(QualityLow))
 			// send PLI to make sure the client will receive the first frame
-			t.remoteTrack.sendPLI(QualityLow)
+			t.remoteTrack.sendPLI()
 		} else if t.remoteTrack.getRemoteTrack(QualityMid) != nil && quality == QualityMid {
-			trackQuality = QualityMid
 			t.lastQuality.Store(uint32(QualityMid))
 			// send PLI to make sure the client will receive the first frame
-			t.remoteTrack.sendPLI(QualityMid)
+			t.remoteTrack.sendPLI()
 		} else if t.remoteTrack.getRemoteTrack(QualityHigh) != nil && quality == QualityHigh {
-			trackQuality = QualityHigh
 			t.lastQuality.Store(uint32(QualityHigh))
 			// send PLI to make sure the client will receive the first frame
-			t.remoteTrack.sendPLI(QualityHigh)
-		} else {
-			trackQuality = QualityNone
+			t.remoteTrack.sendPLI()
 		}
 
 		t.remoteTrack.onRemoteTrackAdded(func(remote *remoteTrack) {
-			quality := RIDToQuality(remote.track.RID())
-			t.remoteTrack.sendPLI(quality)
+			t.remoteTrack.sendPLI()
 		})
-	} else {
-		trackQuality = lastQuality
+	} else if isKeyframe && quality == targetQuality && t.lastQuality.Load() != uint32(targetQuality) {
+		glog.Info("track: ", t.id, " keyframe ", isKeyframe, " change quality from ", t.lastQuality.Load(), " to ", targetQuality)
+		currentQuality = targetQuality
+		t.lastQuality.Store(uint32(currentQuality))
 
-		// lastCheckQualityDuration := time.Since(time.Unix(0, t.lastCheckQualityTS.Load()))
-
-		if isFirstKeyframePacket { // && lastCheckQualityDuration.Seconds() >= 1 {
-			trackQuality = t.client.bitrateController.getQuality(t)
-			// update latest keyframe timestamp
-			// TODO: currently not use anywhere but useful to detect if the track is active or need to refresh full picture
-			switch quality {
-			case QualityHigh:
-				t.remoteTrack.lastHighKeyframeTS.Store(time.Now().UnixNano())
-			case QualityMid:
-				t.remoteTrack.lastMidKeyframeTS.Store(time.Now().UnixNano())
-			case QualityLow:
-				t.remoteTrack.lastLowKeyframeTS.Store(time.Now().UnixNano())
-			}
-
-			t.lastQuality.Store(uint32(trackQuality))
-		}
+	} else if quality == targetQuality && !isKeyframe && t.lastQuality.Load() != uint32(targetQuality) {
+		glog.Info("track: ", t.id, " keyframe ", isKeyframe, " send keyframe and sequence number ", p.SequenceNumber)
+		t.remoteTrack.sendPLI()
 	}
 
-	if trackQuality == quality {
-		t.send(p, trackQuality, lastQuality)
+	if currentQuality == quality {
+		t.send(p, quality)
 	}
 }
 
@@ -260,7 +239,7 @@ func (t *simulcastClientTrack) onTrackEnded() {
 
 func (t *simulcastClientTrack) SetMaxQuality(quality QualityLevel) {
 	t.maxQuality.Store(uint32(quality))
-	t.remoteTrack.sendPLI(quality)
+	t.remoteTrack.sendPLI()
 }
 
 func (t *simulcastClientTrack) MaxQuality() QualityLevel {
@@ -298,5 +277,29 @@ func (t *simulcastClientTrack) rewritePacket(p *rtp.Packet, quality QualityLevel
 }
 
 func (t *simulcastClientTrack) RequestPLI() {
-	t.remoteTrack.sendPLI(t.LastQuality())
+	t.remoteTrack.sendPLI()
+}
+
+func (t *simulcastClientTrack) getQuality() QualityLevel {
+	track := t.remoteTrack
+
+	claim := t.client.bitrateController.GetClaim(t.ID())
+
+	quality := min(claim.quality, t.MaxQuality(), Uint32ToQualityLevel(t.client.quality.Load()))
+
+	if quality != QualityNone && !track.isTrackActive(quality) {
+		if quality != QualityLow && track.isTrackActive(QualityLow) {
+			return QualityLow
+		}
+
+		if quality != QualityMid && track.isTrackActive(QualityMid) {
+			return QualityMid
+		}
+
+		if quality != QualityHigh && track.isTrackActive(QualityHigh) {
+			return QualityHigh
+		}
+	}
+
+	return quality
 }

@@ -359,34 +359,6 @@ func (bc *bitrateController) isThereNonScreenCanDecrease(lowestQuality QualityLe
 	return false
 }
 
-func (bc *bitrateController) getQuality(t *simulcastClientTrack) QualityLevel {
-	track := t.remoteTrack
-
-	claim := bc.GetClaim(t.ID())
-	if claim == nil {
-		// this must be never reached
-		panic("bitrate: claim is not exists")
-	}
-
-	quality := min(claim.quality, t.MaxQuality(), Uint32ToQualityLevel(t.client.quality.Load()))
-
-	if quality != QualityNone && !track.isTrackActive(quality) {
-		if quality != QualityLow && track.isTrackActive(QualityLow) {
-			return QualityLow
-		}
-
-		if quality != QualityMid && track.isTrackActive(QualityMid) {
-			return QualityMid
-		}
-
-		if quality != QualityHigh && track.isTrackActive(QualityHigh) {
-			return QualityHigh
-		}
-	}
-
-	return quality
-}
-
 func (bc *bitrateController) totalSentBitrates() uint32 {
 	total := uint32(0)
 
