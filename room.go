@@ -99,17 +99,17 @@ type Room struct {
 type RoomOptions struct {
 	// Configures the bitrates configuration that will be used by the room
 	// Make sure to use the same bitrate config when publishing video because this is used to manage the usage bandwidth in this room
-	Bitrates BitrateConfigs
+	Bitrates BitrateConfigs `json:"bitrates"`
 	// Configures the codecs that will be used by the room
-	Codecs []string
+	Codecs []string `json:"codecs"`
 	// Configures the interval between sending PLIs to clients that will generate keyframe
 	// More often means more bandwidth usage but more stability on video quality
-	PLIInterval time.Duration
+	PLIInterval time.Duration `json:"pli_interval"`
 	// Configure the mapping of spatsial and temporal layers to quality level
 	// Use this to use scalable video coding (SVC) to control the bitrate level of the video
-	QualityPreset QualityPreset
+	QualityPreset QualityPreset `json:"quality_preset"`
 	// Configure the timeout when the room is empty it will close after the timeout exceeded
-	EmptyRoomTimeout time.Duration
+	EmptyRoomTimeout time.Duration `json:"empty_room_timeout"`
 }
 
 func DefaultRoomOptions() RoomOptions {
