@@ -50,7 +50,7 @@ func newRemoteTrack(ctx context.Context, track IRemoteTrack, minWait, maxWait, p
 		onStatsUpdated:        onStatsUpdated,
 		onPLI:                 onPLI,
 		onRead:                onRead,
-		packetBuffers:         newPacketBuffers(minWait, maxWait, false),
+		packetBuffers:         newPacketBuffers(ctx, minWait, maxWait, false),
 	}
 
 	if pliInterval > 0 {
@@ -87,27 +87,36 @@ func (t *remoteTrack) readRTP() {
 			if readErr == io.EOF {
 				glog.Info("remotetrack: track ended: ", t.track.ID())
 				return
+			} else if readErr == nil || readErr != io.EOF {
+				if p == nil {
+					continue
+				}
+
+				if !t.IsRelay() {
+					go t.updateStats()
+				}
+
+				// if t.Track().Kind() == webrtc.RTPCodecTypeVideo {
+				// 	// video needs to be reordered
+				// 	if p != nil {
+				// 		_ = t.packetBuffers.Add(p)
+				// 	}
+
+				// } else {
+				// 	// audio doesn't need to be reordered
+				// 	if p != nil {
+				// 		t.onRead(p)
+				// 	}
+				// }
+
+				copyPkt := rtppool.GetPacketAllocationFromPool()
+
+				copyPkt.Header = p.Header
+
+				copyPkt.Payload = p.Payload
+
+				t.onRead(copyPkt)
 			}
-
-			if !t.IsRelay() {
-				go t.updateStats()
-			}
-
-			// if t.Track().Kind() == webrtc.RTPCodecTypeVideo {
-			// 	// video needs to be reordered
-			// 	if p != nil {
-
-			// 		_ = t.packetBuffers.Add(p)
-			// 	}
-
-			// } else {
-			// 	// audio doesn't need to be reordered
-			// 	if p != nil {
-			// 		t.onRead(p)
-			// 	}
-			// }
-
-			t.onRead(p)
 		}
 	}
 }

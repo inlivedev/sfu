@@ -81,7 +81,7 @@ type scaleableClientTrack struct {
 	sid             uint8
 	lastTimestamp   uint32
 	lastSequence    uint16
-	dropCounter     uint16
+	baseSequence    uint16
 	qualityPreset   QualityPreset
 	hasInterPicture bool
 	init            bool
@@ -129,21 +129,24 @@ func (t *scaleableClientTrack) isKeyframe(vp9 *codecs.VP9Packet) bool {
 func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 	var qualityPreset IQualityPreset
 
+	t.mu.RLock()
 	isLatePacket := IsRTPPacketLate(p.SequenceNumber, t.lastSequence)
+	t.mu.RUnlock()
 
 	if !t.init {
 		t.init = true
+		t.baseSequence = p.SequenceNumber
 	}
 
 	vp9Packet := &codecs.VP9Packet{}
 	if _, err := vp9Packet.Unmarshal(p.Payload); err != nil {
-		t.send(p, t.dropCounter, t.sid, t.tid, isLatePacket)
+
 		return
 	}
 
 	quality := t.getQuality()
 	if quality == QualityNone {
-		t.dropCounter++
+		t.baseSequence++
 		glog.Info("scalabletrack: packet ", p.SequenceNumber, " is dropped because of quality none")
 		return
 	}
@@ -162,7 +165,7 @@ func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 
 	if !t.hasInterPicture {
 		if !vp9Packet.P {
-			t.dropCounter++
+			t.baseSequence++
 			t.RequestPLI()
 			glog.Info("scalabletrack: packet ", p.SequenceNumber, " client ", t.client.ID(), " is dropped because of no intra frame")
 			return
@@ -174,14 +177,15 @@ func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 		t.tid = targetTID
 	}
 
-	currentDropCounter := t.dropCounter
+	currentBaseSequence := t.baseSequence
 	currentTID := t.tid
 	currentSID := t.sid
 
 	var err error
 
 	if isLatePacket {
-		currentDropCounter, currentSID, currentTID, err = t.packetCaches.GetDecision(p.SequenceNumber, currentDropCounter, currentSID, currentTID)
+		glog.Info("scalabletrack: packet ", p.SequenceNumber, " is late")
+		currentBaseSequence, currentSID, currentTID, err = t.packetCaches.GetDecision(p.SequenceNumber, currentBaseSequence, currentSID, currentTID)
 		if err != nil &&
 			(!vp9Packet.P && vp9Packet.B && currentSID < vp9Packet.SID && vp9Packet.SID <= targetSID) ||
 			(currentSID > targetSID && vp9Packet.E) {
@@ -205,7 +209,7 @@ func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 
 	if currentTID < vp9Packet.TID {
 		// glog.Info("scalabletrack: packet ", p.SequenceNumber, " is dropped because of currentTID ", currentTID, "  < vp9Packet.TID", vp9Packet.TID)
-		t.dropCounter++
+		t.baseSequence++
 		return
 	}
 
@@ -229,7 +233,7 @@ func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 	}
 
 	if currentSID < vp9Packet.SID {
-		t.dropCounter++
+		t.baseSequence++
 		// glog.Info("scalabletrack: packet ", p.SequenceNumber, " is dropped because of currentSID ", currentSID, " < vp9Packet.SID", vp9Packet.SID)
 		return
 	}
@@ -239,19 +243,20 @@ func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 		p.Marker = true
 	}
 
-	t.send(p, currentDropCounter, vp9Packet.SID, vp9Packet.TID, isLatePacket)
+	t.send(p, currentBaseSequence, vp9Packet.SID, vp9Packet.TID, t.sid, t.tid, isLatePacket)
 }
 
-func (t *scaleableClientTrack) send(p *rtp.Packet, dropCounter uint16, decidedSID, decidedTID uint8, isLate bool) {
+func (t *scaleableClientTrack) send(p *rtp.Packet, baseSeq uint16, pSID, tSID, decidedSID, decidedTID uint8, isLate bool) {
 	if !isLate {
+		t.mu.Lock()
 		t.lastSequence = p.Header.SequenceNumber
+		t.mu.Unlock()
+		t.packetCaches.Add(p.SequenceNumber, t.baseSequence, p.Timestamp, pSID, tSID, decidedSID, decidedTID)
 	}
 
-	p.Header.SequenceNumber = p.Header.SequenceNumber - t.dropCounter
+	// p.Header.SequenceNumber = p.Header.SequenceNumber - t.dropCounter
 
-	t.packetCaches.Add(p.SequenceNumber, t.dropCounter, decidedSID, decidedTID)
-
-	// p.Header.SequenceNumber = baseSeq + (p.Header.SequenceNumber - baseSeq) - baseSeq
+	p.Header.SequenceNumber = p.Header.SequenceNumber - baseSeq
 
 	t.lastTimestamp = p.Timestamp
 

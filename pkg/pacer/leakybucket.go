@@ -34,35 +34,35 @@ type queue struct {
 	mu sync.RWMutex
 }
 
-func (q *queue) Front() *list.Element {
-	q.mu.RLock()
-	defer q.mu.RUnlock()
-	return q.List.Front()
-}
+// func (q *queue) Front() *list.Element {
+// 	q.mu.RLock()
+// 	defer q.mu.RUnlock()
+// 	return q.List.Front()
+// }
 
-func (q *queue) Back() *list.Element {
-	q.mu.RLock()
-	defer q.mu.RUnlock()
-	return q.List.Back()
-}
+// func (q *queue) Back() *list.Element {
+// 	q.mu.RLock()
+// 	defer q.mu.RUnlock()
+// 	return q.List.Back()
+// }
 
-func (q *queue) Len() int {
-	q.mu.RLock()
-	defer q.mu.RUnlock()
-	return q.List.Len()
-}
+// func (q *queue) Len() int {
+// 	q.mu.RLock()
+// 	defer q.mu.RUnlock()
+// 	return q.List.Len()
+// }
 
-func (q *queue) PushBack(v *item) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	q.List.PushBack(v)
-}
+// func (q *queue) PushBack(v *item) {
+// 	q.mu.Lock()
+// 	defer q.mu.Unlock()
+// 	q.List.PushBack(v)
+// }
 
-func (q *queue) PushFront(v *item) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	q.List.PushFront(v)
-}
+// func (q *queue) PushFront(v *item) {
+// 	q.mu.Lock()
+// 	defer q.mu.Unlock()
+// 	q.List.PushFront(v)
+// }
 
 func (q *queue) Remove(e *list.Element) *item {
 	q.mu.Lock()
@@ -76,11 +76,11 @@ func (q *queue) Remove(e *list.Element) *item {
 	return i
 }
 
-func (q *queue) InsertAfter(v *item, mark *list.Element) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	q.List.InsertAfter(v, mark)
-}
+// func (q *queue) InsertAfter(v *item, mark *list.Element) {
+// 	q.mu.Lock()
+// 	defer q.mu.Unlock()
+// 	q.List.InsertAfter(v, mark)
+// }
 
 // LeakyBucketPacer implements a leaky bucket pacing algorithm
 type LeakyBucketPacer struct {
@@ -117,16 +117,15 @@ func NewLeakyBucketPacer(initialBitrate int) *LeakyBucketPacer {
 // AddStream adds a new stream and its corresponding writer to the pacer
 func (p *LeakyBucketPacer) AddStream(ssrc uint32, writer interceptor.RTPWriter) {
 	p.writerLock.Lock()
-	defer p.writerLock.Unlock()
+	p.ssrcToWriter[ssrc] = writer
+	p.writerLock.Unlock()
 
 	p.qLock.Lock()
-	defer p.qLock.Unlock()
-
-	p.ssrcToWriter[ssrc] = writer
 	p.queues[ssrc] = &queue{
 		List: list.List{},
 		mu:   sync.RWMutex{},
 	}
+	p.qLock.Unlock()
 }
 
 // SetTargetBitrate updates the target bitrate at which the pacer is allowed to
@@ -192,29 +191,19 @@ func (p *LeakyBucketPacer) Write(header *rtp.Header, payload []byte, attributes 
 		attributes: attributes,
 	}
 
+	// queue.PushBack(newItem)
+	queue.mu.Lock()
+	defer queue.mu.Unlock()
 	if queue.Len() == 0 {
 		queue.PushBack(newItem)
+
 		return header.MarshalSize() + len(payload), nil
 	}
 
-	// add packet in order
-	e := queue.Back()
 Loop:
-	for {
-		if e == nil {
-			break Loop
-		}
+	for e := queue.Back(); e != nil; e = e.Prev() {
 
-		currentCache, ok := e.Value.(*item)
-		if !ok {
-			// could be because the item already removed
-			e = e.Prev()
-			if e == nil {
-				break Loop
-			}
-
-			continue
-		}
+		currentCache, _ := e.Value.(*item)
 
 		if currentCache.packet.Header().SequenceNumber == pkt.Header().SequenceNumber {
 			glog.Warning("packet cache: packet sequence ", pkt.Header().SequenceNumber, " already exists in the cache, will not adding the packet")
@@ -234,16 +223,11 @@ Loop:
 			break Loop
 		}
 
-		queue.mu.RLock()
-		e := e.Prev()
-		queue.mu.RUnlock()
-
-		if e == nil {
+		if e.Prev() == nil {
 			queue.PushFront(newItem)
 
 			break Loop
 		}
-
 	}
 
 	return header.MarshalSize() + len(payload), nil
@@ -255,6 +239,7 @@ func (p *LeakyBucketPacer) Run() {
 	defer ticker.Stop()
 
 	lastSent := time.Now()
+
 	for {
 		select {
 		case <-p.done:
@@ -272,7 +257,9 @@ func (p *LeakyBucketPacer) Run() {
 				}
 
 				for _, queue := range p.queues {
+					queue.mu.RLock()
 					if queue.Len() == 0 {
+						queue.mu.RUnlock()
 						emptyQueueCount++
 
 						if emptyQueueCount == len(p.queues) {
@@ -283,7 +270,10 @@ func (p *LeakyBucketPacer) Run() {
 						continue
 					}
 
-					next := queue.Remove(queue.Front())
+					front := queue.Front()
+					queue.mu.RUnlock()
+
+					next := queue.Remove(front)
 					if next == nil {
 						glog.Warningf("failed to access leaky bucket pacer queue, cast failed")
 						emptyQueueCount++
@@ -299,7 +289,7 @@ func (p *LeakyBucketPacer) Run() {
 						continue
 					}
 
-					glog.Info("sending packet SSRC ", next.packet.Header().SSRC, ": ", next.packet.Header().SequenceNumber)
+					// glog.Info("sending packet SSRC ", next.packet.Header().SSRC, ": ", next.packet.Header().SequenceNumber)
 					n, err := writer.Write(next.packet.Header(), next.packet.Payload(), next.attributes)
 					if err != nil {
 						glog.Error("failed to write packet: ", err)

@@ -156,6 +156,11 @@ func (t *simulcastClientTrack) push(p *rtp.Packet, quality QualityLevel) {
 
 		if isFirstKeyframePacket { // && lastCheckQualityDuration.Seconds() >= 1 {
 			trackQuality = t.client.bitrateController.getQuality(t)
+
+			if trackQuality != lastQuality {
+				glog.Info("track: ", t.id, " change quality from ", lastQuality, " to ", trackQuality)
+			}
+
 			// update latest keyframe timestamp
 			// TODO: currently not use anywhere but useful to detect if the track is active or need to refresh full picture
 			switch quality {

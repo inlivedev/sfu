@@ -16,10 +16,17 @@ type packetCaches struct {
 }
 
 type Cache struct {
-	SeqNum  uint16
-	BaseSeq uint16
-	TID     uint8
-	SID     uint8
+	SeqNum    uint16
+	Timestamp uint32
+	BaseSeq   uint16
+	// packet TID
+	PTID uint8
+	// packet SID
+	PSID uint8
+	// stream TID
+	TID uint8
+	// stream SID
+	SID uint8
 }
 type OperationType uint8
 
@@ -43,7 +50,7 @@ func newPacketCaches() *packetCaches {
 	}
 }
 
-func (p *packetCaches) Add(seqNum, baseSequence uint16, sid, tid uint8) {
+func (p *packetCaches) Add(seqNum, baseSequence uint16, ts uint32, psid, tsid, sid, tid uint8) {
 	p.mu.Lock()
 	defer func() {
 		p.mu.Unlock()
@@ -54,10 +61,13 @@ func (p *packetCaches) Add(seqNum, baseSequence uint16, sid, tid uint8) {
 	}()
 
 	newCache := Cache{
-		SeqNum:  seqNum,
-		BaseSeq: baseSequence,
-		TID:     tid,
-		SID:     sid,
+		SeqNum:    seqNum,
+		BaseSeq:   baseSequence,
+		Timestamp: ts,
+		PSID:      psid,
+		PTID:      tsid,
+		TID:       tid,
+		SID:       sid,
 	}
 
 	if p.caches.Len() == 0 {
