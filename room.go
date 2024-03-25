@@ -411,3 +411,7 @@ func (r *Room) Context() context.Context {
 func (r *Room) Meta() *Metadata {
 	return r.meta
 }
+
+func (r *Room) Options() RoomOptions {
+	return r.options
+}
