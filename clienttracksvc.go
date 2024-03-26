@@ -12,8 +12,8 @@ type IQualityPreset interface {
 }
 
 type QualityPreset struct {
-	SID uint8 `json:"sid"`
-	TID uint8 `json:"tid"`
+	SID uint8 `json:"sid" example:"2"`
+	TID uint8 `json:"tid" example:"2"`
 }
 
 func (q QualityPreset) GetSID() uint8 {

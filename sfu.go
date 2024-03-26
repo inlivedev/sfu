@@ -16,21 +16,21 @@ import (
 // For pixels parameters, it is total pixels (width * height) of the video.
 // High, Mid, and Low are the references for bitrate controller to decide the max bitrate to send to the client.
 type BitrateConfigs struct {
-	AudioRed         uint32 `json:"audio_red,omitempty" yaml:"audio_red,omitempty" mapstructure:"audio_red,omitempty"`
-	Audio            uint32 `json:"audio,omitempty" yaml:"audio,omitempty" mapstructure:"audio,omitempty"`
-	Video            uint32 `json:"video,omitempty" yaml:"video,omitempty" mapstructure:"video,omitempty"`
-	VideoHigh        uint32 `json:"video_high,omitempty" yaml:"video_high,omitempty" mapstructure:"video_high,omitempty"`
-	VideoHighPixels  uint32 `json:"video_high_pixels,omitempty" yaml:"video_high_pixels,omitempty" mapstructure:"video_high_pixels,omitempty"`
-	VideoMid         uint32 `json:"video_mid,omitempty" yaml:"video_mid,omitempty" mapstructure:"video_mid,omitempty"`
-	VideoMidPixels   uint32 `json:"video_mid_pixels,omitempty" yaml:"video_mid_pixels,omitempty" mapstructure:"video_mid_pixels,omitempty"`
-	VideoLow         uint32 `json:"video_low,omitempty" yaml:"video_low,omitempty" mapstructure:"video_low,omitempty"`
-	VideoLowPixels   uint32 `json:"video_low_pixels,omitempty" yaml:"video_low_pixels,omitempty" mapstructure:"video_low_pixels,omitempty"`
-	InitialBandwidth uint32 `json:"initial_bandwidth,omitempty" yaml:"initial_bandwidth,omitempty" mapstructure:"initial_bandwidth,omitempty"`
+	AudioRed         uint32 `json:"audio_red" example:"75000"`
+	Audio            uint32 `json:"audio" example:"48000"`
+	Video            uint32 `json:"video" example:"1200000"`
+	VideoHigh        uint32 `json:"video_high" example:"1200000"`
+	VideoHighPixels  uint32 `json:"video_high_pixels" example:"921600"`
+	VideoMid         uint32 `json:"video_mid" example:"500000"`
+	VideoMidPixels   uint32 `json:"video_mid_pixels" example:"259200"`
+	VideoLow         uint32 `json:"video_low" example:"150000"`
+	VideoLowPixels   uint32 `json:"video_low_pixels" example:"64800"`
+	InitialBandwidth uint32 `json:"initial_bandwidth" example:"1000000"`
 }
 
 func DefaultBitrates() BitrateConfigs {
 	return BitrateConfigs{
-		AudioRed:         65_000,
+		AudioRed:         75_000,
 		Audio:            48_000,
 		Video:            1_200_000,
 		VideoHigh:        1_200_000,
