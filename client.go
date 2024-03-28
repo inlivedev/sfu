@@ -1021,6 +1021,10 @@ func (c *Client) stop() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	if c.peerConnection.pc.ConnectionState() == webrtc.PeerConnectionStateClosed {
+		return nil
+	}
+
 	err := c.peerConnection.Close()
 	if err != nil {
 		return err

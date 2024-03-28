@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 
+	"github.com/golang/glog"
 	"github.com/pion/webrtc/v3"
 )
 
@@ -107,31 +108,25 @@ func (m *Manager) NewRoom(id, name, roomType string, opts RoomOptions) (*Room, e
 		}
 	})
 
-	var emptyRoomTimeout context.Context
+	idle := true
 
 	var emptyRoomCancel context.CancelFunc
 
+	_, emptyRoomCancel = startRoomTimeout(m, room)
+
 	room.OnClientLeft(func(client *Client) {
 		if room.SFU().clients.Length() == 0 {
-			emptyRoomTimeout, emptyRoomCancel = context.WithTimeout(m.context, room.options.EmptyRoomTimeout)
-			go func() {
-				<-emptyRoomTimeout.Done()
-				if emptyRoomTimeout.Err() == context.DeadlineExceeded {
-					m.mutex.Lock()
-					defer m.mutex.Unlock()
-					room.Close()
-					delete(m.rooms, room.id)
-					emptyRoomCancel = nil
-					emptyRoomTimeout = nil
-				}
-			}()
+			idle = true
+			_, emptyRoomCancel = startRoomTimeout(m, room)
 		}
 	})
 
 	room.OnClientJoined(func(client *Client) {
-		if emptyRoomTimeout != nil && emptyRoomCancel != nil {
+		if idle {
 			emptyRoomCancel()
 		}
+
+		idle = false
 	})
 
 	m.rooms[room.id] = room
@@ -217,4 +212,25 @@ func (m *Manager) Close() {
 
 func (m *Manager) Context() context.Context {
 	return m.context
+}
+
+func startRoomTimeout(m *Manager, room *Room) (context.Context, context.CancelFunc) {
+	var cancel context.CancelFunc
+
+	var ctx context.Context
+
+	ctx, cancel = context.WithTimeout(m.context, room.options.EmptyRoomTimeout)
+
+	go func() {
+		<-ctx.Done()
+		if ctx.Err() == context.DeadlineExceeded {
+			m.mutex.Lock()
+			defer m.mutex.Unlock()
+			room.Close()
+			delete(m.rooms, room.id)
+			glog.Info("room ", room.id, " is closed because it's empty and idle for ", room.options.EmptyRoomTimeout)
+		}
+	}()
+
+	return ctx, cancel
 }

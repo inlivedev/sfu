@@ -49,17 +49,16 @@ func DefaultQualityPresets() QualityPresets {
 
 type scaleableClientTrack struct {
 	*clientTrack
-	lastQuality     QualityLevel
-	maxQuality      QualityLevel
-	tid             uint8
-	sid             uint8
-	lastTimestamp   uint32
-	lastSequence    uint16
-	baseSequence    uint16
-	qualityPresets  QualityPresets
-	hasInterPicture bool
-	init            bool
-	packetCaches    *packetCaches
+	lastQuality    QualityLevel
+	maxQuality     QualityLevel
+	tid            uint8
+	sid            uint8
+	lastTimestamp  uint32
+	lastSequence   uint16
+	baseSequence   uint16
+	qualityPresets QualityPresets
+	init           bool
+	packetCaches   *packetCaches
 }
 
 func newScaleableClientTrack(
@@ -103,14 +102,7 @@ func (t *scaleableClientTrack) isKeyframe(vp9 *codecs.VP9Packet) bool {
 func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 	var qualityPreset IQualityPreset
 
-	t.mu.RLock()
-	isLatePacket := IsRTPPacketLate(p.SequenceNumber, t.lastSequence)
-	t.mu.RUnlock()
-
-	if !t.init {
-		t.init = true
-		t.baseSequence = p.SequenceNumber
-	}
+	var isLatePacket bool
 
 	vp9Packet := &codecs.VP9Packet{}
 	if _, err := vp9Packet.Unmarshal(p.Payload); err != nil {
@@ -137,18 +129,15 @@ func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 	targetSID := qualityPreset.GetSID()
 	targetTID := qualityPreset.GetTID()
 
-	if !t.hasInterPicture {
-		if !vp9Packet.P {
-			t.baseSequence++
-			t.RequestPLI()
-			glog.Info("scalabletrack: packet ", p.SequenceNumber, " client ", t.client.ID(), " is dropped because of no intra frame")
-			return
-
-		}
-
-		t.hasInterPicture = true
+	if !t.init {
+		t.init = true
+		t.baseSequence = p.SequenceNumber
 		t.sid = targetSID
 		t.tid = targetTID
+	} else {
+		t.mu.RLock()
+		isLatePacket = IsRTPPacketLate(p.SequenceNumber, t.lastSequence)
+		t.mu.RUnlock()
 	}
 
 	currentBaseSequence := t.baseSequence

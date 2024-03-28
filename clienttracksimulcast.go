@@ -113,6 +113,10 @@ func (t *simulcastClientTrack) push(p *rtp.Packet, quality QualityLevel) {
 
 	targetQuality := t.getQuality()
 
+	if targetQuality == QualityNone {
+		return
+	}
+
 	if !t.client.bitrateController.exists(t.ID()) {
 		// do nothing if the bitrate claim is not exist
 		return
@@ -284,6 +288,10 @@ func (t *simulcastClientTrack) getQuality() QualityLevel {
 	track := t.remoteTrack
 
 	claim := t.client.bitrateController.GetClaim(t.ID())
+
+	if claim == nil {
+		return QualityNone
+	}
 
 	quality := min(claim.quality, t.MaxQuality(), Uint32ToQualityLevel(t.client.quality.Load()))
 
