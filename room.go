@@ -21,7 +21,6 @@ type Options struct {
 	PortStart                uint16
 	PortEnd                  uint16
 	WebRTCPort               int
-	ConnectRemoteRoomTimeout time.Duration
 	EnableBridging           bool
 	EnableBandwidthEstimator bool
 	IceServers               []webrtc.ICEServer
@@ -55,7 +54,6 @@ func DefaultOptions() Options {
 		PortEnd:                  65535,
 		EnableMux:                false,
 		WebRTCPort:               50005,
-		ConnectRemoteRoomTimeout: 30 * time.Second,
 		EnableBandwidthEstimator: true,
 		IceServers: []webrtc.ICEServer{
 			{
@@ -118,7 +116,7 @@ func DefaultRoomOptions() RoomOptions {
 		QualityPresets:   DefaultQualityPresets(),
 		Codecs:           []string{webrtc.MimeTypeVP9, webrtc.MimeTypeH264, webrtc.MimeTypeVP8, "audio/red", webrtc.MimeTypeOpus},
 		PLIInterval:      0,
-		EmptyRoomTimeout: 1 * time.Minute,
+		EmptyRoomTimeout: 3 * time.Minute,
 	}
 }
 
