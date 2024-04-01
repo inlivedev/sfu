@@ -100,13 +100,16 @@ func (t *scaleableClientTrack) isKeyframe(vp9 *codecs.VP9Packet) bool {
 }
 
 func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
 	var qualityPreset IQualityPreset
 
 	var isLatePacket bool
 
 	vp9Packet := &codecs.VP9Packet{}
 	if _, err := vp9Packet.Unmarshal(p.Payload); err != nil {
-
+		t.baseSequence++
 		return
 	}
 
@@ -135,12 +138,11 @@ func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 		t.sid = targetSID
 		t.tid = targetTID
 	} else {
-		t.mu.RLock()
 		isLatePacket = IsRTPPacketLate(p.SequenceNumber, t.lastSequence)
-		t.mu.RUnlock()
 	}
 
-	currentBaseSequence := t.baseSequence
+	t.lastSequence = p.Header.SequenceNumber
+
 	currentTID := t.tid
 	currentSID := t.sid
 
@@ -180,7 +182,7 @@ func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 	}
 
 	if vp9Packet.E && t.tid == targetTID && t.sid == targetSID {
-		t.SetLastQuality(quality)
+		t.setLastQuality(quality)
 	}
 
 	if currentSID < vp9Packet.SID {
@@ -194,20 +196,14 @@ func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 		p.Marker = true
 	}
 
-	t.send(p, currentBaseSequence, vp9Packet.SID, vp9Packet.TID, t.sid, t.tid, isLatePacket)
+	t.send(p, vp9Packet.SID, vp9Packet.TID, t.sid, t.tid)
 }
 
-func (t *scaleableClientTrack) send(p *rtp.Packet, baseSeq uint16, pSID, tSID, decidedSID, decidedTID uint8, isLate bool) {
-	if !isLate {
-		t.mu.Lock()
-		t.lastSequence = p.Header.SequenceNumber
-		t.mu.Unlock()
-		t.packetCaches.Add(p.SequenceNumber, t.baseSequence, p.Timestamp, pSID, tSID, decidedSID, decidedTID)
-	}
+func (t *scaleableClientTrack) send(p *rtp.Packet, pSID, tSID, decidedSID, decidedTID uint8) {
 
-	// p.Header.SequenceNumber = p.Header.SequenceNumber - t.dropCounter
+	t.packetCaches.Add(p.SequenceNumber, t.baseSequence, p.Timestamp, pSID, tSID, decidedSID, decidedTID)
 
-	p.Header.SequenceNumber = p.Header.SequenceNumber - baseSeq
+	p.Header.SequenceNumber = p.Header.SequenceNumber - t.baseSequence
 
 	t.lastTimestamp = p.Timestamp
 
@@ -221,10 +217,7 @@ func (t *scaleableClientTrack) SetSourceType(sourceType TrackType) {
 	t.isScreen = (sourceType == TrackTypeScreen)
 }
 
-func (t *scaleableClientTrack) SetLastQuality(quality QualityLevel) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
+func (t *scaleableClientTrack) setLastQuality(quality QualityLevel) {
 	t.lastQuality = quality
 }
 
@@ -269,5 +262,5 @@ func (t *scaleableClientTrack) getQuality() QualityLevel {
 		return QualityNone
 	}
 
-	return min(t.MaxQuality(), claim.Quality(), Uint32ToQualityLevel(t.client.quality.Load()))
+	return min(t.maxQuality, claim.Quality(), Uint32ToQualityLevel(t.client.quality.Load()))
 }
