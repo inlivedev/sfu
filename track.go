@@ -102,14 +102,10 @@ func newTrack(ctx context.Context, clientID string, trackRemote IRemoteTrack, mi
 
 	onRead := func(p *rtp.Packet) {
 		t.base.clientTracks.mu.RLock()
-		defer t.base.clientTracks.mu.RUnlock()
 
 		tracks := t.base.clientTracks.GetTracks()
 
 		for _, track := range tracks {
-			if p == nil {
-				return
-			}
 			//nolint:ineffassign,staticcheck // packet is from the pool
 			packet := rtppool.NewPacket(&p.Header, p.Payload)
 
@@ -123,6 +119,8 @@ func newTrack(ctx context.Context, clientID string, trackRemote IRemoteTrack, mi
 
 			packet.Release()
 		}
+
+		t.base.clientTracks.mu.RUnlock()
 
 		//nolint:ineffassign // this is required
 		packet := rtppool.NewPacket(&p.Header, p.Payload)
@@ -354,9 +352,6 @@ type SimulcastTrack struct {
 	onAddedRemoteTrackCallbacks []func(*remoteTrack)
 	onReadCallbacks             []func(*rtp.Packet, QualityLevel)
 	pliInterval                 time.Duration
-	onPLIHigh                   func()
-	onPLIMid                    func()
-	onPLILow                    func()
 }
 
 func newSimulcastTrack(ctx context.Context, clientid string, track IRemoteTrack, minWait, maxWait, pliInterval time.Duration, onPLI func(), stats stats.Getter, onStatsUpdated func(*stats.Stats)) ITrack {

@@ -88,56 +88,25 @@ func (t *remoteTrack) readRTP() {
 			if readErr == io.EOF {
 				glog.Info("remotetrack: track ended: ", t.track.ID())
 				return
-			} else if readErr == nil || readErr != io.EOF {
-				if p == nil {
-					continue
-				}
+			}
 
-				if !t.IsRelay() {
-					go t.updateStats()
-				}
+			// could be read deadline reached
+			if p == nil {
+				continue
+			}
 
-				if t.Track().Kind() == webrtc.RTPCodecTypeVideo {
-					// video needs to be reordered
-					if p != nil {
-						_ = t.packetBuffers.Add(p)
-					}
+			if !t.IsRelay() {
+				go t.updateStats()
+			}
 
-				} else {
-					// audio doesn't need to be reordered
-					if p != nil {
-						t.onRead(p)
-					}
-				}
-
-				// copyPkt := rtppool.GetPacketAllocationFromPool()
-
-				// copyPkt.Header = p.Header
-
-				// copyPkt.Payload = p.Payload
-
-				// t.onRead(copyPkt)
+			if t.Track().Kind() == webrtc.RTPCodecTypeVideo {
+				// video needs to be reordered
+				_ = t.packetBuffers.Add(p)
+			} else {
+				// audio doesn't need to be reordered
+				t.onRead(p)
 			}
 		}
-	}
-}
-
-func (t *remoteTrack) popRead() {
-	// pkts := t.packetBuffers.Flush()
-	// for _, orderedPkt := range pkts {
-	orderedPkt := t.packetBuffers.Pop()
-	if orderedPkt != nil {
-		copyPkt := rtppool.GetPacketAllocationFromPool()
-
-		copyPkt.Header = *orderedPkt.Header()
-
-		copyPkt.Payload = orderedPkt.Payload()
-
-		t.onRead(copyPkt)
-
-		rtppool.ResetPacketPoolAllocation(copyPkt)
-
-		orderedPkt.Release()
 	}
 }
 
@@ -152,9 +121,8 @@ func (t *remoteTrack) loop() {
 		default:
 			t.packetBuffers.WaitAvailablePacket()
 
-			packetSent := 0
 			for orderedPkt := t.packetBuffers.Pop(); orderedPkt != nil; orderedPkt = t.packetBuffers.Pop() {
-
+				// make sure the we're passing a new packet to the onRead callback
 				copyPkt := rtppool.GetPacketAllocationFromPool()
 
 				copyPkt.Header = *orderedPkt.Header()
@@ -166,18 +134,7 @@ func (t *remoteTrack) loop() {
 				rtppool.ResetPacketPoolAllocation(copyPkt)
 
 				orderedPkt.Release()
-				packetSent++
 			}
-
-			// if t.packetBuffers.buffers.Len() > 0 {
-			// 	glog.Info("remotetrack: loop end after ", packetSent, " packet sent, buffer length ", t.packetBuffers.buffers.Len())
-			// 	bufferSeqs := make([]uint16, 0)
-			// 	for e := t.packetBuffers.buffers.Front(); e != nil; e = e.Next() {
-			// 		bufferSeqs = append(bufferSeqs, e.Value.(*rtppool.RetainablePacket).Header().SequenceNumber)
-			// 	}
-
-			// 	glog.Info("remotetrack: buffer seqs: ", bufferSeqs)
-			// }
 
 		}
 	}
