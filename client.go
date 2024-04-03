@@ -1167,9 +1167,11 @@ func (c *Client) startIdleTimeout(timeout time.Duration) {
 
 	go func() {
 		<-c.idleTimeoutContext.Done()
-		if c == nil {
+		if c == nil || c.idleTimeoutContext == nil || c.idleTimeoutCancel == nil {
 			return
 		}
+
+		defer c.idleTimeoutCancel()
 
 		err := c.idleTimeoutContext.Err()
 		if err != nil && err == context.DeadlineExceeded {
