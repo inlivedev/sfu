@@ -111,3 +111,7 @@ func extractPrimaryEncodingForRED(payload []byte) ([]byte, error) {
 
 	return payload[blockLength:], nil
 }
+
+func (t *clientTrackRed) Quality() QualityLevel {
+	return QualityAudioRed
+}

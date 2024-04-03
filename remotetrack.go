@@ -21,37 +21,31 @@ type remoteTrack struct {
 	mu      sync.RWMutex
 	track   IRemoteTrack
 
-	onRead                func(*rtp.Packet)
-	onPLI                 func()
-	bitrate               *atomic.Uint32
-	previousBytesReceived *atomic.Uint64
-	currentBytesReceived  *atomic.Uint64
-	latestUpdatedTS       *atomic.Uint64
-	lastPLIRequestTime    time.Time
-	onEndedCallbacks      []func()
-	statsGetter           stats.Getter
-	onStatsUpdated        func(*stats.Stats)
-	packetBuffers         *packetBuffers
+	onRead             func(*rtp.Packet)
+	onPLI              func()
+	latestUpdatedTS    *atomic.Uint64
+	lastPLIRequestTime time.Time
+	onEndedCallbacks   []func()
+	statsGetter        stats.Getter
+	onStatsUpdated     func(*stats.Stats)
+	packetBuffers      *packetBuffers
 }
 
 func newRemoteTrack(ctx context.Context, track IRemoteTrack, minWait, maxWait, pliInterval time.Duration, onPLI func(), statsGetter stats.Getter, onStatsUpdated func(*stats.Stats), onRead func(*rtp.Packet)) *remoteTrack {
 	localctx, cancel := context.WithCancel(ctx)
 
 	rt := &remoteTrack{
-		context:               localctx,
-		cancel:                cancel,
-		mu:                    sync.RWMutex{},
-		track:                 track,
-		bitrate:               &atomic.Uint32{},
-		previousBytesReceived: &atomic.Uint64{},
-		currentBytesReceived:  &atomic.Uint64{},
-		latestUpdatedTS:       &atomic.Uint64{},
-		onEndedCallbacks:      make([]func(), 0),
-		statsGetter:           statsGetter,
-		onStatsUpdated:        onStatsUpdated,
-		onPLI:                 onPLI,
-		onRead:                onRead,
-		packetBuffers:         newPacketBuffers(localctx, minWait, maxWait, true),
+		context:          localctx,
+		cancel:           cancel,
+		mu:               sync.RWMutex{},
+		track:            track,
+		latestUpdatedTS:  &atomic.Uint64{},
+		onEndedCallbacks: make([]func(), 0),
+		statsGetter:      statsGetter,
+		onStatsUpdated:   onStatsUpdated,
+		onPLI:            onPLI,
+		onRead:           onRead,
+		packetBuffers:    newPacketBuffers(localctx, minWait, maxWait, true),
 	}
 
 	if pliInterval > 0 {
@@ -161,13 +155,6 @@ func (t *remoteTrack) updateStats() {
 
 	t.latestUpdatedTS.Store(uint64(s.LastPacketReceivedTimestamp.UnixNano()))
 
-	deltaTime := time.Since(time.Unix(0, int64(latestUpdated)))
-	current := t.currentBytesReceived.Load()
-	t.previousBytesReceived.Store(current)
-	t.currentBytesReceived.Store(s.BytesReceived)
-
-	t.bitrate.Store(uint32((s.BytesReceived-current)*8) / uint32(deltaTime.Seconds()))
-
 	if t.onStatsUpdated != nil {
 		t.onStatsUpdated(s)
 	}
@@ -175,10 +162,6 @@ func (t *remoteTrack) updateStats() {
 
 func (t *remoteTrack) Track() IRemoteTrack {
 	return t.track
-}
-
-func (t *remoteTrack) GetCurrentBitrate() uint32 {
-	return t.bitrate.Load()
 }
 
 func (t *remoteTrack) sendPLI() {

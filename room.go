@@ -143,6 +143,8 @@ func newRoom(id, name string, sfu *SFU, kind string, opts RoomOptions) *Room {
 		room.onClientLeft(client)
 	})
 
+	go room.loopRecordStats()
+
 	return room
 }
 
@@ -330,9 +332,6 @@ func (r *Room) Stats() RoomStats {
 		packetReceived     uint64
 	)
 
-	// make sure the stats is up to date
-	r.updateStats()
-
 	clientStats := make(map[string]*ClientTrackStats)
 
 	r.mu.RLock()
@@ -379,7 +378,9 @@ func (r *Room) updateStats() {
 	defer r.mu.Unlock()
 
 	for _, client := range r.sfu.clients.GetClients() {
+		client.mu.Lock()
 		r.stats[client.ID()] = client.Stats()
+		client.mu.Unlock()
 	}
 }
 
@@ -412,4 +413,21 @@ func (r *Room) Meta() *Metadata {
 
 func (r *Room) Options() RoomOptions {
 	return r.options
+}
+
+func (r *Room) loopRecordStats() {
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	ctx, cancel := context.WithCancel(r.context)
+	defer cancel()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			r.updateStats()
+		}
+	}
 }

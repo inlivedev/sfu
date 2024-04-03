@@ -464,7 +464,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 			client.mu.Lock()
 			defer client.mu.Unlock()
 
-			client.stats.SetReceiver(track.ID(), *stats)
+			client.stats.SetReceiver(remoteTrack.ID(), *stats)
 		}
 
 		if remoteTrack.RID() == "" {
@@ -518,10 +518,6 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 			} else if simulcast, ok = track.(*SimulcastTrack); ok {
 				simulcast.AddRemoteTrack(simulcast.context, remoteTrack, opts.JitterBufferMinWait, opts.JitterBufferMaxWait, client.statsGetter, onStatsUpdated, onPLI)
 			}
-
-			// only process track when the lowest quality is available
-			simulcast.mu.Lock()
-			simulcast.mu.Unlock()
 
 			if !track.IsProcessed() {
 				client.onTrack(track)
@@ -1100,9 +1096,9 @@ func (c *Client) OnConnectionStateChanged(callback func(webrtc.PeerConnectionSta
 
 func (c *Client) onConnectionStateChanged(state webrtc.PeerConnectionState) {
 	c.mu.RLock()
-	callbacks := c.onConnectionStateChangedCallbacks
-	c.mu.RUnlock()
-	for _, callback := range callbacks {
+	defer c.mu.RUnlock()
+
+	for _, callback := range c.onConnectionStateChangedCallbacks {
 		go callback(webrtc.PeerConnectionState(state))
 	}
 }
@@ -1350,25 +1346,7 @@ func (c *Client) SetQuality(quality QualityLevel) {
 // it will return the initial bandwidth. If the receiving bandwidth is not 0, it will return the smallest value between
 // the estimated bandwidth and the receiving bandwidth.
 func (c *Client) GetEstimatedBandwidth() uint32 {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	estimated := uint32(0)
-
-	if c.estimator == nil {
-		estimated = uint32(c.sfu.bitrateConfigs.InitialBandwidth)
-	} else {
-		estimated = uint32(c.estimator.GetTargetBitrate())
-		c.egressBandwidth.Store(estimated)
-	}
-
-	receivingBandwidth := c.receivingBandwidth.Load()
-
-	if receivingBandwidth != 0 && receivingBandwidth < estimated {
-		return receivingBandwidth
-	}
-
-	return estimated
+	return uint32(c.estimator.GetTargetBitrate())
 }
 
 // This should get from the publisher client using RTCIceCandidatePairStats.availableOutgoingBitrate
@@ -1477,7 +1455,7 @@ func (c *Client) TrackStats() *ClientTrackStats {
 	clientStats := &ClientTrackStats{
 		ID:                       c.id,
 		Name:                     c.name,
-		ConsumerBandwidth:        c.egressBandwidth.Load(),
+		ConsumerBandwidth:        c.GetEstimatedBandwidth(),
 		PublisherBandwidth:       c.ingressBandwidth.Load(),
 		Sents:                    make([]TrackSentStats, 0),
 		Receives:                 make([]TrackReceivedStats, 0),
@@ -1486,26 +1464,36 @@ func (c *Client) TrackStats() *ClientTrackStats {
 		VoiceActivityDuration:    uint32(c.stats.VoiceActivity().Milliseconds()),
 	}
 
-	for id, stat := range c.stats.Receivers() {
-		track, err := c.tracks.Get(id)
-		if err != nil {
-			continue
-		}
-		receivedStats := TrackReceivedStats{
-			ID:              track.ID(),
-			Kind:            track.Kind().String(),
-			Codec:           track.MimeType(),
-			BytesReceived:   int64(stat.InboundRTPStreamStats.BytesReceived),
-			PacketsLost:     stat.InboundRTPStreamStats.PacketsLost,
-			PacketsReceived: stat.InboundRTPStreamStats.PacketsReceived,
+	for _, track := range c.Tracks() {
+		if track.IsSimulcast() {
+			simulcastClientTrack := track.(*SimulcastTrack)
+			receivedStats, err := generateClientReceiverStats(c, simulcastClientTrack.remoteTrackHigh)
+			if err != nil {
+				continue
+			}
+
+			clientStats.Receives = append(clientStats.Receives, receivedStats)
+
+		} else {
+			stat, err := c.stats.GetReceiver(track.ID())
+			if err != nil {
+				continue
+			}
+
+			RID := track.(*Track).RemoteTrack().Track().RID()
+			receivedStats, err := generateClientReceiverStats(c, track, RID, stat)
+			if err != nil {
+				continue
+			}
+
+			clientStats.Receives = append(clientStats.Receives, receivedStats)
 		}
 
-		clientStats.Receives = append(clientStats.Receives, receivedStats)
 	}
 
 	for id, stat := range c.stats.Senders() {
-		track, err := c.publishedTracks.Get(id)
-		if err != nil {
+		track, ok := c.clientTracks[id]
+		if !ok {
 			continue
 		}
 		source := "media"
@@ -1517,13 +1505,15 @@ func (c *Client) TrackStats() *ClientTrackStats {
 		// TODO:
 		// - add current bitrate
 		sentStats := TrackSentStats{
-			ID:           id,
-			Kind:         track.Kind().String(),
-			PacketsLost:  stat.RemoteInboundRTPStreamStats.PacketsLost,
-			PacketSent:   stat.OutboundRTPStreamStats.PacketsSent,
-			FractionLost: stat.RemoteInboundRTPStreamStats.FractionLost,
-			BytesSent:    stat.OutboundRTPStreamStats.BytesSent,
-			Source:       source,
+			ID:             id,
+			Kind:           track.Kind(),
+			PacketsLost:    stat.RemoteInboundRTPStreamStats.PacketsLost,
+			PacketSent:     stat.OutboundRTPStreamStats.PacketsSent,
+			FractionLost:   stat.RemoteInboundRTPStreamStats.FractionLost,
+			BytesSent:      stat.OutboundRTPStreamStats.BytesSent,
+			CurrentBitrate: track.SendBitrate(),
+			Source:         source,
+			Quality:        track.Quality(),
 		}
 
 		clientStats.Sents = append(clientStats.Sents, sentStats)
@@ -1658,4 +1648,19 @@ func registerInterceptors(m *webrtc.MediaEngine, interceptorRegistry *intercepto
 	}
 
 	return webrtc.ConfigureTWCCSender(m, interceptorRegistry)
+}
+
+func generateClientReceiverStats(c *Client, track ITrack, rid string, stat *stats.Stats) (TrackReceivedStats, error) {
+	receivedStats := TrackReceivedStats{
+		ID:              track.ID(),
+		RID:             rid,
+		StreamID:        track.StreamID(),
+		Kind:            track.Kind().String(),
+		Codec:           track.MimeType(),
+		BytesReceived:   int64(stat.InboundRTPStreamStats.BytesReceived),
+		PacketsLost:     stat.InboundRTPStreamStats.PacketsLost,
+		PacketsReceived: stat.InboundRTPStreamStats.PacketsReceived,
+	}
+
+	return receivedStats, nil
 }

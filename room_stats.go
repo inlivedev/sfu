@@ -2,6 +2,8 @@ package sfu
 
 import (
 	"time"
+
+	"github.com/pion/webrtc/v3"
 )
 
 type StatTracks struct {
@@ -10,22 +12,25 @@ type StatTracks struct {
 }
 
 type TrackSentStats struct {
-	ID             string       `json:"id"`
-	Kind           string       `json:"kind"`
-	PacketsLost    int64        `json:"packets_lost"`
-	PacketSent     uint64       `json:"packets_sent"`
-	FractionLost   float64      `json:"fraction_lost"`
-	BytesSent      uint64       `json:"bytes_sent"`
-	CurrentBitrate uint64       `json:"current_bitrate"`
-	ClaimedBitrate uint64       `json:"claimed_bitrate"`
-	Source         string       `json:"source"`
-	Quality        QualityLevel `json:"quality"`
+	ID             string              `json:"id"`
+	StreamID       string              `json:"stream_id"`
+	Kind           webrtc.RTPCodecType `json:"kind"`
+	PacketsLost    int64               `json:"packets_lost"`
+	PacketSent     uint64              `json:"packets_sent"`
+	FractionLost   float64             `json:"fraction_lost"`
+	BytesSent      uint64              `json:"bytes_sent"`
+	CurrentBitrate uint32              `json:"current_bitrate"`
+	Source         string              `json:"source"`
+	Quality        QualityLevel        `json:"quality"`
 }
 
 type TrackReceivedStats struct {
 	ID              string `json:"id"`
+	StreamID        string `json:"stream_id"`
+	RID             string `json:"rid"`
 	Kind            string `json:"kind"`
 	Codec           string `json:"codec"`
+	CurrentBitrate  uint32 `json:"current_bitrate"`
 	PacketsLost     int64  `json:"packets_lost"`
 	PacketsReceived uint64 `json:"packets_received"`
 	BytesReceived   int64  `json:"bytes_received"`

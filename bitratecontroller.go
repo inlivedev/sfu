@@ -17,14 +17,10 @@ var (
 )
 
 type bitrateClaim struct {
-	mu               sync.RWMutex
-	track            iClientTrack
-	bitrate          uint32
-	quality          QualityLevel
-	simulcast        bool
-	delayCounter     int
-	lastIncreaseTime time.Time
-	lastDecreaseTime time.Time
+	mu        sync.RWMutex
+	track     iClientTrack
+	quality   QualityLevel
+	simulcast bool
 }
 
 func (c *bitrateClaim) Quality() QualityLevel {
@@ -38,15 +34,51 @@ func (c *bitrateClaim) Bitrate() uint32 {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	return c.bitrate
+	var bitrate uint32
+
+	if c.track.IsSimulcast() {
+		bitrate = c.track.(*simulcastClientTrack).ReceiveBitrateAtQuality(c.quality)
+	} else {
+		bitrate = c.track.ReceiveBitrate()
+		bitrate += bitrate * 10 / 100
+	}
+
+	return bitrate
+
 }
 
 func (c *bitrateClaim) IsAdjustable() bool {
 	return c.track.IsSimulcast() || c.track.IsScaleable()
 }
 
+func (c *bitrateClaim) QualityLevelToBitrate(quality QualityLevel) uint32 {
+	if c.track.IsSimulcast() {
+		t := c.track.(*simulcastClientTrack)
+		switch quality {
+		case QualityLow:
+			return t.ReceiveBitrateAtQuality(QualityLow)
+		case QualityMid:
+			return t.ReceiveBitrateAtQuality(QualityMid)
+		case QualityHigh:
+			return t.ReceiveBitrateAtQuality(QualityHigh)
+		}
+	} else {
+		switch quality {
+		case QualityLow:
+			return c.track.ReceiveBitrate() / 4
+		case QualityMid:
+			return c.track.ReceiveBitrate() / 2
+		case QualityHigh:
+			return c.track.ReceiveBitrate()
+		}
+	}
+
+	return 0
+}
+
 type bitrateController struct {
 	mu                      sync.RWMutex
+	targetBitrate           uint32
 	lastBitrateAdjustmentTS time.Time
 	client                  *Client
 	claims                  map[string]*bitrateClaim
@@ -104,7 +136,7 @@ func (bc *bitrateController) TotalBitrates() uint32 {
 func (bc *bitrateController) totalBitrates() uint32 {
 	total := uint32(0)
 	for _, claim := range bc.Claims() {
-		total += claim.bitrate
+		total += claim.Bitrate()
 	}
 
 	return total
@@ -116,14 +148,7 @@ func (bc *bitrateController) setQuality(clientTrackID string, quality QualityLev
 
 	if claim, ok := bc.claims[clientTrackID]; ok {
 		claim.mu.Lock()
-
-		if claim.quality < quality {
-			claim.lastIncreaseTime = time.Now()
-		}
-
-		bitrate := bc.client.sfu.QualityLevelToBitrate(quality)
 		claim.quality = quality
-		claim.bitrate = bitrate
 		claim.mu.Unlock()
 
 		bc.claims[clientTrackID] = claim
@@ -215,27 +240,6 @@ func (bc *bitrateController) addAudioClaims(clientTracks []iClientTrack) (leftTr
 	return leftTracks, nil
 }
 
-// this should never return QualityNone becaus it will delay onTrack event
-func (bc *bitrateController) getDistributedQuality(totalTracks int) QualityLevel {
-	if totalTracks == 0 {
-		return 0
-	}
-
-	availableBandwidth := bc.client.GetEstimatedBandwidth() - bc.totalBitrates()
-
-	distributedBandwidth := availableBandwidth / uint32(totalTracks)
-
-	bitrateConfig := bc.client.SFU().bitrateConfigs
-
-	if distributedBandwidth < bitrateConfig.VideoMid {
-		return QualityLow
-	} else if distributedBandwidth < bitrateConfig.VideoHigh {
-		return QualityMid
-	}
-
-	return QualityHigh
-}
-
 func (bc *bitrateController) addClaims(clientTracks []iClientTrack) error {
 	leftTracks, err := bc.addAudioClaims(clientTracks)
 	if err != nil {
@@ -245,9 +249,17 @@ func (bc *bitrateController) addClaims(clientTracks []iClientTrack) error {
 	errors := make([]error, 0)
 	claimed := 0
 
+	var trackQuality QualityLevel = QualityHigh
+	if len(leftTracks) > 4 {
+		trackQuality = QualityLow
+	} else if len(leftTracks) > 2 {
+		trackQuality = QualityMid
+	}
+
 	for _, clientTrack := range leftTracks {
 		if clientTrack.Kind() == webrtc.RTPCodecTypeVideo {
-			trackQuality := bc.getDistributedQuality(len(leftTracks) - claimed)
+
+			glog.Info("bitratecontroller: track ", clientTrack.ID(), " quality ", trackQuality)
 			bc.mu.RLock()
 			if _, ok := bc.claims[clientTrack.ID()]; ok {
 				errors = append(errors, ErrAlreadyClaimed)
@@ -283,8 +295,6 @@ func (bc *bitrateController) addClaims(clientTracks []iClientTrack) error {
 }
 
 func (bc *bitrateController) addClaim(clientTrack iClientTrack, quality QualityLevel) (*bitrateClaim, error) {
-	bitrate := bc.client.sfu.QualityLevelToBitrate(quality)
-
 	bc.mu.Lock()
 	defer bc.mu.Unlock()
 
@@ -293,7 +303,6 @@ func (bc *bitrateController) addClaim(clientTrack iClientTrack, quality QualityL
 		track:     clientTrack,
 		quality:   quality,
 		simulcast: clientTrack.IsSimulcast(),
-		bitrate:   bitrate,
 	}
 
 	go func() {
@@ -364,7 +373,7 @@ func (bc *bitrateController) totalSentBitrates() uint32 {
 
 	for _, claim := range bc.Claims() {
 		bc.mu.RLock()
-		total += claim.bitrate
+		total += claim.track.SendBitrate()
 		bc.mu.RUnlock()
 	}
 
@@ -401,6 +410,8 @@ func (bc *bitrateController) needIncreaseBitrate(availableBw uint32) bool {
 func (bc *bitrateController) MonitorBandwidth(estimator cc.BandwidthEstimator) {
 	estimator.OnTargetBitrateChange(func(bw int) {
 		var needAdjustment bool
+
+		bc.targetBitrate = uint32(bw)
 
 		totalSendBitrates := bc.totalSentBitrates()
 
@@ -463,7 +474,7 @@ func (bc *bitrateController) fitBitratesToBandwidth(bw uint32) {
 				if claim.IsAdjustable() &&
 					claim.Quality() == QualityLevel(i) {
 					oldBitrate := claim.Bitrate()
-					newBitrate := bc.client.SFU().QualityLevelToBitrate(claim.Quality() + 1)
+					newBitrate := claim.QualityLevelToBitrate(claim.Quality() + 1)
 					bitrateIncrease := newBitrate - oldBitrate
 
 					// check if the bitrate increase will more than the available bandwidth
@@ -524,8 +535,8 @@ func (bc *bitrateController) isEnoughBandwidthToIncrase(bandwidthLeft uint32, cl
 		return false
 	}
 
-	nextBitrate := bc.client.sfu.QualityLevelToBitrate(nextQuality)
-	currentBitrate := bc.client.sfu.QualityLevelToBitrate(claim.Quality())
+	nextBitrate := claim.QualityLevelToBitrate(nextQuality)
+	currentBitrate := claim.Bitrate()
 
 	bandwidthGap := nextBitrate - currentBitrate
 
