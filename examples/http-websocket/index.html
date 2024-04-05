@@ -411,10 +411,11 @@
             }
             
 			const isFirefox =navigator.userAgent.includes("Firefox")
+			const isSimulcast = document.querySelector("#simulcast").checked
 			console.log("isFirefox",isFirefox)
             if (codec ==='vp9' && !isFirefox){
 				let videoTcvr = null
-				const isSimulcast = document.querySelector("#simulcast").checked
+				
 				console.log("simulcast: ",isSimulcast)
 
 				if (!isSimulcast){
@@ -423,7 +424,7 @@
 					streams: [stream],
 					sendEncodings: [
 							{
-								maxBitrate: 1200*1000,
+								maxBitrate: 900*1000,
 								scalabilityMode: 'L3T3'
 							},
 						
@@ -437,7 +438,7 @@
 					sendEncodings: [
 							{
 								rid: 'high',
-								maxBitrate: 1200*1000,
+								maxBitrate: 700*1000,
 								maxFramerate: 30,
 								scalabilityMode:'L1T2'
 							},
@@ -445,13 +446,13 @@
 								rid: 'mid',
 								scaleResolutionDownBy: 2.0,
 								maxFramerate: 30,
-								maxBitrate: 500*1000,
+								maxBitrate: 300*1000,
 								scalabilityMode:'L1T2'
 							},
 							{
 								rid: 'low',
 								scaleResolutionDownBy: 4.0,
-								maxBitrate: 150*1000,
+								maxBitrate: 90*1000,
 								maxFramerate:30,
 								scalabilityMode:'L1T2'
 							}
@@ -480,7 +481,21 @@
                     videoTcvr.setCodecPreferences(vp9_codecs);
                 }
             } else {
-                const videoTcvr = peerConnection.addTransceiver(stream.getVideoTracks()[0], {
+				let videoTcvr = null
+				if (!isSimulcast){
+					videoTcvr = peerConnection.addTransceiver(stream.getVideoTracks()[0], {
+					direction: 'sendonly',
+					streams: [stream],
+					sendEncodings: [
+							{
+								maxBitrate: 1200*1000,
+							},
+						
+						]
+					})
+					
+				} else {
+                videoTcvr = peerConnection.addTransceiver(stream.getVideoTracks()[0], {
                 direction: 'sendonly',
                 streams: [stream],
                 sendEncodings: [
@@ -503,6 +518,7 @@
                         }
                     ]
                 })
+			}
 
 				const codecs = RTCRtpReceiver.getCapabilities('video').codecs;
 				let h264Codecs = [];

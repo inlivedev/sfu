@@ -34,36 +34,6 @@ type queue struct {
 	mu sync.RWMutex
 }
 
-// func (q *queue) Front() *list.Element {
-// 	q.mu.RLock()
-// 	defer q.mu.RUnlock()
-// 	return q.List.Front()
-// }
-
-// func (q *queue) Back() *list.Element {
-// 	q.mu.RLock()
-// 	defer q.mu.RUnlock()
-// 	return q.List.Back()
-// }
-
-// func (q *queue) Len() int {
-// 	q.mu.RLock()
-// 	defer q.mu.RUnlock()
-// 	return q.List.Len()
-// }
-
-// func (q *queue) PushBack(v *item) {
-// 	q.mu.Lock()
-// 	defer q.mu.Unlock()
-// 	q.List.PushBack(v)
-// }
-
-// func (q *queue) PushFront(v *item) {
-// 	q.mu.Lock()
-// 	defer q.mu.Unlock()
-// 	q.List.PushFront(v)
-// }
-
 func (q *queue) Remove(e *list.Element) *item {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -75,12 +45,6 @@ func (q *queue) Remove(e *list.Element) *item {
 
 	return i
 }
-
-// func (q *queue) InsertAfter(v *item, mark *list.Element) {
-// 	q.mu.Lock()
-// 	defer q.mu.Unlock()
-// 	q.List.InsertAfter(v, mark)
-// }
 
 // LeakyBucketPacer implements a leaky bucket pacing algorithm
 type LeakyBucketPacer struct {
