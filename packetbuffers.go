@@ -10,7 +10,6 @@ import (
 
 	"github.com/golang/glog"
 	"github.com/inlivedev/sfu/pkg/rtppool"
-	"github.com/pion/rtp"
 )
 
 var (
@@ -88,7 +87,7 @@ func (p *packetBuffers) Initiated() bool {
 	return p.init
 }
 
-func (p *packetBuffers) Add(pkt *rtp.Packet) error {
+func (p *packetBuffers) Add(pkt *rtppool.RetainablePacket) error {
 	p.mu.Lock()
 	defer func() {
 		p.checkOrderedPacketAndRecordTimes()
@@ -99,20 +98,18 @@ func (p *packetBuffers) Add(pkt *rtp.Packet) error {
 		p.mu.Unlock()
 	}()
 
-	newPacket := rtppool.NewPacket(&pkt.Header, pkt.Payload)
-
 	if p.init &&
-		(p.lastSequenceNumber == pkt.SequenceNumber || IsRTPPacketLate(pkt.SequenceNumber, p.lastSequenceNumber)) {
-		glog.Warning("packet cache: packet sequence ", pkt.SequenceNumber, " is too late, last sent was ", p.lastSequenceNumber, ", will not adding the packet")
+		(p.lastSequenceNumber == pkt.Header().SequenceNumber || IsRTPPacketLate(pkt.Header().SequenceNumber, p.lastSequenceNumber)) {
+		glog.Warning("packet cache: packet sequence ", pkt.Header().SequenceNumber, " is too late, last sent was ", p.lastSequenceNumber, ", will not adding the packet")
 
 		// add to to front of the list to make sure pop take it first
-		p.buffers.PushFront(newPacket)
+		p.buffers.PushFront(pkt)
 
 		return ErrPacketTooLate
 	}
 
 	if p.buffers.Len() == 0 {
-		p.buffers.PushBack(newPacket)
+		p.buffers.PushBack(pkt)
 
 		return nil
 	}
@@ -120,26 +117,26 @@ func (p *packetBuffers) Add(pkt *rtp.Packet) error {
 Loop:
 	for e := p.buffers.Back(); e != nil; e = e.Prev() {
 		currentPkt := e.Value.(*rtppool.RetainablePacket)
-		if currentPkt.Header().SequenceNumber == pkt.SequenceNumber {
+		if currentPkt.Header().SequenceNumber == pkt.Header().SequenceNumber {
 			// glog.Warning("packet cache: packet sequence ", pkt.SequenceNumber, " already exists in the cache, will not adding the packet")
 
 			return ErrPacketDuplicate
 		}
 
-		if currentPkt.Header().SequenceNumber < pkt.SequenceNumber && pkt.SequenceNumber-currentPkt.Header().SequenceNumber < uint16SizeHalf {
-			p.buffers.InsertAfter(newPacket, e)
+		if currentPkt.Header().SequenceNumber < pkt.Header().SequenceNumber && pkt.Header().SequenceNumber-currentPkt.Header().SequenceNumber < uint16SizeHalf {
+			p.buffers.InsertAfter(pkt, e)
 
 			break Loop
 		}
 
-		if currentPkt.Header().SequenceNumber-pkt.SequenceNumber > uint16SizeHalf {
-			p.buffers.InsertAfter(newPacket, e)
+		if currentPkt.Header().SequenceNumber-pkt.Header().SequenceNumber > uint16SizeHalf {
+			p.buffers.InsertAfter(pkt, e)
 
 			break Loop
 		}
 
 		if e.Prev() == nil {
-			p.buffers.PushFront(newPacket)
+			p.buffers.PushFront(pkt)
 
 			break Loop
 		}

@@ -8,7 +8,7 @@ import (
 
 type rtpPool struct {
 	pool          sync.Pool
-	packetManager *packetManager
+	PacketManager *PacketManager
 }
 
 var rtpPacketPool = &rtpPool{
@@ -17,7 +17,11 @@ var rtpPacketPool = &rtpPool{
 			return &rtp.Packet{}
 		},
 	},
-	packetManager: newPacketManager(),
+	PacketManager: newPacketManager(),
+}
+
+func GetPacketManager() *PacketManager {
+	return rtpPacketPool.PacketManager
 }
 
 func ResetPacketPoolAllocation(localPacket *rtp.Packet) {
@@ -34,7 +38,7 @@ func GetPacketAllocationFromPool() *rtp.Packet {
 }
 
 func NewPacket(header *rtp.Header, payload []byte) *RetainablePacket {
-	pkt, err := rtpPacketPool.packetManager.NewPacket(header, payload)
+	pkt, err := rtpPacketPool.PacketManager.NewPacket(header, payload)
 	if err != nil {
 		return nil
 	}

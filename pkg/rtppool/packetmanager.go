@@ -19,19 +19,19 @@ var (
 
 const maxPayloadLen = 1460
 
-type packetManager struct {
-	headerPool  *sync.Pool
-	payloadPool *sync.Pool
+type PacketManager struct {
+	HeaderPool  *sync.Pool
+	PayloadPool *sync.Pool
 }
 
-func newPacketManager() *packetManager {
-	return &packetManager{
-		headerPool: &sync.Pool{
+func newPacketManager() *PacketManager {
+	return &PacketManager{
+		HeaderPool: &sync.Pool{
 			New: func() interface{} {
 				return &rtp.Header{}
 			},
 		},
-		payloadPool: &sync.Pool{
+		PayloadPool: &sync.Pool{
 			New: func() interface{} {
 				buf := make([]byte, maxPayloadLen)
 				return &buf
@@ -40,7 +40,7 @@ func newPacketManager() *packetManager {
 	}
 }
 
-func (m *packetManager) NewPacket(header *rtp.Header, payload []byte) (*RetainablePacket, error) {
+func (m *PacketManager) NewPacket(header *rtp.Header, payload []byte) (*RetainablePacket, error) {
 	if len(payload) > maxPayloadLen {
 		return nil, io.ErrShortBuffer
 	}
@@ -56,7 +56,7 @@ func (m *packetManager) NewPacket(header *rtp.Header, payload []byte) (*Retainab
 	defer p.mu.Unlock()
 
 	var ok bool
-	p.header, ok = m.headerPool.Get().(*rtp.Header)
+	p.header, ok = m.HeaderPool.Get().(*rtp.Header)
 	if !ok {
 		return nil, errFailedToCastHeaderPool
 	}
@@ -64,7 +64,7 @@ func (m *packetManager) NewPacket(header *rtp.Header, payload []byte) (*Retainab
 	*p.header = header.Clone()
 
 	if payload != nil {
-		p.buffer, ok = m.payloadPool.Get().(*[]byte)
+		p.buffer, ok = m.PayloadPool.Get().(*[]byte)
 		if !ok {
 			return nil, errFailedToCastPayloadPool
 		}
@@ -76,10 +76,10 @@ func (m *packetManager) NewPacket(header *rtp.Header, payload []byte) (*Retainab
 	return p, nil
 }
 
-func (m *packetManager) releasePacket(header *rtp.Header, payload *[]byte) {
-	m.headerPool.Put(header)
+func (m *PacketManager) releasePacket(header *rtp.Header, payload *[]byte) {
+	m.HeaderPool.Put(header)
 	if payload != nil {
-		m.payloadPool.Put(payload)
+		m.PayloadPool.Put(payload)
 	}
 }
 

@@ -2,6 +2,7 @@ package sfu
 
 import (
 	"context"
+	"errors"
 	"io"
 	"sync"
 	"time"
@@ -83,15 +84,30 @@ func (t *remoteTrack) readRTP() {
 				glog.Error("remotetrack: set read deadline error: ", err)
 				return
 			}
+			buffer, ok := rtppool.GetPacketManager().PayloadPool.Get().(*[]byte)
+			if !ok {
+				rtppool.GetPacketManager().PayloadPool.Put(buffer)
+				return
+			}
 
-			p, _, readErr := t.track.ReadRTP()
+			n, _, readErr := t.track.Read(*buffer)
 			if readErr == io.EOF {
 				glog.Info("remotetrack: track ended: ", t.track.ID())
+				rtppool.GetPacketManager().PayloadPool.Put(buffer)
 				return
 			}
 
 			// could be read deadline reached
-			if p == nil {
+			if n == 0 {
+				rtppool.GetPacketManager().PayloadPool.Put(buffer)
+				continue
+			}
+
+			p := rtppool.GetPacketAllocationFromPool()
+
+			if err := t.unmarshal((*buffer)[:n], p); err != nil {
+				rtppool.GetPacketManager().PayloadPool.Put(buffer)
+				rtppool.ResetPacketPoolAllocation(p)
 				continue
 			}
 
@@ -101,13 +117,39 @@ func (t *remoteTrack) readRTP() {
 
 			if t.Track().Kind() == webrtc.RTPCodecTypeVideo {
 				// video needs to be reordered
-				_ = t.packetBuffers.Add(p)
+				retainablePacket := rtppool.NewPacket(&p.Header, p.Payload)
+				if err := t.packetBuffers.Add(retainablePacket); err != nil {
+					retainablePacket.Release()
+				}
 			} else {
 				// audio doesn't need to be reordered
 				t.onRead(p)
 			}
+
+			rtppool.GetPacketManager().PayloadPool.Put(buffer)
+			rtppool.ResetPacketPoolAllocation(p)
 		}
 	}
+}
+
+func (t *remoteTrack) unmarshal(buf []byte, p *rtp.Packet) error {
+	n, err := p.Header.Unmarshal(buf)
+	if err != nil {
+		return err
+	}
+
+	end := len(buf)
+	if p.Header.Padding {
+		p.PaddingSize = buf[end-1]
+		end -= int(p.PaddingSize)
+	}
+	if end < n {
+		return errors.New("remote track buffer too short")
+	}
+
+	p.Payload = buf[n:end]
+
+	return nil
 }
 
 func (t *remoteTrack) loop() {
