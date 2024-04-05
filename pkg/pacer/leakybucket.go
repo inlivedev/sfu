@@ -172,11 +172,6 @@ func (p *LeakyBucketPacer) getQueue(ssrc uint32) *queue {
 // stream.
 func (p *LeakyBucketPacer) Write(header *rtp.Header, payload []byte, attributes interceptor.Attributes) (int, error) {
 	pkt := rtppool.NewPacket(header, payload)
-	err := pkt.Retain()
-	if err != nil {
-		glog.Warning("failed to retain packet: ", err)
-		return 0, err
-	}
 
 	queue := p.getQueue(header.SSRC)
 	if queue == nil {

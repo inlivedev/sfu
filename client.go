@@ -313,7 +313,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		canAddCandidate:                &atomic.Bool{},
 		isInRenegotiation:              &atomic.Bool{},
 		isInRemoteNegotiation:          &atomic.Bool{},
-		dataChannels:                   NewDataChannelList(),
+		dataChannels:                   NewDataChannelList(localCtx),
 		mu:                             sync.RWMutex{},
 		negotiationNeeded:              &atomic.Bool{},
 		peerConnection:                 newPeerConnection(peerConnection),
@@ -518,10 +518,6 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 			} else if simulcast, ok = track.(*SimulcastTrack); ok {
 				simulcast.AddRemoteTrack(simulcast.context, remoteTrack, opts.JitterBufferMinWait, opts.JitterBufferMaxWait, client.statsGetter, onStatsUpdated, onPLI)
 			}
-
-			// only process track when the lowest quality is available
-			simulcast.mu.Lock()
-			simulcast.mu.Unlock()
 
 			if !track.IsProcessed() {
 				client.onTrack(track)
@@ -1009,6 +1005,8 @@ func (c *Client) afterClosed() {
 	if state != ClientStateEnded {
 		c.state.Store(ClientStateEnded)
 	}
+
+	c.internalDataChannel.Close()
 
 	c.onLeft()
 

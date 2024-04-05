@@ -1,6 +1,7 @@
 package sfu
 
 import (
+	"context"
 	"errors"
 	"sync"
 	"time"
@@ -98,11 +99,21 @@ func DefaultDataChannelOptions() DataChannelOptions {
 	}
 }
 
-func NewDataChannelList() *DataChannelList {
-	return &DataChannelList{
+func NewDataChannelList(ctx context.Context) *DataChannelList {
+	list := &DataChannelList{
 		dataChannels: make(map[string]*webrtc.DataChannel),
 		mu:           sync.Mutex{},
 	}
+
+	go func() {
+		localCtx, cancel := context.WithCancel(ctx)
+		defer cancel()
+
+		<-localCtx.Done()
+		list.Clear()
+	}()
+
+	return list
 }
 
 func (d *DataChannelList) Add(dc *webrtc.DataChannel) {
@@ -129,4 +140,14 @@ func (d *DataChannelList) Get(label string) *webrtc.DataChannel {
 	}
 
 	return dc
+}
+
+func (d *DataChannelList) Clear() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	for label, dc := range d.dataChannels {
+		dc.Close()
+		delete(d.dataChannels, label)
+	}
 }

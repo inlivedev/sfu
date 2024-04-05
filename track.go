@@ -68,7 +68,7 @@ type ITrack interface {
 type Track struct {
 	context          context.Context
 	cancel           context.CancelFunc
-	mu               sync.RWMutex
+	mu               sync.Mutex
 	base             baseTrack
 	remoteTrack      *remoteTrack
 	onEndedCallbacks []func()
@@ -94,7 +94,7 @@ func newTrack(ctx context.Context, clientID string, trackRemote IRemoteTrack, mi
 	}
 
 	t := &Track{
-		mu:               sync.RWMutex{},
+		mu:               sync.Mutex{},
 		base:             baseTrack,
 		onReadCallbacks:  make([]func(*rtp.Packet, QualityLevel), 0),
 		onEndedCallbacks: make([]func(), 0),
@@ -298,8 +298,8 @@ func (t *Track) OnRead(callback func(*rtp.Packet, QualityLevel)) {
 }
 
 func (t *Track) onRead(p *rtp.Packet, quality QualityLevel) {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
+	t.mu.Lock()
+	defer t.mu.Unlock()
 
 	for _, callback := range t.onReadCallbacks {
 		copyPacket := rtppool.GetPacketAllocationFromPool()
