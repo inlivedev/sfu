@@ -1012,8 +1012,6 @@ func (c *Client) afterClosed() {
 
 	c.cancel()
 
-	c.estimator.Close()
-
 	c.sfu.onAfterClientStopped(c)
 }
 
