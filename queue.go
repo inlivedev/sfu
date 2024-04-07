@@ -57,6 +57,10 @@ func (q *queue) Push(item interface{}) {
 
 		if !q.IsOpen.Load() {
 			glog.Warning("sfu: queue is closed when push renegotiation")
+			if opItem, ok := item.(negotiationQueue); ok {
+				opItem.ErrorChan <- ErrQueueIsClosed
+			}
+
 			return
 		}
 

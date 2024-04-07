@@ -624,7 +624,12 @@ func (c *Client) Negotiate(offer webrtc.SessionDescription) (*webrtc.SessionDesc
 		ErrorChan:  errorChan,
 	})
 
+	localCtx, cancel := context.WithCancel(c.context)
+	defer cancel()
+
 	select {
+	case <-localCtx.Done():
+		return nil, ErrClientStoped
 	case err := <-errorChan:
 		return nil, err
 	case answer := <-answerChan:
