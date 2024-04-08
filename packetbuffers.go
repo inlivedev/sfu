@@ -117,29 +117,37 @@ func (p *packetBuffers) Add(pkt *rtppool.RetainablePacket) error {
 Loop:
 	for e := p.buffers.Back(); e != nil; e = e.Prev() {
 		currentPkt := e.Value.(*rtppool.RetainablePacket)
+
+		if err := currentPkt.Retain(); err != nil {
+			// already released
+			continue
+		}
+
 		if currentPkt.Header().SequenceNumber == pkt.Header().SequenceNumber {
 			// glog.Warning("packet cache: packet sequence ", pkt.SequenceNumber, " already exists in the cache, will not adding the packet")
-
+			currentPkt.Release()
 			return ErrPacketDuplicate
 		}
 
 		if currentPkt.Header().SequenceNumber < pkt.Header().SequenceNumber && pkt.Header().SequenceNumber-currentPkt.Header().SequenceNumber < uint16SizeHalf {
 			p.buffers.InsertAfter(pkt, e)
-
+			currentPkt.Release()
 			break Loop
 		}
 
 		if currentPkt.Header().SequenceNumber-pkt.Header().SequenceNumber > uint16SizeHalf {
 			p.buffers.InsertAfter(pkt, e)
-
+			currentPkt.Release()
 			break Loop
 		}
 
 		if e.Prev() == nil {
 			p.buffers.PushFront(pkt)
-
+			currentPkt.Release()
 			break Loop
 		}
+
+		currentPkt.Release()
 	}
 
 	return nil
@@ -355,6 +363,13 @@ func (p *packetBuffers) WaitAvailablePacket() {
 func (p *packetBuffers) checkOrderedPacketAndRecordTimes() {
 	for e := p.buffers.Front(); e != nil; e = e.Next() {
 		pkt := e.Value.(*rtppool.RetainablePacket)
+
+		// make sure call retain to prevent packet from being released when we are still using it
+		if err := pkt.Retain(); err != nil {
+			// already released
+			continue
+		}
+
 		currentSeq := pkt.Header().SequenceNumber
 		latency := time.Since(pkt.AddedTime())
 
@@ -370,8 +385,12 @@ func (p *packetBuffers) checkOrderedPacketAndRecordTimes() {
 				p.packetAvailableWait.Signal()
 			}
 		} else if latency > p.maxLatency {
+			// passed the max latency
 			p.packetAvailableWait.Signal()
 		}
+
+		// release the packet after we are done with it
+		pkt.Release()
 	}
 }
 
