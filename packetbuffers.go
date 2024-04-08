@@ -156,6 +156,15 @@ Loop:
 func (p *packetBuffers) pop(el *list.Element) *rtppool.RetainablePacket {
 	pkt := el.Value.(*rtppool.RetainablePacket)
 
+	if err := pkt.Retain(); err != nil {
+		// already released
+		return nil
+	}
+
+	defer func() {
+		pkt.Release()
+	}()
+
 	// make sure packet is not late
 	if IsRTPPacketLate(pkt.Header().SequenceNumber, p.lastSequenceNumber) {
 		glog.Warning("packet cache: packet sequence ", pkt.Header().SequenceNumber, " is too late, last sent was ", p.lastSequenceNumber)
@@ -286,6 +295,14 @@ func (p *packetBuffers) Pop() *rtppool.RetainablePacket {
 	}
 
 	item := frontElement.Value.(*rtppool.RetainablePacket)
+	if err := item.Retain(); err != nil {
+		return nil
+	}
+
+	defer func() {
+		item.Release()
+	}()
+
 	if IsRTPPacketLate(item.Header().SequenceNumber, p.lastSequenceNumber) {
 
 		return p.pop(frontElement)
