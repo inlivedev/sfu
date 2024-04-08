@@ -118,9 +118,8 @@ func (t *remoteTrack) readRTP() {
 			if t.Track().Kind() == webrtc.RTPCodecTypeVideo {
 				// video needs to be reordered
 				retainablePacket := rtppool.NewPacket(&p.Header, p.Payload)
-				if err := t.packetBuffers.Add(retainablePacket); err != nil {
-					retainablePacket.Release()
-				}
+				_ = t.packetBuffers.Add(retainablePacket)
+
 			} else {
 				// audio doesn't need to be reordered
 				t.onRead(p)
