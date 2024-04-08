@@ -113,6 +113,14 @@ func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 		return
 	}
 
+	// check if svc packet
+	if vp9Packet.SID > 0 || vp9Packet.TID > 0 {
+		if !t.remoteTrack.IsAdaptive() {
+			t.remoteTrack.SetSVC(true)
+			glog.Info("scalabletrack: remote track is adaptive")
+		}
+	}
+
 	quality := t.getQuality()
 	if quality == QualityNone {
 		t.baseSequence++

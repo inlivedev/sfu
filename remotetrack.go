@@ -21,6 +21,7 @@ type remoteTrack struct {
 	cancel  context.CancelFunc
 	mu      sync.RWMutex
 	track   IRemoteTrack
+	isSVC   bool
 
 	onRead                func(*rtp.Packet)
 	onPLI                 func()
@@ -33,6 +34,7 @@ type remoteTrack struct {
 	statsGetter           stats.Getter
 	onStatsUpdated        func(*stats.Stats)
 	packetBuffers         *packetBuffers
+	looping               bool
 }
 
 func newRemoteTrack(ctx context.Context, track IRemoteTrack, minWait, maxWait, pliInterval time.Duration, onPLI func(), statsGetter stats.Getter, onStatsUpdated func(*stats.Stats), onRead func(*rtp.Packet)) *remoteTrack {
@@ -61,7 +63,7 @@ func newRemoteTrack(ctx context.Context, track IRemoteTrack, minWait, maxWait, p
 
 	go rt.readRTP()
 
-	if rt.Track().Kind() == webrtc.RTPCodecTypeVideo {
+	if rt.IsAdaptive() {
 		go rt.loop()
 	}
 
@@ -70,6 +72,24 @@ func newRemoteTrack(ctx context.Context, track IRemoteTrack, minWait, maxWait, p
 
 func (t *remoteTrack) Context() context.Context {
 	return t.context
+}
+
+func (t *remoteTrack) IsAdaptive() bool {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
+	return t.Track().RID() != "" || t.isSVC
+}
+
+func (t *remoteTrack) SetSVC(isAdaptive bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	t.isSVC = isAdaptive
+
+	if isAdaptive {
+		go t.loop()
+	}
 }
 
 func (t *remoteTrack) readRTP() {
@@ -115,13 +135,13 @@ func (t *remoteTrack) readRTP() {
 				go t.updateStats()
 			}
 
-			if t.Track().Kind() == webrtc.RTPCodecTypeVideo {
-				// video needs to be reordered
+			if t.Track().Kind() == webrtc.RTPCodecTypeVideo && t.IsAdaptive() {
+				// adaptive video needs to be reordered
 				retainablePacket := rtppool.NewPacket(&p.Header, p.Payload)
 				_ = t.packetBuffers.Add(retainablePacket)
 
 			} else {
-				// audio doesn't need to be reordered
+				// audio and non adaptive video doesn't need to be reordered
 				t.onRead(p)
 			}
 
@@ -152,14 +172,33 @@ func (t *remoteTrack) unmarshal(buf []byte, p *rtp.Packet) error {
 }
 
 func (t *remoteTrack) loop() {
+	if t.looping {
+		return
+	}
+
 	ctx, cancel := context.WithCancel(t.context)
 	defer cancel()
+
+	t.mu.Lock()
+	t.looping = true
+	t.mu.Unlock()
+
+	defer func() {
+		t.mu.Lock()
+		t.looping = false
+		t.mu.Unlock()
+	}()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		default:
+			if !t.IsAdaptive() {
+				t.Flush()
+				return
+			}
+
 			t.packetBuffers.WaitAvailablePacket()
 
 			for orderedPkt := t.packetBuffers.Pop(); orderedPkt != nil; orderedPkt = t.packetBuffers.Pop() {
@@ -180,6 +219,23 @@ func (t *remoteTrack) loop() {
 		}
 	}
 
+}
+
+func (t *remoteTrack) Flush() {
+	pkts := t.packetBuffers.Flush()
+	for _, pkt := range pkts {
+		copyPkt := rtppool.GetPacketAllocationFromPool()
+
+		copyPkt.Header = *pkt.Header()
+
+		copyPkt.Payload = pkt.Payload()
+
+		t.onRead(copyPkt)
+
+		rtppool.ResetPacketPoolAllocation(copyPkt)
+
+		pkt.Release()
+	}
 }
 
 func (t *remoteTrack) updateStats() {
