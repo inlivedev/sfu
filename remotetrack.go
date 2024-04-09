@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 
 	"github.com/golang/glog"
+	"github.com/inlivedev/sfu/pkg/networkmonitor"
 	"github.com/inlivedev/sfu/pkg/rtppool"
 	"github.com/pion/interceptor/pkg/stats"
 	"github.com/pion/rtp"
@@ -35,9 +36,10 @@ type remoteTrack struct {
 	onStatsUpdated        func(*stats.Stats)
 	packetBuffers         *packetBuffers
 	looping               bool
+	monitor               *networkmonitor.NetworkMonitor
 }
 
-func newRemoteTrack(ctx context.Context, track IRemoteTrack, minWait, maxWait, pliInterval time.Duration, onPLI func(), statsGetter stats.Getter, onStatsUpdated func(*stats.Stats), onRead func(*rtp.Packet)) *remoteTrack {
+func newRemoteTrack(ctx context.Context, track IRemoteTrack, minWait, maxWait, pliInterval time.Duration, onPLI func(), statsGetter stats.Getter, onStatsUpdated func(*stats.Stats), onRead func(*rtp.Packet), onNetworkConditionChanged func(networkmonitor.NetworkConditionType)) *remoteTrack {
 	localctx, cancel := context.WithCancel(ctx)
 
 	rt := &remoteTrack{
@@ -55,7 +57,10 @@ func newRemoteTrack(ctx context.Context, track IRemoteTrack, minWait, maxWait, p
 		onPLI:                 onPLI,
 		onRead:                onRead,
 		packetBuffers:         newPacketBuffers(localctx, minWait, maxWait, true),
+		monitor:               networkmonitor.Default(),
 	}
+
+	rt.monitor.OnNetworkConditionChanged(onNetworkConditionChanged)
 
 	if pliInterval > 0 {
 		rt.enableIntervalPLI(pliInterval)
@@ -145,6 +150,8 @@ func (t *remoteTrack) readRTP() {
 				t.onRead(p)
 			}
 
+			t.monitor.Add(p.SequenceNumber)
+
 			rtppool.GetPacketManager().PayloadPool.Put(buffer)
 			rtppool.ResetPacketPoolAllocation(p)
 		}
@@ -200,9 +207,10 @@ func (t *remoteTrack) loop() {
 			}
 
 			t.packetBuffers.WaitAvailablePacket()
-
+			t.mu.RLock()
 			for orderedPkt := t.packetBuffers.Pop(); orderedPkt != nil; orderedPkt = t.packetBuffers.Pop() {
 				// make sure the we're passing a new packet to the onRead callback
+
 				copyPkt := rtppool.GetPacketAllocationFromPool()
 
 				copyPkt.Header = *orderedPkt.Header()
@@ -215,6 +223,8 @@ func (t *remoteTrack) loop() {
 
 				orderedPkt.Release()
 			}
+
+			t.mu.RUnlock()
 
 		}
 	}

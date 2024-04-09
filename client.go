@@ -15,6 +15,7 @@ import (
 	"github.com/golang/glog"
 	"github.com/inlivedev/sfu/pkg/interceptors/playoutdelay"
 	"github.com/inlivedev/sfu/pkg/interceptors/voiceactivedetector"
+	"github.com/inlivedev/sfu/pkg/networkmonitor"
 	"github.com/inlivedev/sfu/pkg/pacer"
 	"github.com/pion/interceptor"
 	"github.com/pion/interceptor/pkg/cc"
@@ -155,6 +156,7 @@ type Client struct {
 	onRenegotiation                   func(context.Context, webrtc.SessionDescription) (webrtc.SessionDescription, error)
 	onAllowedRemoteRenegotiation      func()
 	onTracksAvailableCallbacks        []func([]ITrack)
+	onNetworkConditionChangedFunc     func(networkmonitor.NetworkConditionType)
 	// onTrack is used by SFU to take action when a new track is added to the client
 	onTrack                        func(ITrack)
 	onTracksAdded                  func([]ITrack)
@@ -473,7 +475,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 			minWait := opts.JitterBufferMinWait
 			maxWait := opts.JitterBufferMaxWait
 
-			track = newTrack(client.context, client.id, remoteTrack, minWait, maxWait, s.pliInterval, onPLI, client.statsGetter, onStatsUpdated)
+			track = newTrack(client.context, client, remoteTrack, minWait, maxWait, s.pliInterval, onPLI, client.statsGetter, onStatsUpdated)
 
 			go func() {
 				ctx, cancel := context.WithCancel(track.Context())
@@ -499,7 +501,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 
 			if err != nil {
 				// if track not found, add it
-				track = newSimulcastTrack(client.context, client.id, remoteTrack, opts.JitterBufferMinWait, opts.JitterBufferMaxWait, s.pliInterval, onPLI, client.statsGetter, onStatsUpdated)
+				track = newSimulcastTrack(client.context, client, remoteTrack, opts.JitterBufferMinWait, opts.JitterBufferMaxWait, s.pliInterval, onPLI, client.statsGetter, onStatsUpdated)
 				if err := client.tracks.Add(track); err != nil {
 					glog.Error("client: error add track ", err)
 				}
@@ -1663,4 +1665,17 @@ func registerInterceptors(m *webrtc.MediaEngine, interceptorRegistry *intercepto
 	}
 
 	return webrtc.ConfigureTWCCSender(m, interceptorRegistry)
+}
+
+func (c *Client) OnNetworkConditionChanged(callback func(networkmonitor.NetworkConditionType)) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.onNetworkConditionChangedFunc = callback
+}
+
+func (c *Client) onNetworkConditionChanged(condition networkmonitor.NetworkConditionType) {
+	if c.onNetworkConditionChangedFunc != nil {
+		c.onNetworkConditionChangedFunc(condition)
+	}
 }
