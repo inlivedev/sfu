@@ -543,7 +543,7 @@ func (s *SFU) AddRelayTrack(ctx context.Context, id, streamid, rid string, clien
 		track, ok := s.relayTracks[relayTrack.ID()]
 		if !ok {
 			// if track not found, add it
-			track = newSimulcastTrack(ctx, client, relayTrack, 0, 0, s.pliInterval, onPLI, nil, nil)
+			track = newSimulcastTrack(ctx, client.options.ReorderPackets, client, relayTrack, 0, 0, s.pliInterval, onPLI, nil, nil)
 			s.relayTracks[relayTrack.ID()] = track
 
 		} else if simulcast, ok = track.(*SimulcastTrack); ok {

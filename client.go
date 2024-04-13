@@ -64,13 +64,13 @@ type ClientOptions struct {
 	Type                 string
 	EnableVoiceDetection bool
 	EnablePlayoutDelay   bool
-	// Configure the minimum playout delay that will be used by the room
+	// Configure the minimum playout delay that will be used by the client
 	// Recommendation:
 	// 0 ms: Certain gaming scenarios (likely without audio) where we will want to play the frame as soon as possible. Also, for remote desktop without audio where rendering a frame asap makes sense
 	// 100/150/200 ms: These could be the max target latency for interactive streaming use cases depending on the actual application (gaming, remoting with audio, interactive scenarios)
 	// 400 ms: Application that want to ensure a network glitch has very little chance of causing a freeze can start with a minimum delay target that is high enough to deal with network issues. Video streaming is one example.
 	MinPlayoutDelay uint16
-	// Configure the minimum playout delay that will be used by the room
+	// Configure the minimum playout delay that will be used by the client
 	// Recommendation:
 	// 0 ms: Certain gaming scenarios (likely without audio) where we will want to play the frame as soon as possible. Also, for remote desktop without audio where rendering a frame asap makes sense
 	// 100/150/200 ms: These could be the max target latency for interactive streaming use cases depending on the actual application (gaming, remoting with audio, interactive scenarios)
@@ -78,8 +78,8 @@ type ClientOptions struct {
 	MaxPlayoutDelay     uint16
 	JitterBufferMinWait time.Duration
 	JitterBufferMaxWait time.Duration
-	// disable this will turn off the adaptive stream and jitter buffer. It just forward all received packets
-	EnableAdaptiveStream bool
+	// On unstable network, the packets can be arrived unordered which may affected the nack and packet loss counts, set this to true to allow the SFU to handle reordered packet
+	ReorderPackets bool
 }
 
 type internalDataMessage struct {
@@ -180,13 +180,12 @@ func DefaultClientOptions() ClientOptions {
 	return ClientOptions{
 		IdleTimeout:          5 * time.Minute,
 		Type:                 ClientTypePeer,
-		EnableVoiceDetection: false,
+		EnableVoiceDetection: true,
 		EnablePlayoutDelay:   true,
 		MinPlayoutDelay:      100,
 		MaxPlayoutDelay:      200,
 		JitterBufferMinWait:  20 * time.Millisecond,
 		JitterBufferMaxWait:  150 * time.Millisecond,
-		EnableAdaptiveStream: true,
 	}
 }
 
@@ -501,7 +500,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 
 			if err != nil {
 				// if track not found, add it
-				track = newSimulcastTrack(client.context, client, remoteTrack, opts.JitterBufferMinWait, opts.JitterBufferMaxWait, s.pliInterval, onPLI, client.statsGetter, onStatsUpdated)
+				track = newSimulcastTrack(client.context, client.options.ReorderPackets, client, remoteTrack, opts.JitterBufferMinWait, opts.JitterBufferMaxWait, s.pliInterval, onPLI, client.statsGetter, onStatsUpdated)
 				if err := client.tracks.Add(track); err != nil {
 					glog.Error("client: error add track ", err)
 				}
@@ -512,10 +511,6 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 					<-ctx.Done()
 					client.stats.removeReceiverStats(remoteTrack.ID())
 				}()
-
-				if simulcast, ok = track.(*SimulcastTrack); !ok {
-					glog.Error("client: error track is not simulcast track")
-				}
 
 			} else if simulcast, ok = track.(*SimulcastTrack); ok {
 				simulcast.AddRemoteTrack(simulcast.context, remoteTrack, opts.JitterBufferMinWait, opts.JitterBufferMaxWait, client.statsGetter, onStatsUpdated, onPLI)
@@ -819,7 +814,8 @@ func (c *Client) renegotiateQueuOp() {
 					err = c.peerConnection.PC().SetLocalDescription(offer)
 					if err != nil {
 						glog.Error("sfu: error set local description on renegotiation ", err)
-						c.stop()
+						_ = c.stop()
+
 						return
 					}
 
@@ -828,19 +824,22 @@ func (c *Client) renegotiateQueuOp() {
 					if err != nil {
 						//TODO: when this happen, we need to close the client and ask the remote client to reconnect
 						glog.Error("sfu: error on renegotiation ", err)
-						c.stop()
+						_ = c.stop()
+
 						return
 					}
 
 					if answer.Type != webrtc.SDPTypeAnswer {
 						glog.Error("sfu: error on renegotiation, the answer is not an answer type")
-						c.stop()
+						_ = c.stop()
+
 						return
 					}
 
 					err = c.peerConnection.PC().SetRemoteDescription(answer)
 					if err != nil {
-						c.stop()
+						_ = c.stop()
+
 						return
 					}
 				}
@@ -918,9 +917,6 @@ func (c *Client) setClientTrack(t ITrack) iClientTrack {
 		}()
 
 		sender := senderTcv.Sender()
-		if sender == nil {
-			return
-		}
 
 		if c.peerConnection == nil || c.peerConnection.PC() == nil || sender == nil || c.peerConnection.PC().ConnectionState() == webrtc.PeerConnectionStateClosed {
 			return
@@ -1285,32 +1281,33 @@ func (c *Client) SubscribeTracks(req []SubscribeTrackRequest) error {
 			continue
 		}
 
-		if client, err := c.sfu.clients.GetClient(r.ClientID); err == nil {
-			for _, track := range client.tracks.GetTracks() {
-				if track.ID() == r.TrackID {
-					if clientTrack := c.setClientTrack(track); clientTrack != nil {
-						clientTracks = append(clientTracks, clientTrack)
-					}
-
-					glog.Info("client: subscribe track ", r.TrackID, " from ", r.ClientID, " to ", c.ID())
-
-					trackFound = true
-
-				}
-			}
-
-			// look on relay tracks
-			for _, track := range c.SFU().relayTracks {
-				if track.ID() == r.TrackID {
-					if clientTrack := c.setClientTrack(track); clientTrack != nil {
-						clientTracks = append(clientTracks, clientTrack)
-					}
-
-					trackFound = true
-				}
-			}
-		} else if err != nil {
+		client, err := c.sfu.clients.GetClient(r.ClientID)
+		if err != nil {
 			return err
+		}
+
+		for _, track := range client.tracks.GetTracks() {
+			if track.ID() == r.TrackID {
+				if clientTrack := c.setClientTrack(track); clientTrack != nil {
+					clientTracks = append(clientTracks, clientTrack)
+				}
+
+				glog.Info("client: subscribe track ", r.TrackID, " from ", r.ClientID, " to ", c.ID())
+
+				trackFound = true
+
+			}
+		}
+
+		// look on relay tracks
+		for _, track := range c.SFU().relayTracks {
+			if track.ID() == r.TrackID {
+				if clientTrack := c.setClientTrack(track); clientTrack != nil {
+					clientTracks = append(clientTracks, clientTrack)
+				}
+
+				trackFound = true
+			}
 		}
 
 		if !trackFound {

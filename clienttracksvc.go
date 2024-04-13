@@ -2,6 +2,7 @@ package sfu
 
 import (
 	"github.com/golang/glog"
+	"github.com/inlivedev/sfu/pkg/packetmap"
 	"github.com/pion/rtp"
 	"github.com/pion/rtp/codecs"
 )
@@ -55,10 +56,10 @@ type scaleableClientTrack struct {
 	sid            uint8
 	lastTimestamp  uint32
 	lastSequence   uint16
-	baseSequence   uint16
 	qualityPresets QualityPresets
 	init           bool
 	packetCaches   *packetCaches
+	packetmap      *packetmap.Map
 }
 
 func newScaleableClientTrack(
@@ -74,7 +75,7 @@ func newScaleableClientTrack(
 		lastQuality:    QualityHigh,
 		tid:            qualityPresets.High.TID,
 		sid:            qualityPresets.High.SID,
-		packetCaches:   newPacketCaches(),
+		packetmap:      &packetmap.Map{},
 	}
 
 	return sct
@@ -109,7 +110,6 @@ func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 
 	vp9Packet := &codecs.VP9Packet{}
 	if _, err := vp9Packet.Unmarshal(p.Payload); err != nil {
-		t.baseSequence++
 		return
 	}
 
@@ -123,7 +123,6 @@ func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 
 	quality := t.getQuality()
 	if quality == QualityNone {
-		t.baseSequence++
 		glog.Info("scalabletrack: packet ", p.SequenceNumber, " is dropped because of quality none")
 		return
 	}
@@ -142,7 +141,6 @@ func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 
 	if !t.init {
 		t.init = true
-		t.baseSequence = p.SequenceNumber
 		t.sid = targetSID
 		t.tid = targetTID
 	} else {
@@ -168,12 +166,6 @@ func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 		}
 	}
 
-	if currentTID < vp9Packet.TID {
-		// glog.Info("scalabletrack: packet ", p.SequenceNumber, " is dropped because of currentTID ", currentTID, "  < vp9Packet.TID", vp9Packet.TID)
-		t.baseSequence++
-		return
-	}
-
 	// check if possible to scale up spatial layer
 
 	if currentSID < targetSID && !isLatePacket {
@@ -193,11 +185,20 @@ func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 		t.setLastQuality(quality)
 	}
 
-	if currentSID < vp9Packet.SID {
-		t.baseSequence++
-		// glog.Info("scalabletrack: packet ", p.SequenceNumber, " is dropped because of currentSID ", currentSID, " < vp9Packet.SID", vp9Packet.SID)
+	if currentTID < vp9Packet.TID || currentSID < vp9Packet.SID {
+		// glog.Info("scalabletrack: packet ", p.SequenceNumber, " is dropped because of currentTID ", currentTID, "  < vp9Packet.TID", vp9Packet.TID)
+		ok := t.packetmap.Drop(p.SequenceNumber, vp9Packet.PictureID)
+		if ok {
+			return
+		}
+	}
+
+	ok, newseqno, _ := t.packetmap.Map(p.SequenceNumber, vp9Packet.PictureID)
+	if !ok {
 		return
 	}
+
+	p.SequenceNumber = newseqno
 
 	// mark packet as a last spatial layer packet
 	if vp9Packet.E && currentSID == vp9Packet.SID && targetSID <= currentSID {
@@ -208,11 +209,6 @@ func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 }
 
 func (t *scaleableClientTrack) send(p *rtp.Packet, pSID, tSID, decidedSID, decidedTID uint8) {
-
-	t.packetCaches.Add(p.SequenceNumber, t.baseSequence, p.Timestamp, pSID, tSID, decidedSID, decidedTID)
-
-	p.Header.SequenceNumber = p.Header.SequenceNumber - t.baseSequence
-
 	t.lastTimestamp = p.Timestamp
 
 	if err := t.localTrack.WriteRTP(p); err != nil {

@@ -39,7 +39,7 @@ type remoteTrack struct {
 	monitor               *networkmonitor.NetworkMonitor
 }
 
-func newRemoteTrack(ctx context.Context, track IRemoteTrack, minWait, maxWait, pliInterval time.Duration, onPLI func(), statsGetter stats.Getter, onStatsUpdated func(*stats.Stats), onRead func(*rtp.Packet), onNetworkConditionChanged func(networkmonitor.NetworkConditionType)) *remoteTrack {
+func newRemoteTrack(ctx context.Context, useBuffer bool, track IRemoteTrack, minWait, maxWait, pliInterval time.Duration, onPLI func(), statsGetter stats.Getter, onStatsUpdated func(*stats.Stats), onRead func(*rtp.Packet), onNetworkConditionChanged func(networkmonitor.NetworkConditionType)) *remoteTrack {
 	localctx, cancel := context.WithCancel(ctx)
 
 	rt := &remoteTrack{
@@ -56,8 +56,11 @@ func newRemoteTrack(ctx context.Context, track IRemoteTrack, minWait, maxWait, p
 		onStatsUpdated:        onStatsUpdated,
 		onPLI:                 onPLI,
 		onRead:                onRead,
-		packetBuffers:         newPacketBuffers(localctx, minWait, maxWait, true),
 		monitor:               networkmonitor.Default(),
+	}
+
+	if useBuffer {
+		rt.packetBuffers = newPacketBuffers(localctx, minWait, maxWait, true)
 	}
 
 	rt.monitor.OnNetworkConditionChanged(onNetworkConditionChanged)
@@ -68,11 +71,15 @@ func newRemoteTrack(ctx context.Context, track IRemoteTrack, minWait, maxWait, p
 
 	go rt.readRTP()
 
-	if rt.IsAdaptive() {
+	if useBuffer && rt.IsAdaptive() {
 		go rt.loop()
 	}
 
 	return rt
+}
+
+func (t *remoteTrack) Buffered() bool {
+	return t.packetBuffers != nil
 }
 
 func (t *remoteTrack) Context() context.Context {
@@ -137,8 +144,8 @@ func (t *remoteTrack) readRTP() {
 				go t.updateStats()
 			}
 
-			if t.Track().Kind() == webrtc.RTPCodecTypeVideo && t.IsAdaptive() {
-				// adaptive video needs to be reordered
+			if t.Buffered() && t.Track().Kind() == webrtc.RTPCodecTypeVideo && t.IsAdaptive() {
+				// 	// adaptive video needs to be reordered
 				retainablePacket := rtppool.NewPacket(&p.Header, p.Payload)
 				_ = t.packetBuffers.Add(retainablePacket)
 

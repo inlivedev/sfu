@@ -140,7 +140,7 @@ func newTrack(ctx context.Context, client *Client, trackRemote IRemoteTrack, min
 		client.onNetworkConditionChanged(condition)
 	}
 
-	t.remoteTrack = newRemoteTrack(ctx, trackRemote, minWait, maxWait, pliInterval, onPLI, stats, onStatsUpdated, onRead, onNetworkConditionChanged)
+	t.remoteTrack = newRemoteTrack(ctx, client.options.ReorderPackets, trackRemote, minWait, maxWait, pliInterval, onPLI, stats, onStatsUpdated, onRead, onNetworkConditionChanged)
 
 	var cancel context.CancelFunc
 
@@ -359,9 +359,10 @@ type SimulcastTrack struct {
 	onReadCallbacks             []func(*rtp.Packet, QualityLevel)
 	pliInterval                 time.Duration
 	onNetworkConditionChanged   func(networkmonitor.NetworkConditionType)
+	reordered                   bool
 }
 
-func newSimulcastTrack(ctx context.Context, client *Client, track IRemoteTrack, minWait, maxWait, pliInterval time.Duration, onPLI func(), stats stats.Getter, onStatsUpdated func(*stats.Stats)) ITrack {
+func newSimulcastTrack(ctx context.Context, reordered bool, client *Client, track IRemoteTrack, minWait, maxWait, pliInterval time.Duration, onPLI func(), stats stats.Getter, onStatsUpdated func(*stats.Stats)) ITrack {
 	remoteTrackID := strings.ReplaceAll(strings.ReplaceAll(track.ID(), "{", ""), "}", "")
 	streamID := strings.ReplaceAll(strings.ReplaceAll(track.StreamID(), "{", ""), "}", "")
 	msid := strings.ReplaceAll(strings.ReplaceAll(track.Msid(), "{", ""), "}", "")
@@ -540,7 +541,7 @@ func (t *SimulcastTrack) AddRemoteTrack(ctx context.Context, track IRemoteTrack,
 
 	}
 
-	remoteTrack = newRemoteTrack(ctx, track, minWait, maxWait, t.pliInterval, onPLI, stats, onStatsUpdated, onRead, t.onNetworkConditionChanged)
+	remoteTrack = newRemoteTrack(ctx, t.reordered, track, minWait, maxWait, t.pliInterval, onPLI, stats, onStatsUpdated, onRead, t.onNetworkConditionChanged)
 
 	switch quality {
 	case QualityHigh:
