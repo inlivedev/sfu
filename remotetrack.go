@@ -96,7 +96,7 @@ func (t *remoteTrack) SetSVC(isAdaptive bool) {
 
 	t.isSVC = isAdaptive
 
-	if isAdaptive {
+	if t.packetBuffers != nil && isAdaptive {
 		go t.loop()
 	}
 }
