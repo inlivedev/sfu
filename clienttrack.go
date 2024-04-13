@@ -52,17 +52,8 @@ func newClientTrack(c *Client, t *Track, isScreen bool) *clientTrack {
 	}
 
 	go func() {
-		clientCtx, clientCancel := context.WithCancel(c.Context())
-		defer func() {
-			clientCancel()
-			cancel()
-		}()
-		select {
-		case <-clientCtx.Done():
-			return
-		case <-ctx.Done():
-			return
-		}
+		defer cancel()
+		<-ctx.Done()
 	}()
 
 	return ct

@@ -68,7 +68,6 @@ type ITrack interface {
 
 type Track struct {
 	context          context.Context
-	cancel           context.CancelFunc
 	mu               sync.Mutex
 	base             baseTrack
 	remoteTrack      *remoteTrack
@@ -143,10 +142,12 @@ func newTrack(ctx context.Context, client *Client, trackRemote IRemoteTrack, min
 
 	t.remoteTrack = newRemoteTrack(ctx, trackRemote, minWait, maxWait, pliInterval, onPLI, stats, onStatsUpdated, onRead, onNetworkConditionChanged)
 
-	t.context, t.cancel = context.WithCancel(t.remoteTrack.Context())
+	var cancel context.CancelFunc
+
+	t.context, cancel = context.WithCancel(t.remoteTrack.Context())
 
 	go func() {
-		defer t.cancel()
+		defer cancel()
 		<-t.context.Done()
 	}()
 
