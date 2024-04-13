@@ -80,9 +80,6 @@ func (t *remoteTrack) Context() context.Context {
 }
 
 func (t *remoteTrack) IsAdaptive() bool {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-
 	return t.Track().RID() != "" || t.isSVC
 }
 
@@ -290,16 +287,16 @@ func (t *remoteTrack) GetCurrentBitrate() uint32 {
 
 func (t *remoteTrack) sendPLI() {
 	// return if there is a pending PLI request
-	t.mu.Lock()
-
 	maxGapSeconds := 250 * time.Millisecond
+	t.mu.RLock()
 	requestGap := time.Since(t.lastPLIRequestTime)
+	t.mu.RUnlock()
 
 	if requestGap < maxGapSeconds {
-		t.mu.Unlock()
 		return // ignore PLI request
 	}
 
+	t.mu.Lock()
 	t.lastPLIRequestTime = time.Now()
 	t.mu.Unlock()
 

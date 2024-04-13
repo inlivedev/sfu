@@ -229,11 +229,16 @@ func (r *Room) AddClient(id, name string, opts ClientOptions) (*Client, error) {
 		timeout, cancel := context.WithTimeout(client.context, opts.IdleTimeout)
 		defer cancel()
 
+		mu := sync.Mutex{}
+
 		connectingChan := make(chan bool)
 
 		timeoutReached := false
 
 		client.OnConnectionStateChanged(func(state webrtc.PeerConnectionState) {
+			mu.Lock()
+			defer mu.Unlock()
+
 			if initConnection && state == webrtc.PeerConnectionStateConnected && !timeoutReached {
 				connectingChan <- true
 

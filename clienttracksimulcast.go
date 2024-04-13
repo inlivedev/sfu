@@ -15,7 +15,6 @@ type simulcastClientTrack struct {
 	mu                      sync.RWMutex
 	client                  *Client
 	context                 context.Context
-	cancel                  context.CancelFunc
 	kind                    webrtc.RTPCodecType
 	mimeType                string
 	localTrack              *webrtc.TrackLocalStaticRTP
@@ -32,7 +31,6 @@ type simulcastClientTrack struct {
 }
 
 func newSimulcastClientTrack(c *Client, t *SimulcastTrack) *simulcastClientTrack {
-	ctx, cancel := context.WithCancel(t.Context())
 	track, newTrackErr := webrtc.NewTrackLocalStaticRTP(t.base.codec.RTPCodecCapability, t.base.id, t.base.streamid)
 	if newTrackErr != nil {
 		panic(newTrackErr)
@@ -47,11 +45,12 @@ func newSimulcastClientTrack(c *Client, t *SimulcastTrack) *simulcastClientTrack
 
 	lastTimestamp := &atomic.Uint32{}
 
+	ctx, cancel := context.WithCancel(t.context)
+
 	ct := &simulcastClientTrack{
 		mu:                      sync.RWMutex{},
 		id:                      GenerateID(16),
 		context:                 ctx,
-		cancel:                  cancel,
 		kind:                    t.base.kind,
 		mimeType:                t.base.codec.MimeType,
 		client:                  c,
@@ -71,6 +70,23 @@ func newSimulcastClientTrack(c *Client, t *SimulcastTrack) *simulcastClientTrack
 	ct.SetMaxQuality(QualityHigh)
 
 	ct.remoteTrack.sendPLI()
+
+	go func() {
+		clientCtx, clientCancel := context.WithCancel(c.Context())
+		defer func() {
+			clientCancel()
+			cancel()
+		}()
+
+		select {
+		case <-clientCtx.Done():
+			ct.onTrackEnded()
+			return
+		case <-ctx.Done():
+			ct.onTrackEnded()
+			return
+		}
+	}()
 
 	return ct
 }

@@ -819,6 +819,7 @@ func (c *Client) renegotiateQueuOp() {
 					err = c.peerConnection.PC().SetLocalDescription(offer)
 					if err != nil {
 						glog.Error("sfu: error set local description on renegotiation ", err)
+						c.stop()
 						return
 					}
 
@@ -827,16 +828,19 @@ func (c *Client) renegotiateQueuOp() {
 					if err != nil {
 						//TODO: when this happen, we need to close the client and ask the remote client to reconnect
 						glog.Error("sfu: error on renegotiation ", err)
+						c.stop()
 						return
 					}
 
 					if answer.Type != webrtc.SDPTypeAnswer {
 						glog.Error("sfu: error on renegotiation, the answer is not an answer type")
+						c.stop()
 						return
 					}
 
 					err = c.peerConnection.PC().SetRemoteDescription(answer)
 					if err != nil {
+						c.stop()
 						return
 					}
 				}
