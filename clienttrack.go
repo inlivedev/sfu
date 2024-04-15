@@ -32,7 +32,6 @@ type iClientTrack interface {
 type clientTrack struct {
 	id          string
 	context     context.Context
-	cancel      context.CancelFunc
 	mu          sync.RWMutex
 	client      *Client
 	kind        webrtc.RTPCodecType
@@ -48,7 +47,6 @@ func newClientTrack(c *Client, t *Track, isScreen bool) *clientTrack {
 	ct := &clientTrack{
 		id:          t.ID(),
 		context:     ctx,
-		cancel:      cancel,
 		mu:          sync.RWMutex{},
 		client:      c,
 		kind:        t.base.kind,
@@ -58,6 +56,11 @@ func newClientTrack(c *Client, t *Track, isScreen bool) *clientTrack {
 		isScreen:    isScreen,
 		ssrc:        t.remoteTrack.track.SSRC(),
 	}
+
+	go func() {
+		defer cancel()
+		<-ctx.Done()
+	}()
 
 	return ct
 }

@@ -179,6 +179,8 @@
 					if (msg.type == 'clientid'){
 						clientid = msg.data
 						document.getElementById("clientid").innerText = "ClientID: "+clientid
+					} else if(msg.type==='network_condition') {
+						document.getElementById("network").innerText = msg.data==0?'Unstable':'Stable'
 					} else if (msg.type == 'offer') {
 						console.log("client received offer: ",msg.data)
                         await peerConnection.setRemoteDescription(msg.data);
@@ -411,10 +413,14 @@
             }
             
 			const isFirefox =navigator.userAgent.includes("Firefox")
+			const isSimulcast = document.querySelector("#simulcast").checked
+			const isSvc = document.querySelector("#svc").checked
+			const maxBitrate = document.querySelector("#maxBitrate").value
+
 			console.log("isFirefox",isFirefox)
             if (codec ==='vp9' && !isFirefox){
 				let videoTcvr = null
-				const isSimulcast = document.querySelector("#simulcast").checked
+				
 				console.log("simulcast: ",isSimulcast)
 
 				if (!isSimulcast){
@@ -423,8 +429,8 @@
 					streams: [stream],
 					sendEncodings: [
 							{
-								maxBitrate: 1200*1000,
-								scalabilityMode: 'L3T3'
+								maxBitrate: maxBitrate,
+								scalabilityMode: isSvc?'L3T3':'L1T1'
 							},
 						
 						]
@@ -437,23 +443,23 @@
 					sendEncodings: [
 							{
 								rid: 'high',
-								maxBitrate: 1200*1000,
+								maxBitrate: maxBitrate,
 								maxFramerate: 30,
-								scalabilityMode:'L1T2'
+								scalabilityMode: isSvc?'L3T3':'L1T1'
 							},
 							{
 								rid: 'mid',
 								scaleResolutionDownBy: 2.0,
 								maxFramerate: 30,
-								maxBitrate: 500*1000,
-								scalabilityMode:'L1T2'
+								maxBitrate:maxBitrate/2,
+								scalabilityMode: isSvc?'L3T3':'L1T1'
 							},
 							{
 								rid: 'low',
 								scaleResolutionDownBy: 4.0,
-								maxBitrate: 150*1000,
+								maxBitrate: maxBitrate/4,
 								maxFramerate:30,
-								scalabilityMode:'L1T2'
+								scalabilityMode: isSvc?'L3T3':'L1T1'
 							}
 						]
 					})
@@ -480,7 +486,21 @@
                     videoTcvr.setCodecPreferences(vp9_codecs);
                 }
             } else {
-                const videoTcvr = peerConnection.addTransceiver(stream.getVideoTracks()[0], {
+				let videoTcvr = null
+				if (!isSimulcast){
+					videoTcvr = peerConnection.addTransceiver(stream.getVideoTracks()[0], {
+					direction: 'sendonly',
+					streams: [stream],
+					sendEncodings: [
+							{
+								maxBitrate: 1200*1000,
+							},
+						
+						]
+					})
+					
+				} else {
+                videoTcvr = peerConnection.addTransceiver(stream.getVideoTracks()[0], {
                 direction: 'sendonly',
                 streams: [stream],
                 sendEncodings: [
@@ -503,6 +523,7 @@
                         }
                     ]
                 })
+			}
 
 				const codecs = RTCRtpReceiver.getCapabilities('video').codecs;
 				let h264Codecs = [];
@@ -872,19 +893,19 @@
 							rid: 'high',
 							maxBitrate: 1200*1000,
 							maxFramerate: 30,
-							scalabilityMode: 'L1T2'
+							scalabilityMode: isSvc?'L3T3':'L1T1'
 						},
 						{
 							rid: 'mid',
 							maxFramerate: 20,
 							maxBitrate: 400*1000,
-							scalabilityMode: 'L1T2'
+							scalabilityMode: isSvc?'L3T3':'L1T1'
 						},
 						{
 							rid: 'low',
 							maxBitrate: 150*1000,
 							maxFramerate:15,
-							scalabilityMode: 'L1T2'
+							scalabilityMode: isSvc?'L3T3':'L1T1'
 						}
 					]
 				})
@@ -936,7 +957,6 @@
             document.getElementById("btnShareScreen").onclick = shareScreen;
             document.getElementById("btnStats").onclick = toggleStats;
             document.getElementById("selectQuality").onchange = switchQuality;
-            document.getElementById("selectBandwidth").onchange = setBandwidthLimit;
         });
         </script>
 </head>
@@ -950,12 +970,14 @@
     <aside>
         <h3>Outbound Video</h3>
 		<p id="clientid"></p>
+		<p>Network: <span id="network">Stable</span></p>
         <div id="stats-local"></div>
     </aside>
     <footer>
         <button id="btnStart">Start H264</button>
         <button id="btnStartVP9">Start with VP9</button>
 		<span><input id="simulcast" type="checkbox" value="simulcast">Simulcast</span>
+		<span><input id="svc" type="checkbox" value="svc" checked>SVC</span>
         <button id="btnShareScreen">Share Screen</button>
         <button id="btnStats">Toggle Stats</button>
         <span><label>Quality</label> <select id="selectQuality">
@@ -965,17 +987,12 @@
             <option value="none">none</option>
         </select></span>
 
-        <span><label>Bandwidth Limit</label> <select id="selectBandwidth">
-            <option selected value="0">no limit</option>
+        <span><label>MaxBitrate</label> <select id="maxBitrate">
+            <option value="120000">120Kbps</option>
             <option value="300000">300Kbps</option>
             <option value="500000">500Kbps</option>
-            <option value="1000000">1Mbps</option>
+            <option value="1000000" selected>1Mbps</option>
             <option value="2000000">2Mbps</option>
-            <option value="3000000">3Mbps</option>
-            <option value="4000000">4Mbps</option>
-            <option value="5000000">5Mbps</option>
-            <option value="7000000">7Mbps</option>
-            <option value="10000000">10Mbps</option>
         </select></span>
     </footer>
 </body>

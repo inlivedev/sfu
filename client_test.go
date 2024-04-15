@@ -189,7 +189,7 @@ func TestClientDataChannel(t *testing.T) {
 		t.Fatal("timeout waiting for data channel")
 	case state := <-connChan:
 		if state == webrtc.PeerConnectionStateConnected {
-			pc.CreateDataChannel("test", nil)
+			_, _ = pc.CreateDataChannel("test", nil)
 
 			negotiate(pc, client)
 		}

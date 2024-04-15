@@ -155,59 +155,6 @@ func (bc *bitrateController) setQuality(clientTrackID string, quality QualityLev
 	}
 }
 
-func (bc *bitrateController) setSimulcastClaim(clientTrackID string, simulcast bool) {
-	bc.mu.Lock()
-	defer bc.mu.Unlock()
-
-	if claim, ok := bc.claims[clientTrackID]; ok {
-		claim.simulcast = simulcast
-		bc.claims[clientTrackID] = claim
-	}
-}
-
-// this handle some simulcast failed to send mid and low track, only high track available
-// by default we just send the high track that is only available
-func (bc *bitrateController) checkAllTrackActive(claim *bitrateClaim) (bool, QualityLevel) {
-	trackCount := 0
-	quality := QualityNone
-	track, ok := claim.track.(*simulcastClientTrack)
-
-	if ok {
-		if track.remoteTrack.remoteTrackHigh != nil {
-			trackCount++
-			quality = QualityHigh
-		}
-
-		if track.remoteTrack.remoteTrackMid != nil {
-			trackCount++
-			quality = QualityMid
-		}
-
-		if track.remoteTrack.remoteTrackLow != nil {
-			trackCount++
-			quality = QualityLow
-		}
-
-		if trackCount == 1 {
-			qualityLvl := Uint32ToQualityLevel(uint32(quality))
-			if claim.quality != qualityLvl {
-				bc.setQuality(claim.track.ID(), qualityLvl)
-			}
-
-			// this will force the current track identified as non simulcast track
-			if claim.simulcast {
-				bc.setSimulcastClaim(claim.track.ID(), false)
-			}
-
-			return true, qualityLvl
-		}
-
-		return true, claim.quality
-	}
-
-	return false, claim.quality
-}
-
 func (bc *bitrateController) addAudioClaims(clientTracks []iClientTrack) (leftTracks []iClientTrack, err error) {
 	errors := make([]error, 0)
 
@@ -308,11 +255,15 @@ func (bc *bitrateController) addClaim(clientTrack iClientTrack, quality QualityL
 	go func() {
 		ctx, cancel := context.WithCancel(clientTrack.Context())
 		defer cancel()
+
 		<-ctx.Done()
+
 		bc.removeClaim(clientTrack.ID())
+
 		if bc.client.IsDebugEnabled() {
 			glog.Info("clienttrack: track ", clientTrack.ID(), " claim removed")
 		}
+
 		clientTrack.Client().stats.removeSenderStats(clientTrack.ID())
 	}()
 
@@ -337,32 +288,6 @@ func (bc *bitrateController) exists(id string) bool {
 
 	if _, ok := bc.claims[id]; ok {
 		return true
-	}
-
-	return false
-}
-
-func (bc *bitrateController) isScreenNeedIncrease(highestQuality QualityLevel) bool {
-	bc.mu.RLock()
-	defer bc.mu.RUnlock()
-
-	for _, claim := range bc.claims {
-		if claim.track.IsScreen() && claim.quality <= highestQuality {
-			return true
-		}
-	}
-
-	return false
-}
-
-func (bc *bitrateController) isThereNonScreenCanDecrease(lowestQuality QualityLevel) bool {
-	bc.mu.RLock()
-	defer bc.mu.RUnlock()
-
-	for _, claim := range bc.claims {
-		if !claim.track.IsScreen() && (claim.track.IsScaleable() || claim.track.IsSimulcast()) && claim.quality > lowestQuality {
-			return true
-		}
 	}
 
 	return false

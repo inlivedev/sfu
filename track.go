@@ -10,6 +10,7 @@ import (
 
 	"github.com/golang/glog"
 	"github.com/inlivedev/sfu/pkg/interceptors/voiceactivedetector"
+	"github.com/inlivedev/sfu/pkg/networkmonitor"
 	"github.com/inlivedev/sfu/pkg/rtppool"
 	"github.com/pion/interceptor/pkg/stats"
 	"github.com/pion/rtp"
@@ -67,15 +68,14 @@ type ITrack interface {
 
 type Track struct {
 	context          context.Context
-	cancel           context.CancelFunc
-	mu               sync.RWMutex
+	mu               sync.Mutex
 	base             baseTrack
 	remoteTrack      *remoteTrack
 	onEndedCallbacks []func()
 	onReadCallbacks  []func(*rtp.Packet, QualityLevel)
 }
 
-func newTrack(ctx context.Context, clientID string, trackRemote IRemoteTrack, minWait, maxWait, pliInterval time.Duration, onPLI func(), stats stats.Getter, onStatsUpdated func(*stats.Stats)) ITrack {
+func newTrack(ctx context.Context, client *Client, trackRemote IRemoteTrack, minWait, maxWait, pliInterval time.Duration, onPLI func(), stats stats.Getter, onStatsUpdated func(*stats.Stats)) ITrack {
 	ctList := newClientTrackList()
 
 	remoteTrackID := strings.ReplaceAll(strings.ReplaceAll(trackRemote.ID(), "{", ""), "}", "")
@@ -87,14 +87,14 @@ func newTrack(ctx context.Context, clientID string, trackRemote IRemoteTrack, mi
 		isScreen:     &atomic.Bool{},
 		msid:         msid,
 		streamid:     streamID,
-		clientid:     clientID,
+		clientid:     client.ID(),
 		kind:         trackRemote.Kind(),
 		codec:        trackRemote.Codec(),
 		clientTracks: ctList,
 	}
 
 	t := &Track{
-		mu:               sync.RWMutex{},
+		mu:               sync.Mutex{},
 		base:             baseTrack,
 		onReadCallbacks:  make([]func(*rtp.Packet, QualityLevel), 0),
 		onEndedCallbacks: make([]func(), 0),
@@ -136,12 +136,18 @@ func newTrack(ctx context.Context, clientID string, trackRemote IRemoteTrack, mi
 		packet.Release()
 	}
 
-	t.remoteTrack = newRemoteTrack(ctx, trackRemote, minWait, maxWait, pliInterval, onPLI, stats, onStatsUpdated, onRead)
+	onNetworkConditionChanged := func(condition networkmonitor.NetworkConditionType) {
+		client.onNetworkConditionChanged(condition)
+	}
 
-	t.context, t.cancel = context.WithCancel(t.remoteTrack.Context())
+	t.remoteTrack = newRemoteTrack(ctx, client.options.ReorderPackets, trackRemote, minWait, maxWait, pliInterval, onPLI, stats, onStatsUpdated, onRead, onNetworkConditionChanged)
+
+	var cancel context.CancelFunc
+
+	t.context, cancel = context.WithCancel(t.remoteTrack.Context())
 
 	go func() {
-		defer t.cancel()
+		defer cancel()
 		<-t.context.Done()
 	}()
 
@@ -298,8 +304,8 @@ func (t *Track) OnRead(callback func(*rtp.Packet, QualityLevel)) {
 }
 
 func (t *Track) onRead(p *rtp.Packet, quality QualityLevel) {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
+	t.mu.Lock()
+	defer t.mu.Unlock()
 
 	for _, callback := range t.onReadCallbacks {
 		copyPacket := rtppool.GetPacketAllocationFromPool()
@@ -352,9 +358,11 @@ type SimulcastTrack struct {
 	onAddedRemoteTrackCallbacks []func(*remoteTrack)
 	onReadCallbacks             []func(*rtp.Packet, QualityLevel)
 	pliInterval                 time.Duration
+	onNetworkConditionChanged   func(networkmonitor.NetworkConditionType)
+	reordered                   bool
 }
 
-func newSimulcastTrack(ctx context.Context, clientid string, track IRemoteTrack, minWait, maxWait, pliInterval time.Duration, onPLI func(), stats stats.Getter, onStatsUpdated func(*stats.Stats)) ITrack {
+func newSimulcastTrack(ctx context.Context, reordered bool, client *Client, track IRemoteTrack, minWait, maxWait, pliInterval time.Duration, onPLI func(), stats stats.Getter, onStatsUpdated func(*stats.Stats)) ITrack {
 	remoteTrackID := strings.ReplaceAll(strings.ReplaceAll(track.ID(), "{", ""), "}", "")
 	streamID := strings.ReplaceAll(strings.ReplaceAll(track.StreamID(), "{", ""), "}", "")
 	msid := strings.ReplaceAll(strings.ReplaceAll(track.Msid(), "{", ""), "}", "")
@@ -366,7 +374,7 @@ func newSimulcastTrack(ctx context.Context, clientid string, track IRemoteTrack,
 			isScreen:     &atomic.Bool{},
 			msid:         msid,
 			streamid:     streamID,
-			clientid:     clientid,
+			clientid:     client.ID(),
 			kind:         track.Kind(),
 			codec:        track.Codec(),
 			clientTracks: newClientTrackList(),
@@ -381,6 +389,9 @@ func newSimulcastTrack(ctx context.Context, clientid string, track IRemoteTrack,
 		onAddedRemoteTrackCallbacks: make([]func(*remoteTrack), 0),
 		onReadCallbacks:             make([]func(*rtp.Packet, QualityLevel), 0),
 		pliInterval:                 pliInterval,
+		onNetworkConditionChanged: func(condition networkmonitor.NetworkConditionType) {
+			client.onNetworkConditionChanged(condition)
+		},
 	}
 
 	rt := t.AddRemoteTrack(ctx, track, minWait, maxWait, stats, onStatsUpdated, onPLI)
@@ -530,7 +541,7 @@ func (t *SimulcastTrack) AddRemoteTrack(ctx context.Context, track IRemoteTrack,
 
 	}
 
-	remoteTrack = newRemoteTrack(ctx, track, minWait, maxWait, t.pliInterval, onPLI, stats, onStatsUpdated, onRead)
+	remoteTrack = newRemoteTrack(ctx, t.reordered, track, minWait, maxWait, t.pliInterval, onPLI, stats, onStatsUpdated, onRead, t.onNetworkConditionChanged)
 
 	switch quality {
 	case QualityHigh:

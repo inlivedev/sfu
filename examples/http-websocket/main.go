@@ -17,6 +17,7 @@ import (
 	"github.com/inlivedev/sfu"
 	"github.com/inlivedev/sfu/pkg/fakeclient"
 	"github.com/inlivedev/sfu/pkg/interceptors/voiceactivedetector"
+	"github.com/inlivedev/sfu/pkg/networkmonitor"
 	"github.com/pion/webrtc/v3"
 	"golang.org/x/net/websocket"
 )
@@ -51,6 +52,7 @@ const (
 	TypeOffer                = "offer"
 	TypeAnswer               = "answer"
 	TypeCandidate            = "candidate"
+	TypeNetworkCondition     = "network_condition"
 	TypeError                = "error"
 	TypeAllowRenegotiation   = "allow_renegotiation"
 	TypeIsAllowRenegotiation = "is_allow_renegotiation"
@@ -326,6 +328,17 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 		candidateBytes, _ := json.Marshal(resp)
 
 		_, _ = conn.Write(candidateBytes)
+	})
+
+	client.OnNetworkConditionChanged(func(condition networkmonitor.NetworkConditionType) {
+		resp := Respose{
+			Status: true,
+			Type:   TypeNetworkCondition,
+			Data:   condition,
+		}
+		respBytes, _ := json.Marshal(resp)
+
+		_, _ = conn.Write(respBytes)
 	})
 
 	ticker := time.NewTicker(1 * time.Second)

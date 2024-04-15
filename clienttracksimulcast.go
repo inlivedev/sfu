@@ -6,6 +6,7 @@ import (
 	"sync/atomic"
 
 	"github.com/golang/glog"
+	"github.com/inlivedev/sfu/pkg/packetmap"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v3"
 )
@@ -15,7 +16,6 @@ type simulcastClientTrack struct {
 	mu                      sync.RWMutex
 	client                  *Client
 	context                 context.Context
-	cancel                  context.CancelFunc
 	kind                    webrtc.RTPCodecType
 	mimeType                string
 	localTrack              *webrtc.TrackLocalStaticRTP
@@ -28,12 +28,14 @@ type simulcastClientTrack struct {
 	lastTimestamp           *atomic.Uint32
 	isScreen                *atomic.Bool
 	isEnded                 *atomic.Bool
+	packetmapHigh           *packetmap.Map
+	packetmapMid            *packetmap.Map
+	packetmapLow            *packetmap.Map
 	onTrackEndedCallbacks   []func()
 	ssrc                    webrtc.SSRC
 }
 
 func newSimulcastClientTrack(c *Client, t *SimulcastTrack) *simulcastClientTrack {
-	ctx, cancel := context.WithCancel(t.Context())
 	track, newTrackErr := webrtc.NewTrackLocalStaticRTP(t.base.codec.RTPCodecCapability, t.base.id, t.base.streamid)
 	if newTrackErr != nil {
 		panic(newTrackErr)
@@ -48,11 +50,12 @@ func newSimulcastClientTrack(c *Client, t *SimulcastTrack) *simulcastClientTrack
 
 	lastTimestamp := &atomic.Uint32{}
 
+	ctx, cancel := context.WithCancel(t.context)
+
 	ct := &simulcastClientTrack{
 		mu:                      sync.RWMutex{},
 		id:                      GenerateID(16),
 		context:                 ctx,
-		cancel:                  cancel,
 		kind:                    t.base.kind,
 		mimeType:                t.base.codec.MimeType,
 		client:                  c,
@@ -67,11 +70,31 @@ func newSimulcastClientTrack(c *Client, t *SimulcastTrack) *simulcastClientTrack
 		isScreen:                isScreen,
 		isEnded:                 &atomic.Bool{},
 		onTrackEndedCallbacks:   make([]func(), 0),
+		packetmapHigh:           &packetmap.Map{},
+		packetmapMid:            &packetmap.Map{},
+		packetmapLow:            &packetmap.Map{},
 	}
 
 	ct.SetMaxQuality(QualityHigh)
 
 	ct.remoteTrack.sendPLI()
+
+	go func() {
+		clientCtx, clientCancel := context.WithCancel(c.Context())
+		defer func() {
+			clientCancel()
+			cancel()
+		}()
+
+		select {
+		case <-clientCtx.Done():
+			ct.onTrackEnded()
+			return
+		case <-ctx.Done():
+			ct.onTrackEnded()
+			return
+		}
+	}()
 
 	return ct
 }
@@ -110,6 +133,8 @@ func (t *simulcastClientTrack) push(p *rtp.Packet, quality QualityLevel) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
+	isKeyframe := IsKeyframe(t.mimeType, p)
+
 	currentQuality := t.LastQuality()
 
 	targetQuality := t.getQuality()
@@ -123,7 +148,38 @@ func (t *simulcastClientTrack) push(p *rtp.Packet, quality QualityLevel) {
 		return
 	}
 
-	isKeyframe := IsKeyframe(t.mimeType, p)
+	var canSwitch bool
+
+	if isKeyframe && quality == targetQuality && t.lastQuality.Load() != uint32(targetQuality) {
+		switch quality {
+		case QualityHigh:
+			canSwitch = t.packetmapHigh.Drop(p.SequenceNumber, 0)
+		case QualityMid:
+			canSwitch = t.packetmapMid.Drop(p.SequenceNumber, 0)
+		case QualityLow:
+			canSwitch = t.packetmapLow.Drop(p.SequenceNumber, 0)
+		}
+	}
+
+	if !canSwitch {
+		switch quality {
+		case QualityHigh:
+			ok, _, _ := t.packetmapHigh.Map(p.SequenceNumber, 0)
+			if !ok {
+				return
+			}
+		case QualityMid:
+			ok, _, _ := t.packetmapMid.Map(p.SequenceNumber, 0)
+			if !ok {
+				return
+			}
+		case QualityLow:
+			ok, _, _ := t.packetmapLow.Map(p.SequenceNumber, 0)
+			if !ok {
+				return
+			}
+		}
+	}
 
 	// check if it's a first packet to send
 	if currentQuality == QualityNone && t.sequenceNumber.Load() == 0 {
@@ -145,12 +201,14 @@ func (t *simulcastClientTrack) push(p *rtp.Packet, quality QualityLevel) {
 		t.remoteTrack.onRemoteTrackAdded(func(remote *remoteTrack) {
 			t.remoteTrack.sendPLI()
 		})
-	} else if isKeyframe && quality == targetQuality && t.lastQuality.Load() != uint32(targetQuality) {
+	} else if isKeyframe && canSwitch && quality == targetQuality && t.lastQuality.Load() != uint32(targetQuality) {
+		// change quality to target quality if it's a keyframe
 		glog.Info("track: ", t.id, " keyframe ", isKeyframe, " change quality from ", t.lastQuality.Load(), " to ", targetQuality)
 		currentQuality = targetQuality
 		t.lastQuality.Store(uint32(currentQuality))
 
 	} else if quality == targetQuality && !isKeyframe && t.lastQuality.Load() != uint32(targetQuality) {
+		// request PLI to allow us switch quality to target quality
 		glog.Info("track: ", t.id, " keyframe ", isKeyframe, " send keyframe and sequence number ", p.SequenceNumber)
 		t.remoteTrack.sendPLI()
 	}

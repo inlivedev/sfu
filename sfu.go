@@ -505,7 +505,7 @@ func (s *SFU) OnTracksAvailable(callback func(tracks []ITrack)) {
 	s.onTrackAvailableCallbacks = append(s.onTrackAvailableCallbacks, callback)
 }
 
-func (s *SFU) AddRelayTrack(ctx context.Context, id, streamid, rid, clientid string, kind webrtc.RTPCodecType, ssrc webrtc.SSRC, mimeType string, rtpChan chan *rtp.Packet) error {
+func (s *SFU) AddRelayTrack(ctx context.Context, id, streamid, rid string, client *Client, kind webrtc.RTPCodecType, ssrc webrtc.SSRC, mimeType string, rtpChan chan *rtp.Packet) error {
 	var track ITrack
 
 	relayTrack := NewTrackRelay(id, streamid, rid, kind, ssrc, mimeType, rtpChan)
@@ -514,7 +514,7 @@ func (s *SFU) AddRelayTrack(ctx context.Context, id, streamid, rid, clientid str
 
 	if rid == "" {
 		// not simulcast
-		track = newTrack(ctx, clientid, relayTrack, 0, 0, s.pliInterval, onPLI, nil, nil)
+		track = newTrack(ctx, client, relayTrack, 0, 0, s.pliInterval, onPLI, nil, nil)
 		s.mu.Lock()
 		s.relayTracks[relayTrack.ID()] = track
 		s.mu.Unlock()
@@ -527,7 +527,7 @@ func (s *SFU) AddRelayTrack(ctx context.Context, id, streamid, rid, clientid str
 		track, ok := s.relayTracks[relayTrack.ID()]
 		if !ok {
 			// if track not found, add it
-			track = newSimulcastTrack(ctx, clientid, relayTrack, 0, 0, s.pliInterval, onPLI, nil, nil)
+			track = newSimulcastTrack(ctx, client.options.ReorderPackets, client, relayTrack, 0, 0, s.pliInterval, onPLI, nil, nil)
 			s.relayTracks[relayTrack.ID()] = track
 
 		} else if simulcast, ok = track.(*SimulcastTrack); ok {
@@ -536,10 +536,10 @@ func (s *SFU) AddRelayTrack(ctx context.Context, id, streamid, rid, clientid str
 		s.mu.Unlock()
 	}
 
-	s.broadcastTracksToAutoSubscribeClients(clientid, []ITrack{track})
+	s.broadcastTracksToAutoSubscribeClients(client.ID(), []ITrack{track})
 
 	// notify the local clients that a relay track is available
-	s.onTracksAvailable(clientid, []ITrack{track})
+	s.onTracksAvailable(client.ID(), []ITrack{track})
 
 	return nil
 }

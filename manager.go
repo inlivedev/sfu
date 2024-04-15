@@ -115,7 +115,7 @@ func (m *Manager) NewRoom(id, name, roomType string, opts RoomOptions) (*Room, e
 	_, emptyRoomCancel = startRoomTimeout(m, room)
 
 	room.OnClientLeft(func(client *Client) {
-		if room.SFU().clients.Length() == 0 {
+		if room.SFU().clients.Length() == 0 && !idle {
 			idle = true
 			_, emptyRoomCancel = startRoomTimeout(m, room)
 		}

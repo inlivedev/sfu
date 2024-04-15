@@ -2,6 +2,7 @@ package sfu
 
 import (
 	"context"
+	"errors"
 	"io"
 	"sync"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"sync/atomic"
 
 	"github.com/golang/glog"
+	"github.com/inlivedev/sfu/pkg/networkmonitor"
 	"github.com/inlivedev/sfu/pkg/rtppool"
 	"github.com/pion/interceptor/pkg/stats"
 	"github.com/pion/rtp"
@@ -20,33 +22,48 @@ type remoteTrack struct {
 	cancel  context.CancelFunc
 	mu      sync.RWMutex
 	track   IRemoteTrack
+	isSVC   bool
 
-	onRead             func(*rtp.Packet)
-	onPLI              func()
-	latestUpdatedTS    *atomic.Uint64
-	lastPLIRequestTime time.Time
-	onEndedCallbacks   []func()
-	statsGetter        stats.Getter
-	onStatsUpdated     func(*stats.Stats)
-	packetBuffers      *packetBuffers
+	onRead                func(*rtp.Packet)
+	onPLI                 func()
+	bitrate               *atomic.Uint32
+	previousBytesReceived *atomic.Uint64
+	currentBytesReceived  *atomic.Uint64
+	latestUpdatedTS       *atomic.Uint64
+	lastPLIRequestTime    time.Time
+	onEndedCallbacks      []func()
+	statsGetter           stats.Getter
+	onStatsUpdated        func(*stats.Stats)
+	packetBuffers         *packetBuffers
+	looping               bool
+	monitor               *networkmonitor.NetworkMonitor
 }
 
-func newRemoteTrack(ctx context.Context, track IRemoteTrack, minWait, maxWait, pliInterval time.Duration, onPLI func(), statsGetter stats.Getter, onStatsUpdated func(*stats.Stats), onRead func(*rtp.Packet)) *remoteTrack {
+func newRemoteTrack(ctx context.Context, useBuffer bool, track IRemoteTrack, minWait, maxWait, pliInterval time.Duration, onPLI func(), statsGetter stats.Getter, onStatsUpdated func(*stats.Stats), onRead func(*rtp.Packet), onNetworkConditionChanged func(networkmonitor.NetworkConditionType)) *remoteTrack {
 	localctx, cancel := context.WithCancel(ctx)
 
 	rt := &remoteTrack{
-		context:          localctx,
-		cancel:           cancel,
-		mu:               sync.RWMutex{},
-		track:            track,
-		latestUpdatedTS:  &atomic.Uint64{},
-		onEndedCallbacks: make([]func(), 0),
-		statsGetter:      statsGetter,
-		onStatsUpdated:   onStatsUpdated,
-		onPLI:            onPLI,
-		onRead:           onRead,
-		packetBuffers:    newPacketBuffers(localctx, minWait, maxWait, true),
+		context:               localctx,
+		cancel:                cancel,
+		mu:                    sync.RWMutex{},
+		track:                 track,
+		bitrate:               &atomic.Uint32{},
+		previousBytesReceived: &atomic.Uint64{},
+		currentBytesReceived:  &atomic.Uint64{},
+		latestUpdatedTS:       &atomic.Uint64{},
+		onEndedCallbacks:      make([]func(), 0),
+		statsGetter:           statsGetter,
+		onStatsUpdated:        onStatsUpdated,
+		onPLI:                 onPLI,
+		onRead:                onRead,
+		monitor:               networkmonitor.Default(),
 	}
+
+	if useBuffer {
+		rt.packetBuffers = newPacketBuffers(localctx, minWait, maxWait, true)
+	}
+
+	rt.monitor.OnNetworkConditionChanged(onNetworkConditionChanged)
 
 	if pliInterval > 0 {
 		rt.enableIntervalPLI(pliInterval)
@@ -54,15 +71,34 @@ func newRemoteTrack(ctx context.Context, track IRemoteTrack, minWait, maxWait, p
 
 	go rt.readRTP()
 
-	if rt.Track().Kind() == webrtc.RTPCodecTypeVideo {
+	if useBuffer && rt.IsAdaptive() {
 		go rt.loop()
 	}
 
 	return rt
 }
 
+func (t *remoteTrack) Buffered() bool {
+	return t.packetBuffers != nil
+}
+
 func (t *remoteTrack) Context() context.Context {
 	return t.context
+}
+
+func (t *remoteTrack) IsAdaptive() bool {
+	return t.Track().RID() != "" || t.isSVC
+}
+
+func (t *remoteTrack) SetSVC(isAdaptive bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	t.isSVC = isAdaptive
+
+	if t.packetBuffers != nil && isAdaptive {
+		go t.loop()
+	}
 }
 
 func (t *remoteTrack) readRTP() {
@@ -77,15 +113,30 @@ func (t *remoteTrack) readRTP() {
 				glog.Error("remotetrack: set read deadline error: ", err)
 				return
 			}
+			buffer, ok := rtppool.GetPacketManager().PayloadPool.Get().(*[]byte)
+			if !ok {
+				rtppool.GetPacketManager().PayloadPool.Put(buffer)
+				return
+			}
 
-			p, _, readErr := t.track.ReadRTP()
+			n, _, readErr := t.track.Read(*buffer)
 			if readErr == io.EOF {
 				glog.Info("remotetrack: track ended: ", t.track.ID())
+				rtppool.GetPacketManager().PayloadPool.Put(buffer)
 				return
 			}
 
 			// could be read deadline reached
-			if p == nil {
+			if n == 0 {
+				rtppool.GetPacketManager().PayloadPool.Put(buffer)
+				continue
+			}
+
+			p := rtppool.GetPacketAllocationFromPool()
+
+			if err := t.unmarshal((*buffer)[:n], p); err != nil {
+				rtppool.GetPacketManager().PayloadPool.Put(buffer)
+				rtppool.ResetPacketPoolAllocation(p)
 				continue
 			}
 
@@ -93,30 +144,77 @@ func (t *remoteTrack) readRTP() {
 				go t.updateStats()
 			}
 
-			if t.Track().Kind() == webrtc.RTPCodecTypeVideo {
-				// video needs to be reordered
-				_ = t.packetBuffers.Add(p)
+			if t.Buffered() && t.Track().Kind() == webrtc.RTPCodecTypeVideo && t.IsAdaptive() {
+				// 	// adaptive video needs to be reordered
+				retainablePacket := rtppool.NewPacket(&p.Header, p.Payload)
+				_ = t.packetBuffers.Add(retainablePacket)
+
 			} else {
-				// audio doesn't need to be reordered
+				// audio and non adaptive video doesn't need to be reordered
 				t.onRead(p)
 			}
+
+			t.monitor.Add(p.SequenceNumber)
+
+			rtppool.GetPacketManager().PayloadPool.Put(buffer)
+			rtppool.ResetPacketPoolAllocation(p)
 		}
 	}
 }
 
+func (t *remoteTrack) unmarshal(buf []byte, p *rtp.Packet) error {
+	n, err := p.Header.Unmarshal(buf)
+	if err != nil {
+		return err
+	}
+
+	end := len(buf)
+	if p.Header.Padding {
+		p.PaddingSize = buf[end-1]
+		end -= int(p.PaddingSize)
+	}
+	if end < n {
+		return errors.New("remote track buffer too short")
+	}
+
+	p.Payload = buf[n:end]
+
+	return nil
+}
+
 func (t *remoteTrack) loop() {
+	if t.looping {
+		return
+	}
+
 	ctx, cancel := context.WithCancel(t.context)
 	defer cancel()
+
+	t.mu.Lock()
+	t.looping = true
+	t.mu.Unlock()
+
+	defer func() {
+		t.mu.Lock()
+		t.looping = false
+		t.mu.Unlock()
+	}()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		default:
-			t.packetBuffers.WaitAvailablePacket()
+			if !t.IsAdaptive() {
+				t.Flush()
+				return
+			}
 
+			t.packetBuffers.WaitAvailablePacket()
+			t.mu.RLock()
 			for orderedPkt := t.packetBuffers.Pop(); orderedPkt != nil; orderedPkt = t.packetBuffers.Pop() {
 				// make sure the we're passing a new packet to the onRead callback
+
 				copyPkt := rtppool.GetPacketAllocationFromPool()
 
 				copyPkt.Header = *orderedPkt.Header()
@@ -130,9 +228,28 @@ func (t *remoteTrack) loop() {
 				orderedPkt.Release()
 			}
 
+			t.mu.RUnlock()
+
 		}
 	}
 
+}
+
+func (t *remoteTrack) Flush() {
+	pkts := t.packetBuffers.Flush()
+	for _, pkt := range pkts {
+		copyPkt := rtppool.GetPacketAllocationFromPool()
+
+		copyPkt.Header = *pkt.Header()
+
+		copyPkt.Payload = pkt.Payload()
+
+		t.onRead(copyPkt)
+
+		rtppool.ResetPacketPoolAllocation(copyPkt)
+
+		pkt.Release()
+	}
 }
 
 func (t *remoteTrack) updateStats() {
@@ -166,16 +283,16 @@ func (t *remoteTrack) Track() IRemoteTrack {
 
 func (t *remoteTrack) sendPLI() {
 	// return if there is a pending PLI request
-	t.mu.Lock()
-
 	maxGapSeconds := 250 * time.Millisecond
+	t.mu.RLock()
 	requestGap := time.Since(t.lastPLIRequestTime)
+	t.mu.RUnlock()
 
 	if requestGap < maxGapSeconds {
-		t.mu.Unlock()
 		return // ignore PLI request
 	}
 
+	t.mu.Lock()
 	t.lastPLIRequestTime = time.Now()
 	t.mu.Unlock()
 

@@ -34,36 +34,6 @@ type queue struct {
 	mu sync.RWMutex
 }
 
-// func (q *queue) Front() *list.Element {
-// 	q.mu.RLock()
-// 	defer q.mu.RUnlock()
-// 	return q.List.Front()
-// }
-
-// func (q *queue) Back() *list.Element {
-// 	q.mu.RLock()
-// 	defer q.mu.RUnlock()
-// 	return q.List.Back()
-// }
-
-// func (q *queue) Len() int {
-// 	q.mu.RLock()
-// 	defer q.mu.RUnlock()
-// 	return q.List.Len()
-// }
-
-// func (q *queue) PushBack(v *item) {
-// 	q.mu.Lock()
-// 	defer q.mu.Unlock()
-// 	q.List.PushBack(v)
-// }
-
-// func (q *queue) PushFront(v *item) {
-// 	q.mu.Lock()
-// 	defer q.mu.Unlock()
-// 	q.List.PushFront(v)
-// }
-
 func (q *queue) Remove(e *list.Element) *item {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -75,12 +45,6 @@ func (q *queue) Remove(e *list.Element) *item {
 
 	return i
 }
-
-// func (q *queue) InsertAfter(v *item, mark *list.Element) {
-// 	q.mu.Lock()
-// 	defer q.mu.Unlock()
-// 	q.List.InsertAfter(v, mark)
-// }
 
 // LeakyBucketPacer implements a leaky bucket pacing algorithm
 type LeakyBucketPacer struct {
@@ -172,11 +136,6 @@ func (p *LeakyBucketPacer) getQueue(ssrc uint32) *queue {
 // stream.
 func (p *LeakyBucketPacer) Write(header *rtp.Header, payload []byte, attributes interceptor.Attributes) (int, error) {
 	pkt := rtppool.NewPacket(header, payload)
-	err := pkt.Retain()
-	if err != nil {
-		glog.Warning("failed to retain packet: ", err)
-		return 0, err
-	}
 
 	queue := p.getQueue(header.SSRC)
 	if queue == nil {

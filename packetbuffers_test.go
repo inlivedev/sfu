@@ -38,7 +38,8 @@ func TestAdd(t *testing.T) {
 	caches := newPacketBuffers(ctx, minLatency, maxLatency, false)
 
 	for i, pkt := range packets {
-		err := caches.Add(pkt)
+		rp := rtppool.NewPacket(&pkt.Header, pkt.Payload)
+		err := caches.Add(rp)
 		if i != 2 && i != 3 {
 			require.NoError(t, err)
 		}
@@ -51,6 +52,7 @@ func TestAdd(t *testing.T) {
 		packet := e.Value.(*rtppool.RetainablePacket)
 		require.Equal(t, packet.Header().SequenceNumber, sortedNumbers[i], fmt.Sprintf("packet sequence number %d should be equal to sortedNumbers sequence number %d", packet.Header().SequenceNumber, sortedNumbers[i]))
 		i++
+		packet.Release()
 	}
 }
 
@@ -80,7 +82,8 @@ func TestAddLost(t *testing.T) {
 			// drop packet 65533
 			continue
 		}
-		err := caches.Add(pkt)
+		rp := rtppool.NewPacket(&pkt.Header, pkt.Payload)
+		err := caches.Add(rp)
 
 		if i != 2 && i != 3 {
 			require.NoError(t, err)
@@ -98,6 +101,7 @@ func TestAddLost(t *testing.T) {
 
 		require.Equal(t, packet.Header().SequenceNumber, sortedNumbers[i], fmt.Sprintf("packet sequence number %d should be equal to sortedNumbers sequence number %d", packet.Header().SequenceNumber, sortedNumbers[i]))
 		i++
+		packet.Release()
 	}
 }
 
@@ -127,7 +131,8 @@ func TestDuplicateAdd(t *testing.T) {
 			glog.Info("packet sequence ", pkt.Header.SequenceNumber)
 		}
 
-		err := caches.Add(pkt)
+		rp := rtppool.NewPacket(&pkt.Header, pkt.Payload)
+		err := caches.Add(rp)
 		if i == 2 || i == 3 {
 			require.EqualError(t, err, ErrPacketTooLate.Error())
 		} else {
@@ -172,7 +177,8 @@ func TestFlush(t *testing.T) {
 	caches := newPacketBuffers(ctx, minLatency, maxLatency, false)
 
 	for i, pkt := range packets {
-		err := caches.Add(pkt)
+		rp := rtppool.NewPacket(&pkt.Header, pkt.Payload)
+		err := caches.Add(rp)
 		if i != 2 && i != 3 {
 			require.NoError(t, err)
 		}
@@ -215,7 +221,8 @@ func TestFlushBetweenAdded(t *testing.T) {
 	sorted := make([]*rtppool.RetainablePacket, 0)
 
 	for i, pkt := range packets {
-		err := caches.Add(pkt)
+		rp := rtppool.NewPacket(&pkt.Header, pkt.Payload)
+		err := caches.Add(rp)
 		if i != 2 && i != 3 {
 			require.NoError(t, err)
 		}
@@ -271,7 +278,8 @@ func TestLatency(t *testing.T) {
 			// last sort call should return immediately
 			glog.Info("packet sequence ", pkt.Header.SequenceNumber)
 			time.Sleep(2 * maxLatency)
-			err := caches.Add(pkt)
+			rp := rtppool.NewPacket(&pkt.Header, pkt.Payload)
+			err := caches.Add(rp)
 			sortedPackets := caches.Flush()
 			sorted = append(sorted, sortedPackets...)
 			if err != nil {
@@ -284,7 +292,8 @@ func TestLatency(t *testing.T) {
 		} else if pkt.Header.SequenceNumber == 0 {
 			// last sort call should return immediately
 			time.Sleep(2 * maxLatency)
-			err := caches.Add(pkt)
+			rp := rtppool.NewPacket(&pkt.Header, pkt.Payload)
+			err := caches.Add(rp)
 			sortedPackets := caches.Flush()
 			sorted = append(sorted, sortedPackets...)
 			if err != nil {
@@ -296,7 +305,8 @@ func TestLatency(t *testing.T) {
 			// from 15 packets added, 3 packets will be dropped because it's too late
 			require.Equal(t, 13, len(sorted), "sorted length should be equal to 13, result ", resultsSeqs, seqs)
 		} else {
-			err := caches.Add(pkt)
+			rp := rtppool.NewPacket(&pkt.Header, pkt.Payload)
+			err := caches.Add(rp)
 			sortedPackets := caches.Flush()
 			sorted = append(sorted, sortedPackets...)
 			if err != nil {
@@ -331,7 +341,9 @@ func BenchmarkPushPool(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_ = packetBuffers.Add(testPackets[i])
+		pkt := testPackets[i]
+		rp := rtppool.NewPacket(&pkt.Header, pkt.Payload)
+		_ = packetBuffers.Add(rp)
 	}
 
 }
@@ -342,10 +354,8 @@ func BenchmarkPopPool(b *testing.B) {
 	packetBuffers := newPacketBuffers(ctx, 10*time.Millisecond, 100*time.Millisecond, false)
 
 	for i := 0; i < b.N; i++ {
-		packetBuffers.Add(&rtp.Packet{
-			Header:  rtp.Header{},
-			Payload: make([]byte, 1400),
-		})
+		rp := rtppool.NewPacket(&rtp.Header{}, make([]byte, 1400))
+		packetBuffers.Add(rp)
 	}
 
 	b.ResetTimer()
