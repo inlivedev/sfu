@@ -357,24 +357,27 @@ func (r *Room) Stats() RoomStats {
 	}
 
 	roomStats := RoomStats{
-		ActiveSessions:  r.sfu.TotalActiveSessions(),
-		ClientsCount:    len(r.stats),
-		BitrateReceived: bitratesReceived,
-		BitrateSent:     bitratesSent,
-		BytesIngress:    bytesReceived,
-		BytesEgress:     bytesSent,
-		Timestamp:       time.Now(),
-		ClientStats:     clientStats,
+		ActiveSessions: r.sfu.TotalActiveSessions(),
+		ClientsCount:   0,
+		BytesIngress:   bytesReceived,
+		BytesEgress:    bytesSent,
+		Timestamp:      time.Now(),
+		ClientStats:    clientStats,
 	}
 
 	for id, c := range r.sfu.clients.GetClients() {
 		roomStats.ClientStats[id] = c.Stats()
+
+		roomStats.ClientsCount++
+
 		for _, track := range roomStats.ClientStats[id].Receives {
 			if track.Kind == webrtc.RTPCodecTypeAudio {
 				roomStats.ReceivedTracks.Audio++
 			} else {
 				roomStats.ReceivedTracks.Video++
 			}
+
+			roomStats.BitrateReceived += uint64(track.CurrentBitrate)
 		}
 
 		for _, track := range roomStats.ClientStats[id].Sents {
@@ -383,6 +386,8 @@ func (r *Room) Stats() RoomStats {
 			} else {
 				roomStats.SentTracks.Video++
 			}
+
+			roomStats.BitrateSent += uint64(track.CurrentBitrate)
 		}
 	}
 

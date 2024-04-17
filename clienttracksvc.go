@@ -68,7 +68,7 @@ func newScaleableClientTrack(
 ) *scaleableClientTrack {
 
 	sct := &scaleableClientTrack{
-		clientTrack:    newClientTrack(c, t, false),
+		clientTrack:    newClientTrack(c, t, false, nil),
 		qualityPresets: qualityPresets,
 		maxQuality:     QualityHigh,
 		lastQuality:    QualityHigh,

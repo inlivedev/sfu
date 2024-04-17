@@ -54,11 +54,11 @@ func newSimulcastClientTrack(c *Client, t *SimulcastTrack) *simulcastClientTrack
 
 	ct := &simulcastClientTrack{
 		mu:                      sync.RWMutex{},
-		id:                      GenerateID(16),
-		streamid:                GenerateID(16),
+		id:                      track.ID(),
+		streamid:                track.StreamID(),
 		context:                 ctx,
-		kind:                    t.base.kind,
-		mimeType:                t.base.codec.MimeType,
+		kind:                    track.Kind(),
+		mimeType:                track.Codec().MimeType,
 		client:                  c,
 		localTrack:              track,
 		remoteTrack:             t,

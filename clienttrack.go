@@ -44,17 +44,22 @@ type clientTrack struct {
 	ssrc        webrtc.SSRC
 }
 
-func newClientTrack(c *Client, t *Track, isScreen bool) *clientTrack {
+func newClientTrack(c *Client, t *Track, isScreen bool, localTrack *webrtc.TrackLocalStaticRTP) *clientTrack {
 	ctx, cancel := context.WithCancel(t.Context())
+
+	if localTrack == nil {
+		localTrack = t.createLocalTrack()
+	}
+
 	ct := &clientTrack{
-		id:          t.ID(),
-		streamid:    t.StreamID(),
+		id:          localTrack.ID(),
+		streamid:    localTrack.StreamID(),
 		context:     ctx,
 		mu:          sync.RWMutex{},
 		client:      c,
-		kind:        t.base.kind,
-		mimeType:    t.remoteTrack.track.Codec().MimeType,
-		localTrack:  t.createLocalTrack(),
+		kind:        localTrack.Kind(),
+		mimeType:    localTrack.Codec().MimeType,
+		localTrack:  localTrack,
 		remoteTrack: t.remoteTrack,
 		isScreen:    isScreen,
 		ssrc:        t.remoteTrack.track.SSRC(),

@@ -170,12 +170,12 @@ func (c *ClientStats) SetReceiver(id, rid string, stats stats.Stats) {
 
 	c.receivers[idrid] = stats
 	if _, ok := c.bytesReceived[idrid]; !ok {
-		c.bytesReceived[id] = stats.InboundRTPStreamStats.BytesReceived
-		c.receiversBitrates[id] = uint32(c.bytesReceived[idrid]) * 8
+		c.bytesReceived[idrid] = stats.InboundRTPStreamStats.BytesReceived
+		c.receiversBitrates[idrid] = uint32(c.bytesReceived[idrid]) * 8
 	} else {
 		delta := stats.InboundRTPStreamStats.BytesReceived - c.bytesReceived[id]
-		c.receiversBitrates[id] = uint32(delta) * 8
-		c.bytesReceived[id] = stats.InboundRTPStreamStats.BytesReceived
+		c.receiversBitrates[idrid] = uint32(delta) * 8
+		c.bytesReceived[idrid] = stats.InboundRTPStreamStats.BytesReceived
 	}
 }
 
