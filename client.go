@@ -462,10 +462,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		}
 
 		onStatsUpdated := func(stats *stats.Stats) {
-			client.mu.Lock()
-			defer client.mu.Unlock()
-
-			client.stats.SetReceiver(remoteTrack.ID(), *stats)
+			client.stats.SetReceiver(remoteTrack.ID(), remoteTrack.RID(), *stats)
 		}
 
 		if remoteTrack.RID() == "" {
@@ -480,7 +477,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 				ctx, cancel := context.WithCancel(track.Context())
 				defer cancel()
 				<-ctx.Done()
-				client.stats.removeReceiverStats(remoteTrack.ID())
+				client.stats.removeReceiverStats(remoteTrack.ID() + remoteTrack.RID())
 			}()
 
 			if err := client.tracks.Add(track); err != nil {
@@ -509,7 +506,18 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 					ctx, cancel := context.WithCancel(track.Context())
 					defer cancel()
 					<-ctx.Done()
-					client.stats.removeReceiverStats(remoteTrack.ID())
+					simulcastTrack := track.(*SimulcastTrack)
+					if simulcastTrack.remoteTrackHigh != nil {
+						client.stats.removeReceiverStats(simulcastTrack.remoteTrackHigh.track.ID() + simulcastTrack.remoteTrackHigh.track.RID())
+					}
+
+					if simulcastTrack.remoteTrackMid != nil {
+						client.stats.removeReceiverStats(simulcastTrack.remoteTrackMid.track.ID() + simulcastTrack.remoteTrackMid.track.RID())
+					}
+
+					if simulcastTrack.remoteTrackLow != nil {
+						client.stats.removeReceiverStats(simulcastTrack.remoteTrackLow.track.ID() + simulcastTrack.remoteTrackLow.track.RID())
+					}
 				}()
 
 			} else if simulcast, ok = track.(*SimulcastTrack); ok {
@@ -525,9 +533,6 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 	})
 
 	peerConnection.OnICECandidate(func(candidate *webrtc.ICECandidate) {
-		client.mu.Lock()
-		defer client.mu.Unlock()
-
 		// only sending candidate when the local description is set, means expecting the remote peer already has the remote description
 		if candidate != nil {
 			if client.canAddCandidate.Load() {
@@ -535,8 +540,9 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 
 				return
 			}
-
+			client.mu.Lock()
 			client.pendingLocalCandidates = append(client.pendingLocalCandidates, candidate)
+			client.mu.Unlock()
 		}
 	})
 
@@ -1205,14 +1211,7 @@ func (c *Client) PeerConnection() *PeerConnection {
 	return c.peerConnection
 }
 
-func (c *Client) Stats() *ClientStats {
-	return c.stats
-}
-
 func (c *Client) updateSenderStats(sender *webrtc.RTPSender) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	if c.statsGetter == nil {
 		return
 	}
@@ -1456,15 +1455,15 @@ func (c *Client) SetName(name string) {
 }
 
 // TODO: fix the panic nil here when the client is ended
-func (c *Client) TrackStats() *ClientTrackStats {
+func (c *Client) Stats() ClientTrackStats {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	if c.peerConnection.PC().ConnectionState() == webrtc.PeerConnectionStateClosed {
-		return nil
+		return ClientTrackStats{}
 	}
 
-	clientStats := &ClientTrackStats{
+	clientStats := ClientTrackStats{
 		ID:                       c.id,
 		Name:                     c.name,
 		ConsumerBandwidth:        c.GetEstimatedBandwidth(),
@@ -1479,21 +1478,47 @@ func (c *Client) TrackStats() *ClientTrackStats {
 	for _, track := range c.Tracks() {
 		if track.IsSimulcast() {
 			simulcastClientTrack := track.(*SimulcastTrack)
-			receivedStats, err := generateClientReceiverStats(c, simulcastClientTrack.remoteTrackHigh)
-			if err != nil {
-				continue
+			if simulcastClientTrack.remoteTrackHigh != nil {
+				stats, err := c.stats.GetReceiver(simulcastClientTrack.remoteTrackHigh.Track().ID(), simulcastClientTrack.remoteTrackHigh.Track().RID())
+				if err == nil {
+					receivedStats, err := generateClientReceiverStats(c, simulcastClientTrack.remoteTrackHigh.Track(), stats)
+					if err == nil {
+						clientStats.Receives = append(clientStats.Receives, receivedStats)
+					}
+				}
+
 			}
 
-			clientStats.Receives = append(clientStats.Receives, receivedStats)
+			if simulcastClientTrack.remoteTrackMid != nil {
+				stats, err := c.stats.GetReceiver(simulcastClientTrack.remoteTrackMid.Track().ID(), simulcastClientTrack.remoteTrackMid.Track().RID())
+				if err == nil {
+					receivedStats, err := generateClientReceiverStats(c, simulcastClientTrack.remoteTrackMid.Track(), stats)
+					if err == nil {
+						clientStats.Receives = append(clientStats.Receives, receivedStats)
+					}
+				}
+
+			}
+
+			if simulcastClientTrack.remoteTrackLow != nil {
+				stats, err := c.stats.GetReceiver(simulcastClientTrack.remoteTrackLow.Track().ID(), simulcastClientTrack.remoteTrackLow.Track().RID())
+				if err == nil {
+					receivedStats, err := generateClientReceiverStats(c, simulcastClientTrack.remoteTrackLow.Track(), stats)
+					if err == nil {
+						clientStats.Receives = append(clientStats.Receives, receivedStats)
+					}
+				}
+
+			}
 
 		} else {
-			stat, err := c.stats.GetReceiver(track.ID())
+			t := track.(*Track)
+			stat, err := c.stats.GetReceiver(t.RemoteTrack().track.ID(), t.RemoteTrack().track.RID())
 			if err != nil {
 				continue
 			}
 
-			RID := track.(*Track).RemoteTrack().Track().RID()
-			receivedStats, err := generateClientReceiverStats(c, track, RID, stat)
+			receivedStats, err := generateClientReceiverStats(c, track.(*Track).RemoteTrack().Track(), stat)
 			if err != nil {
 				continue
 			}
@@ -1518,7 +1543,9 @@ func (c *Client) TrackStats() *ClientTrackStats {
 		// - add current bitrate
 		sentStats := TrackSentStats{
 			ID:             id,
+			StreamID:       track.StreamID(),
 			Kind:           track.Kind(),
+			Codec:          track.MimeType(),
 			PacketsLost:    stat.RemoteInboundRTPStreamStats.PacketsLost,
 			PacketSent:     stat.OutboundRTPStreamStats.PacketsSent,
 			FractionLost:   stat.RemoteInboundRTPStreamStats.FractionLost,
@@ -1632,9 +1659,6 @@ func (c *Client) enableVADStatUpdate() {
 }
 
 func (c *Client) Tracks() []ITrack {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	return c.tracks.GetTracks()
 }
 
@@ -1662,14 +1686,17 @@ func registerInterceptors(m *webrtc.MediaEngine, interceptorRegistry *intercepto
 	return webrtc.ConfigureTWCCSender(m, interceptorRegistry)
 }
 
-func generateClientReceiverStats(c *Client, track ITrack, rid string, stat *stats.Stats) (TrackReceivedStats, error) {
+func generateClientReceiverStats(c *Client, track IRemoteTrack, stat stats.Stats) (TrackReceivedStats, error) {
+	bitrate, _ := c.stats.GetReceiverBitrate(track.ID(), track.RID())
+
 	receivedStats := TrackReceivedStats{
 		ID:              track.ID(),
-		RID:             rid,
+		RID:             track.RID(),
 		StreamID:        track.StreamID(),
-		Kind:            track.Kind().String(),
-		Codec:           track.MimeType(),
+		Kind:            track.Kind(),
+		Codec:           track.Codec().MimeType,
 		BytesReceived:   int64(stat.InboundRTPStreamStats.BytesReceived),
+		CurrentBitrate:  bitrate,
 		PacketsLost:     stat.InboundRTPStreamStats.PacketsLost,
 		PacketsReceived: stat.InboundRTPStreamStats.PacketsReceived,
 	}

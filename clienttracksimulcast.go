@@ -13,6 +13,7 @@ import (
 
 type simulcastClientTrack struct {
 	id                      string
+	streamid                string
 	mu                      sync.RWMutex
 	client                  *Client
 	context                 context.Context
@@ -32,7 +33,6 @@ type simulcastClientTrack struct {
 	packetmapMid            *packetmap.Map
 	packetmapLow            *packetmap.Map
 	onTrackEndedCallbacks   []func()
-	ssrc                    webrtc.SSRC
 }
 
 func newSimulcastClientTrack(c *Client, t *SimulcastTrack) *simulcastClientTrack {
@@ -55,6 +55,7 @@ func newSimulcastClientTrack(c *Client, t *SimulcastTrack) *simulcastClientTrack
 	ct := &simulcastClientTrack{
 		mu:                      sync.RWMutex{},
 		id:                      GenerateID(16),
+		streamid:                GenerateID(16),
 		context:                 ctx,
 		kind:                    t.base.kind,
 		mimeType:                t.base.codec.MimeType,
@@ -249,6 +250,10 @@ func (t *simulcastClientTrack) ID() string {
 	return t.id
 }
 
+func (t *simulcastClientTrack) StreamID() string {
+	return t.streamid
+}
+
 func (t *simulcastClientTrack) Kind() webrtc.RTPCodecType {
 	return t.kind
 }
@@ -363,11 +368,17 @@ func (t *simulcastClientTrack) getQuality() QualityLevel {
 }
 
 func (t *simulcastClientTrack) ReceiveBitrate() uint32 {
-	return t.ReceiveBitrateAtQuality(t.getQuality())
+	total := uint32(0)
+
+	for _, quality := range []QualityLevel{QualityHigh, QualityMid, QualityLow} {
+		total += t.ReceiveBitrateAtQuality(quality)
+	}
+
+	return total
 }
 
 func (t *simulcastClientTrack) SendBitrate() uint32 {
-	bitrate, err := t.client.Stats().GetSenderBitrate(t.ID())
+	bitrate, err := t.client.stats.GetSenderBitrate(t.ID())
 	if err != nil {
 		glog.Error("clienttrack: error on get sender", err)
 		return 0
@@ -391,13 +402,17 @@ func (t *simulcastClientTrack) ReceiveBitrateAtQuality(quality QualityLevel) uin
 		remoteTrack = t.remoteTrack.remoteTrackLow
 	}
 
-	bitrate, err := t.client.Stats().GetReceiverBitrate(remoteTrack.track.ID())
+	if remoteTrack == nil {
+		return 0
+	}
+
+	bitrate, err := t.client.stats.GetReceiverBitrate(remoteTrack.track.ID(), remoteTrack.track.RID())
 	if err != nil {
 		glog.Error("clienttrack: error on get receiver", err)
 		return 0
 	}
 
-	return bitrate + bitrate*10/100
+	return bitrate
 }
 
 func (t *simulcastClientTrack) Quality() QualityLevel {

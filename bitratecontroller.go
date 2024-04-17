@@ -297,9 +297,7 @@ func (bc *bitrateController) totalSentBitrates() uint32 {
 	total := uint32(0)
 
 	for _, claim := range bc.Claims() {
-		bc.mu.RLock()
 		total += claim.track.SendBitrate()
-		bc.mu.RUnlock()
 	}
 
 	return total
@@ -336,7 +334,9 @@ func (bc *bitrateController) MonitorBandwidth(estimator cc.BandwidthEstimator) {
 	estimator.OnTargetBitrateChange(func(bw int) {
 		var needAdjustment bool
 
+		bc.mu.Lock()
 		bc.targetBitrate = uint32(bw)
+		bc.mu.Unlock()
 
 		totalSendBitrates := bc.totalSentBitrates()
 

@@ -12,6 +12,7 @@ import (
 type iClientTrack interface {
 	push(rtp *rtp.Packet, quality QualityLevel)
 	ID() string
+	StreamID() string
 	Context() context.Context
 	Kind() webrtc.RTPCodecType
 	MimeType() string
@@ -31,6 +32,7 @@ type iClientTrack interface {
 
 type clientTrack struct {
 	id          string
+	streamid    string
 	context     context.Context
 	mu          sync.RWMutex
 	client      *Client
@@ -46,6 +48,7 @@ func newClientTrack(c *Client, t *Track, isScreen bool) *clientTrack {
 	ctx, cancel := context.WithCancel(t.Context())
 	ct := &clientTrack{
 		id:          t.ID(),
+		streamid:    t.StreamID(),
 		context:     ctx,
 		mu:          sync.RWMutex{},
 		client:      c,
@@ -69,8 +72,16 @@ func (t *clientTrack) ID() string {
 	return t.id
 }
 
+func (t *clientTrack) StreamID() string {
+	return t.streamid
+}
+
 func (t *clientTrack) ReceiveBitrate() uint32 {
-	bitrate, err := t.client.Stats().GetReceiverBitrate(t.ID())
+	if t.remoteTrack == nil || t.client == nil {
+		return 0
+	}
+
+	bitrate, err := t.client.stats.GetReceiverBitrate(t.ID(), t.remoteTrack.track.RID())
 	if err != nil {
 		glog.Error("clienttrack: error on get receiver", err)
 		return 0
@@ -80,9 +91,8 @@ func (t *clientTrack) ReceiveBitrate() uint32 {
 }
 
 func (t *clientTrack) SendBitrate() uint32 {
-	bitrate, err := t.client.Stats().GetSenderBitrate(t.ID())
+	bitrate, err := t.client.stats.GetSenderBitrate(t.ID())
 	if err != nil {
-		glog.Error("clienttrack: error on get sender", err)
 		return 0
 	}
 

@@ -15,6 +15,7 @@ type TrackSentStats struct {
 	ID             string              `json:"id"`
 	StreamID       string              `json:"stream_id"`
 	Kind           webrtc.RTPCodecType `json:"kind"`
+	Codec          string              `json:"codec"`
 	PacketsLost    int64               `json:"packets_lost"`
 	PacketSent     uint64              `json:"packets_sent"`
 	FractionLost   float64             `json:"fraction_lost"`
@@ -25,15 +26,15 @@ type TrackSentStats struct {
 }
 
 type TrackReceivedStats struct {
-	ID              string `json:"id"`
-	StreamID        string `json:"stream_id"`
-	RID             string `json:"rid"`
-	Kind            string `json:"kind"`
-	Codec           string `json:"codec"`
-	CurrentBitrate  uint32 `json:"current_bitrate"`
-	PacketsLost     int64  `json:"packets_lost"`
-	PacketsReceived uint64 `json:"packets_received"`
-	BytesReceived   int64  `json:"bytes_received"`
+	ID              string              `json:"id"`
+	StreamID        string              `json:"stream_id"`
+	RID             string              `json:"rid"`
+	Kind            webrtc.RTPCodecType `json:"kind"`
+	Codec           string              `json:"codec"`
+	CurrentBitrate  uint32              `json:"current_bitrate"`
+	PacketsLost     int64               `json:"packets_lost"`
+	PacketsReceived uint64              `json:"packets_received"`
+	BytesReceived   int64               `json:"bytes_received"`
 }
 
 type ClientTrackStats struct {
@@ -50,15 +51,14 @@ type ClientTrackStats struct {
 }
 
 type RoomStats struct {
-	ActiveSessions     int                          `json:"active_sessions"`
-	ClientsCount       int                          `json:"clients_count"`
-	PacketSentLost     int64                        `json:"packet_sent_lost"`
-	PacketReceivedLost int64                        `json:"packet_received_lost"`
-	PacketReceived     uint64                       `json:"packet_received"`
-	PacketSent         uint64                       `json:"packet_sent"`
-	ByteSent           uint64                       `json:"bytes_sent"`
-	BytesReceived      uint64                       `json:"bytes_received"`
-	Tracks             StatTracks                   `json:"tracks"`
-	Timestamp          time.Time                    `json:"timestamp"`
-	ClientStats        map[string]*ClientTrackStats `json:"client_stats"`
+	ActiveSessions  int                         `json:"active_sessions"`
+	ClientsCount    int                         `json:"clients_count"`
+	BitrateSent     uint64                      `json:"bitrate_sent"`
+	BitrateReceived uint64                      `json:"bitrate_received"`
+	BytesIngress    uint64                      `json:"bytes_ingress"`
+	BytesEgress     uint64                      `json:"bytes_egress"`
+	ReceivedTracks  StatTracks                  `json:"received_tracks"`
+	SentTracks      StatTracks                  `json:"sent_tracks"`
+	Timestamp       time.Time                   `json:"timestamp"`
+	ClientStats     map[string]ClientTrackStats `json:"client_stats"`
 }
