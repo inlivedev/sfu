@@ -13,6 +13,7 @@ import (
 
 type simulcastClientTrack struct {
 	id                      string
+	streamid                string
 	mu                      sync.RWMutex
 	client                  *Client
 	context                 context.Context
@@ -53,10 +54,11 @@ func newSimulcastClientTrack(c *Client, t *SimulcastTrack) *simulcastClientTrack
 
 	ct := &simulcastClientTrack{
 		mu:                      sync.RWMutex{},
-		id:                      GenerateID(16),
+		id:                      track.ID(),
+		streamid:                track.StreamID(),
 		context:                 ctx,
-		kind:                    t.base.kind,
-		mimeType:                t.base.codec.MimeType,
+		kind:                    track.Kind(),
+		mimeType:                track.Codec().MimeType,
 		client:                  c,
 		localTrack:              track,
 		remoteTrack:             t,
@@ -244,17 +246,12 @@ func (t *simulcastClientTrack) GetRemoteTrack() *remoteTrack {
 	return nil
 }
 
-func (t *simulcastClientTrack) getCurrentBitrate() uint32 {
-	currentTrack := t.GetRemoteTrack()
-	if currentTrack == nil {
-		return 0
-	}
-
-	return currentTrack.GetCurrentBitrate()
-}
-
 func (t *simulcastClientTrack) ID() string {
 	return t.id
+}
+
+func (t *simulcastClientTrack) StreamID() string {
+	return t.streamid
 }
 
 func (t *simulcastClientTrack) Kind() webrtc.RTPCodecType {
@@ -368,4 +365,60 @@ func (t *simulcastClientTrack) getQuality() QualityLevel {
 	}
 
 	return quality
+}
+
+func (t *simulcastClientTrack) ReceiveBitrate() uint32 {
+	total := uint32(0)
+
+	for _, quality := range []QualityLevel{QualityHigh, QualityMid, QualityLow} {
+		total += t.ReceiveBitrateAtQuality(quality)
+	}
+
+	return total
+}
+
+func (t *simulcastClientTrack) SendBitrate() uint32 {
+	bitrate, err := t.client.stats.GetSenderBitrate(t.ID())
+	if err != nil {
+		glog.Error("clienttrack: error on get sender", err)
+		return 0
+	}
+
+	return bitrate
+}
+
+func (t *simulcastClientTrack) ReceiveBitrateAtQuality(quality QualityLevel) uint32 {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
+	var remoteTrack *remoteTrack
+
+	switch quality {
+	case QualityHigh:
+		remoteTrack = t.remoteTrack.remoteTrackHigh
+	case QualityMid:
+		remoteTrack = t.remoteTrack.remoteTrackMid
+	case QualityLow:
+		remoteTrack = t.remoteTrack.remoteTrackLow
+	}
+
+	if remoteTrack == nil {
+		return 0
+	}
+
+	bitrate, err := t.client.stats.GetReceiverBitrate(remoteTrack.track.ID(), remoteTrack.track.RID())
+	if err != nil {
+		glog.Error("clienttrack: error on get receiver", err)
+		return 0
+	}
+
+	return bitrate
+}
+
+func (t *simulcastClientTrack) Quality() QualityLevel {
+	return t.getQuality()
+}
+
+func (t *simulcastClientTrack) MimeType() string {
+	return t.mimeType
 }

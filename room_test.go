@@ -233,8 +233,8 @@ Loop:
 
 				roomStats := testRoom.Stats()
 
-				diffPercentClientIgressRoomBytesSent := (float64(totalClientIngressBytes) - float64(roomStats.ByteSent)) / float64(totalClientIngressBytes) * 100
-				diffPercentClientEgressRoomBytesReceived := (float64(totalClientEgressBytes) - float64(roomStats.BytesReceived)) / float64(totalClientEgressBytes) * 100
+				diffPercentClientIgressRoomBytesSent := (float64(totalClientIngressBytes) - float64(roomStats.BitrateSent/8)) / float64(totalClientIngressBytes) * 100
+				diffPercentClientEgressRoomBytesReceived := (float64(totalClientEgressBytes) - float64(roomStats.BitrateReceived/8)) / float64(totalClientEgressBytes) * 100
 
 				if diffPercentClientIgressRoomBytesSent < 10.0 &&
 					diffPercentClientEgressRoomBytesReceived < 10.0 {
@@ -243,10 +243,8 @@ Loop:
 
 				t.Log("total client ingress bytes: ", totalClientIngressBytes)
 				t.Log("total client egress bytes: ", totalClientEgressBytes)
-				t.Log("total room bytes sent: ", roomStats.ByteSent)
-				t.Log("total room bytes receive: ", roomStats.BytesReceived)
-				t.Log("total room packet received lost: ", roomStats.PacketReceivedLost)
-				t.Log("total room packet sent lost: ", roomStats.PacketSentLost)
+				t.Log("total room bytes sent: ", roomStats.BitrateSent*8)
+				t.Log("total room bytes receive: ", roomStats.BitrateReceived*8)
 			}
 		}
 	}
@@ -260,18 +258,13 @@ Loop:
 	require.NotEqual(t, uint64(0), totalClientEgressBytes)
 	require.NotEqual(t, uint64(0), totalClientIngressBytes)
 
-	t.Log("total room bytes sent: ", roomStats.ByteSent)
-	t.Log("total room bytes receive: ", roomStats.BytesReceived)
-	t.Log("total room packet sent lost: ", roomStats.PacketSentLost)
-	t.Log("total room packet received lost: ", roomStats.PacketReceivedLost)
-
-	diffPercentClientIgressRoomBytesSent := (float64(totalClientIngressBytes) - float64(roomStats.ByteSent-uint64(roomStats.PacketSentLost*1500))) / float64(totalClientIngressBytes) * 100
+	diffPercentClientIgressRoomBytesSent := float64(totalClientIngressBytes) / float64(totalClientIngressBytes) * 100
 	require.LessOrEqual(t, diffPercentClientIgressRoomBytesSent, 20.0, "expecting less than 20 percent difference client igress and room byte sent")
 
-	diffPercentClientEgressRoomBytesReceived := (float64(totalClientEgressBytes) - float64(roomStats.BytesReceived)) / float64(totalClientEgressBytes) * 100
+	diffPercentClientEgressRoomBytesReceived := (float64(totalClientEgressBytes) - float64(roomStats.BitrateReceived/8)) / float64(totalClientEgressBytes) * 100
 	require.LessOrEqual(t, diffPercentClientEgressRoomBytesReceived, 20.0, "expecting less than 20 percent difference client egress and room byte received")
 
-	t.Log(totalClientIngressBytes, roomStats.ByteSent)
+	t.Log(totalClientIngressBytes, roomStats.BitrateSent/8)
 }
 
 func TestRoomAddClientTimeout(t *testing.T) {

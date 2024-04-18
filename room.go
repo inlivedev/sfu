@@ -87,7 +87,7 @@ type Room struct {
 	meta                    *Metadata
 	sfu                     *SFU
 	state                   string
-	stats                   map[string]*ClientStats
+	stats                   map[string]TrackStats
 	kind                    string
 	extensions              []IExtension
 	OnEvent                 func(event Event)
@@ -129,7 +129,7 @@ func newRoom(id, name string, sfu *SFU, kind string, opts RoomOptions) *Room {
 		cancel:     cancel,
 		sfu:        sfu,
 		token:      GenerateID(21),
-		stats:      make(map[string]*ClientStats),
+		stats:      make(map[string]TrackStats),
 		state:      StateRoomOpen,
 		name:       name,
 		mu:         &sync.RWMutex{},
@@ -142,6 +142,8 @@ func newRoom(id, name string, sfu *SFU, kind string, opts RoomOptions) *Room {
 	sfu.OnClientRemoved(func(client *Client) {
 		room.onClientLeft(client)
 	})
+
+	go room.loopRecordStats()
 
 	return room
 }
@@ -203,9 +205,6 @@ func (r *Room) StopClient(id string) error {
 }
 
 func (r *Room) AddClient(id, name string, opts ClientOptions) (*Client, error) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
 	if r.state == StateRoomClosed {
 		return nil, ErrRoomIsClosed
 	}
@@ -297,15 +296,11 @@ func (r *Room) onClientLeft(client *Client) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	r.stats[client.ID()] = client.Stats()
+	r.stats[client.ID()] = client.stats.TrackStats
 }
 
 func (r *Room) onClientJoined(client *Client) {
-	r.mu.RLock()
-	callbacks := r.onClientJoinedCallbacks
-	r.mu.RUnlock()
-
-	for _, callback := range callbacks {
+	for _, callback := range r.onClientJoinedCallbacks {
 		callback(client)
 	}
 
@@ -325,58 +320,78 @@ func (r *Room) SFU() *SFU {
 	return r.sfu
 }
 
+// Get the room real time stats. This will return the current room stats.
+// The client stats and it's tracks will be removed from the stats if the client or track is removed.
+// But the aggregated stats will still be there and included in the room stats even if they're removed.
 func (r *Room) Stats() RoomStats {
 	var (
-		bytesReceived      uint64
-		bytesSent          uint64
-		packetSentLost     int64
-		packetSent         uint64
-		packetReceivedLost int64
-		packetReceived     uint64
+		bytesReceived    uint64
+		bytesSent        uint64
+		bitratesSent     uint64
+		bitratesReceived uint64
 	)
 
-	// make sure the stats is up to date
-	r.updateStats()
-
-	clientStats := make(map[string]*ClientTrackStats)
+	clientStats := make(map[string]ClientTrackStats)
 
 	r.mu.RLock()
 
 	defer r.mu.RUnlock()
 
-	for id, cstats := range r.stats {
-		if cstats.Client != nil {
-			stats := cstats.Client.TrackStats()
-			if stats != nil {
-				clientStats[id] = stats
-				for _, stat := range stats.Receives {
-					bytesReceived += uint64(stat.BytesReceived)
-					packetReceivedLost += stat.PacketsLost
-					packetReceived += stat.PacketsReceived
-				}
+	for _, cstats := range r.stats {
+		for _, stat := range cstats.bytesReceived {
+			bytesReceived += stat
+		}
 
-				for _, stat := range stats.Sents {
-					bytesSent += stat.BytesSent
-					packetSentLost += stat.PacketsLost
-					packetSent += stat.PacketSent
-				}
-			}
+		for _, stat := range cstats.senderBitrates {
+			bitratesSent += uint64(stat)
+		}
+
+		for _, stat := range cstats.receiversBitrates {
+			bitratesReceived += uint64(stat)
+		}
+
+		for _, stat := range cstats.bytesSent {
+			bytesSent += stat
 		}
 
 	}
 
-	return RoomStats{
-		ActiveSessions:     r.sfu.TotalActiveSessions(),
-		ClientsCount:       len(r.stats),
-		PacketSentLost:     packetSentLost,
-		PacketReceivedLost: packetReceivedLost,
-		PacketReceived:     packetReceived,
-		PacketSent:         packetSent,
-		BytesReceived:      bytesReceived,
-		ByteSent:           bytesSent,
-		Timestamp:          time.Now(),
-		ClientStats:        clientStats,
+	roomStats := RoomStats{
+		ActiveSessions: r.sfu.TotalActiveSessions(),
+		ClientsCount:   0,
+		BytesIngress:   bytesReceived,
+		BytesEgress:    bytesSent,
+		Timestamp:      time.Now(),
+		ClientStats:    clientStats,
 	}
+
+	for id, c := range r.sfu.clients.GetClients() {
+		roomStats.ClientStats[id] = c.Stats()
+
+		roomStats.ClientsCount++
+
+		for _, track := range roomStats.ClientStats[id].Receives {
+			if track.Kind == webrtc.RTPCodecTypeAudio {
+				roomStats.ReceivedTracks.Audio++
+			} else {
+				roomStats.ReceivedTracks.Video++
+			}
+
+			roomStats.BitrateReceived += uint64(track.CurrentBitrate)
+		}
+
+		for _, track := range roomStats.ClientStats[id].Sents {
+			if track.Kind == webrtc.RTPCodecTypeAudio {
+				roomStats.SentTracks.Audio++
+			} else {
+				roomStats.SentTracks.Video++
+			}
+
+			roomStats.BitrateSent += uint64(track.CurrentBitrate)
+		}
+	}
+
+	return roomStats
 }
 
 func (r *Room) updateStats() {
@@ -384,7 +399,7 @@ func (r *Room) updateStats() {
 	defer r.mu.Unlock()
 
 	for _, client := range r.sfu.clients.GetClients() {
-		r.stats[client.ID()] = client.Stats()
+		r.stats[client.ID()] = client.stats.TrackStats
 	}
 }
 
@@ -417,4 +432,21 @@ func (r *Room) Meta() *Metadata {
 
 func (r *Room) Options() RoomOptions {
 	return r.options
+}
+
+func (r *Room) loopRecordStats() {
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	ctx, cancel := context.WithCancel(r.context)
+	defer cancel()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			r.updateStats()
+		}
+	}
 }

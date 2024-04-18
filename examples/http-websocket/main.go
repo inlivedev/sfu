@@ -349,17 +349,17 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			stats := client.TrackStats()
-			if stats != nil {
-				resp := Respose{
-					Status: true,
-					Type:   TypeTrackStats,
-					Data:   stats,
-				}
+			stats := client.Stats()
 
-				respBytes, _ := json.Marshal(resp)
-				_, _ = conn.Write(respBytes)
+			resp := Respose{
+				Status: true,
+				Type:   TypeTrackStats,
+				Data:   stats,
 			}
+
+			respBytes, _ := json.Marshal(resp)
+			_, _ = conn.Write(respBytes)
+
 		case req := <-messageChan:
 			// handle as SDP if no error
 			if req.Type == TypeOffer || req.Type == TypeAnswer {

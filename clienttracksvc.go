@@ -58,7 +58,6 @@ type scaleableClientTrack struct {
 	lastSequence   uint16
 	qualityPresets QualityPresets
 	init           bool
-	packetCaches   *packetCaches
 	packetmap      *packetmap.Map
 }
 
@@ -69,7 +68,7 @@ func newScaleableClientTrack(
 ) *scaleableClientTrack {
 
 	sct := &scaleableClientTrack{
-		clientTrack:    newClientTrack(c, t, false),
+		clientTrack:    newClientTrack(c, t, false, nil),
 		qualityPresets: qualityPresets,
 		maxQuality:     QualityHigh,
 		lastQuality:    QualityHigh,
@@ -205,10 +204,10 @@ func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 		p.Marker = true
 	}
 
-	t.send(p, vp9Packet.SID, vp9Packet.TID, t.sid, t.tid)
+	t.send(p)
 }
 
-func (t *scaleableClientTrack) send(p *rtp.Packet, pSID, tSID, decidedSID, decidedTID uint8) {
+func (t *scaleableClientTrack) send(p *rtp.Packet) {
 	t.lastTimestamp = p.Timestamp
 
 	if err := t.localTrack.WriteRTP(p); err != nil {

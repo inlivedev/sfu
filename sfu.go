@@ -125,6 +125,7 @@ type SFU struct {
 	onClientRemovedCallbacks  []func(*Client)
 	onClientAddedCallbacks    []func(*Client)
 	relayTracks               map[string]ITrack
+	clientStats               map[string]*ClientStats
 }
 
 type PublishedTrack struct {
@@ -481,23 +482,6 @@ func (s *SFU) TotalActiveSessions() int {
 	}
 
 	return count
-}
-
-func (s *SFU) QualityLevelToBitrate(level QualityLevel) uint32 {
-	switch level {
-	case QualityAudioRed:
-		return s.bitrateConfigs.AudioRed
-	case QualityAudio:
-		return s.bitrateConfigs.Audio
-	case QualityLow:
-		return s.bitrateConfigs.VideoLow
-	case QualityMid:
-		return s.bitrateConfigs.VideoMid
-	case QualityHigh:
-		return s.bitrateConfigs.VideoHigh
-	default:
-		return 0
-	}
 }
 
 func (s *SFU) PLIInterval() time.Duration {

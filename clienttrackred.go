@@ -20,18 +20,18 @@ type clientTrackRed struct {
 }
 
 func newClientTrackRed(c *Client, t *Track) *clientTrackRed {
-
+	var localTrack *webrtc.TrackLocalStaticRTP
 	mimeType := t.remoteTrack.track.Codec().MimeType
-	localTrack := t.createLocalTrack()
 
 	if !c.receiveRED {
 		mimeType = webrtc.MimeTypeOpus
 		localTrack = t.createOpusLocalTrack()
+	} else {
+		localTrack = t.createLocalTrack()
 	}
 
-	ctBase := newClientTrack(c, t, false)
+	ctBase := newClientTrack(c, t, false, localTrack)
 	ctBase.mimeType = mimeType
-	ctBase.localTrack = localTrack
 
 	ct := &clientTrackRed{
 		clientTrack:  ctBase,
@@ -110,4 +110,8 @@ func extractPrimaryEncodingForRED(payload []byte) ([]byte, error) {
 	}
 
 	return payload[blockLength:], nil
+}
+
+func (t *clientTrackRed) Quality() QualityLevel {
+	return QualityAudioRed
 }

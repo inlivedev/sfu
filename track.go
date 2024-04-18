@@ -255,7 +255,7 @@ func (t *Track) subscribe(c *Client) iClientTrack {
 
 		ct = newClientTrackRed(c, t)
 	} else {
-		ct = newClientTrack(c, t, t.IsScreen())
+		ct = newClientTrack(c, t, t.IsScreen(), nil)
 
 	}
 

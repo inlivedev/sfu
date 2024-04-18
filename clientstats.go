@@ -12,23 +12,33 @@ var (
 	ErrCLientStatsNotFound = errors.New("client stats not found")
 )
 
-type voiceActivityStats struct {
-	mu       sync.Mutex
-	active   bool
+type staticVoiceActivityStats struct {
 	start    uint32
 	duration uint32
 }
 
-type ClientStats struct {
-	mu                sync.Mutex
-	senderMu          sync.RWMutex
-	receiverMu        sync.RWMutex
-	Client            *Client
+type voiceActivityStats struct {
+	mu     sync.Mutex
+	active bool
+	staticVoiceActivityStats
+}
+
+type TrackStats struct {
 	senders           map[string]stats.Stats
 	senderBitrates    map[string]uint32
+	bytesSent         map[string]uint64
 	receivers         map[string]stats.Stats
 	receiversBitrates map[string]uint32
-	voiceActivity     voiceActivityStats
+	bytesReceived     map[string]uint64
+}
+
+type ClientStats struct {
+	mu         sync.Mutex
+	senderMu   sync.RWMutex
+	receiverMu sync.RWMutex
+	Client     *Client
+	TrackStats
+	voiceActivity voiceActivityStats
 }
 
 func newClientStats(c *Client) *ClientStats {
@@ -36,8 +46,14 @@ func newClientStats(c *Client) *ClientStats {
 		senderMu:   sync.RWMutex{},
 		receiverMu: sync.RWMutex{},
 		Client:     c,
-		senders:    make(map[string]stats.Stats),
-		receivers:  make(map[string]stats.Stats),
+		TrackStats: TrackStats{
+			senders:           make(map[string]stats.Stats),
+			receivers:         make(map[string]stats.Stats),
+			senderBitrates:    make(map[string]uint32),
+			receiversBitrates: make(map[string]uint32),
+			bytesSent:         make(map[string]uint64),
+			bytesReceived:     make(map[string]uint64),
+		},
 		voiceActivity: voiceActivityStats{
 			mu:     sync.Mutex{},
 			active: false,
@@ -83,11 +99,31 @@ func (c *ClientStats) GetSender(id string) (stats.Stats, error) {
 	return sender, nil
 }
 
+func (c *ClientStats) GetSenderBitrate(id string) (uint32, error) {
+	c.senderMu.RLock()
+	defer c.senderMu.RUnlock()
+
+	bitrate, ok := c.senderBitrates[id]
+	if !ok {
+		return 0, ErrCLientStatsNotFound
+	}
+
+	return bitrate, nil
+}
+
 func (c *ClientStats) SetSender(id string, stats stats.Stats) {
 	c.senderMu.Lock()
 	defer c.senderMu.Unlock()
 
 	c.senders[id] = stats
+	if _, ok := c.bytesSent[id]; !ok {
+		c.bytesSent[id] = stats.OutboundRTPStreamStats.BytesSent
+		c.senderBitrates[id] = uint32(c.bytesSent[id]) * 8
+	} else {
+		delta := stats.OutboundRTPStreamStats.BytesSent - c.bytesSent[id]
+		c.bytesSent[id] = stats.OutboundRTPStreamStats.BytesSent
+		c.senderBitrates[id] = uint32(delta) * 8
+	}
 }
 
 func (c *ClientStats) Receivers() map[string]stats.Stats {
@@ -102,11 +138,23 @@ func (c *ClientStats) Receivers() map[string]stats.Stats {
 	return stats
 }
 
-func (c *ClientStats) GetReceiver(id string) (stats.Stats, error) {
+func (c *ClientStats) GetReceiverBitrate(id, rid string) (uint32, error) {
 	c.receiverMu.RLock()
 	defer c.receiverMu.RUnlock()
 
-	receiver, ok := c.receivers[id]
+	bitrate, ok := c.receiversBitrates[id+rid]
+	if !ok {
+		return 0, ErrCLientStatsNotFound
+	}
+
+	return bitrate, nil
+}
+
+func (c *ClientStats) GetReceiver(id, rid string) (stats.Stats, error) {
+	c.receiverMu.RLock()
+	defer c.receiverMu.RUnlock()
+
+	receiver, ok := c.receivers[id+rid]
 	if !ok {
 		return stats.Stats{}, ErrCLientStatsNotFound
 	}
@@ -114,11 +162,21 @@ func (c *ClientStats) GetReceiver(id string) (stats.Stats, error) {
 	return receiver, nil
 }
 
-func (c *ClientStats) SetReceiver(id string, stats stats.Stats) {
+func (c *ClientStats) SetReceiver(id, rid string, stats stats.Stats) {
 	c.receiverMu.Lock()
 	defer c.receiverMu.Unlock()
 
-	c.receivers[id] = stats
+	idrid := id + rid
+
+	c.receivers[idrid] = stats
+	if _, ok := c.bytesReceived[idrid]; !ok {
+		c.bytesReceived[idrid] = stats.InboundRTPStreamStats.BytesReceived
+		c.receiversBitrates[idrid] = uint32(c.bytesReceived[idrid]) * 8
+	} else {
+		delta := stats.InboundRTPStreamStats.BytesReceived - c.bytesReceived[id]
+		c.receiversBitrates[idrid] = uint32(delta) * 8
+		c.bytesReceived[idrid] = stats.InboundRTPStreamStats.BytesReceived
+	}
 }
 
 // UpdateVoiceActivity updates voice activity duration

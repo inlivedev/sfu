@@ -12,8 +12,10 @@ import (
 type iClientTrack interface {
 	push(rtp *rtp.Packet, quality QualityLevel)
 	ID() string
+	StreamID() string
 	Context() context.Context
 	Kind() webrtc.RTPCodecType
+	MimeType() string
 	LocalTrack() *webrtc.TrackLocalStaticRTP
 	IsScreen() bool
 	IsSimulcast() bool
@@ -23,10 +25,14 @@ type iClientTrack interface {
 	RequestPLI()
 	SetMaxQuality(quality QualityLevel)
 	MaxQuality() QualityLevel
+	ReceiveBitrate() uint32
+	SendBitrate() uint32
+	Quality() QualityLevel
 }
 
 type clientTrack struct {
 	id          string
+	streamid    string
 	context     context.Context
 	mu          sync.RWMutex
 	client      *Client
@@ -35,20 +41,28 @@ type clientTrack struct {
 	localTrack  *webrtc.TrackLocalStaticRTP
 	remoteTrack *remoteTrack
 	isScreen    bool
+	ssrc        webrtc.SSRC
 }
 
-func newClientTrack(c *Client, t *Track, isScreen bool) *clientTrack {
+func newClientTrack(c *Client, t *Track, isScreen bool, localTrack *webrtc.TrackLocalStaticRTP) *clientTrack {
 	ctx, cancel := context.WithCancel(t.Context())
+
+	if localTrack == nil {
+		localTrack = t.createLocalTrack()
+	}
+
 	ct := &clientTrack{
-		id:          t.ID(),
+		id:          localTrack.ID(),
+		streamid:    localTrack.StreamID(),
 		context:     ctx,
 		mu:          sync.RWMutex{},
 		client:      c,
-		kind:        t.base.kind,
-		mimeType:    t.remoteTrack.track.Codec().MimeType,
-		localTrack:  t.createLocalTrack(),
+		kind:        localTrack.Kind(),
+		mimeType:    localTrack.Codec().MimeType,
+		localTrack:  localTrack,
 		remoteTrack: t.remoteTrack,
 		isScreen:    isScreen,
+		ssrc:        t.remoteTrack.track.SSRC(),
 	}
 
 	go func() {
@@ -63,6 +77,33 @@ func (t *clientTrack) ID() string {
 	return t.id
 }
 
+func (t *clientTrack) StreamID() string {
+	return t.streamid
+}
+
+func (t *clientTrack) ReceiveBitrate() uint32 {
+	if t.remoteTrack == nil || t.client == nil {
+		return 0
+	}
+
+	bitrate, err := t.client.stats.GetReceiverBitrate(t.ID(), t.remoteTrack.track.RID())
+	if err != nil {
+		glog.Error("clienttrack: error on get receiver", err)
+		return 0
+	}
+
+	return bitrate
+}
+
+func (t *clientTrack) SendBitrate() uint32 {
+	bitrate, err := t.client.stats.GetSenderBitrate(t.ID())
+	if err != nil {
+		return 0
+	}
+
+	return bitrate
+}
+
 func (t *clientTrack) Context() context.Context {
 	return t.context
 }
@@ -73,6 +114,10 @@ func (t *clientTrack) Client() *Client {
 
 func (t *clientTrack) Kind() webrtc.RTPCodecType {
 	return t.remoteTrack.track.Kind()
+}
+
+func (t *clientTrack) MimeType() string {
+	return t.mimeType
 }
 
 func (t *clientTrack) push(p *rtp.Packet, _ QualityLevel) {
@@ -122,4 +167,16 @@ func (t *clientTrack) SetMaxQuality(_ QualityLevel) {
 
 func (t *clientTrack) MaxQuality() QualityLevel {
 	return QualityHigh
+}
+
+func (t *clientTrack) SSRC() webrtc.SSRC {
+	return t.ssrc
+}
+
+func (t *clientTrack) Quality() QualityLevel {
+	if t.Kind() == webrtc.RTPCodecTypeVideo {
+		return QualityHigh
+	}
+
+	return QualityAudio
 }
