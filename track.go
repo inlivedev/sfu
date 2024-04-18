@@ -37,7 +37,7 @@ type baseTrack struct {
 	id           string
 	msid         string
 	streamid     string
-	clientid     string
+	client       *Client
 	isProcessed  bool
 	kind         webrtc.RTPCodecType
 	codec        webrtc.RTPCodecParameters
@@ -69,7 +69,7 @@ type ITrack interface {
 type Track struct {
 	context          context.Context
 	mu               sync.Mutex
-	base             baseTrack
+	base             *baseTrack
 	remoteTrack      *remoteTrack
 	onEndedCallbacks []func()
 	onReadCallbacks  []func(*rtp.Packet, QualityLevel)
@@ -82,12 +82,12 @@ func newTrack(ctx context.Context, client *Client, trackRemote IRemoteTrack, min
 	streamID := strings.ReplaceAll(strings.ReplaceAll(trackRemote.StreamID(), "{", ""), "}", "")
 	msid := strings.ReplaceAll(strings.ReplaceAll(trackRemote.Msid(), "{", ""), "}", "")
 
-	baseTrack := baseTrack{
+	baseTrack := &baseTrack{
 		id:           remoteTrackID,
 		isScreen:     &atomic.Bool{},
 		msid:         msid,
 		streamid:     streamID,
-		clientid:     client.ID(),
+		client:       client,
 		kind:         trackRemote.Kind(),
 		codec:        trackRemote.Codec(),
 		clientTracks: ctList,
@@ -155,7 +155,7 @@ func newTrack(ctx context.Context, client *Client, trackRemote IRemoteTrack, min
 }
 
 func (t *Track) ClientID() string {
-	return t.base.clientid
+	return t.base.client.id
 }
 
 func (t *Track) Context() context.Context {
@@ -362,7 +362,7 @@ type SimulcastTrack struct {
 	reordered                   bool
 }
 
-func newSimulcastTrack(ctx context.Context, reordered bool, client *Client, track IRemoteTrack, minWait, maxWait, pliInterval time.Duration, onPLI func(), stats stats.Getter, onStatsUpdated func(*stats.Stats)) ITrack {
+func newSimulcastTrack(client *Client, track IRemoteTrack, minWait, maxWait, pliInterval time.Duration, onPLI func(), stats stats.Getter, onStatsUpdated func(*stats.Stats)) ITrack {
 	remoteTrackID := strings.ReplaceAll(strings.ReplaceAll(track.ID(), "{", ""), "}", "")
 	streamID := strings.ReplaceAll(strings.ReplaceAll(track.StreamID(), "{", ""), "}", "")
 	msid := strings.ReplaceAll(strings.ReplaceAll(track.Msid(), "{", ""), "}", "")
@@ -374,7 +374,7 @@ func newSimulcastTrack(ctx context.Context, reordered bool, client *Client, trac
 			isScreen:     &atomic.Bool{},
 			msid:         msid,
 			streamid:     streamID,
-			clientid:     client.ID(),
+			client:       client,
 			kind:         track.Kind(),
 			codec:        track.Codec(),
 			clientTracks: newClientTrackList(),
@@ -394,7 +394,7 @@ func newSimulcastTrack(ctx context.Context, reordered bool, client *Client, trac
 		},
 	}
 
-	rt := t.AddRemoteTrack(ctx, track, minWait, maxWait, stats, onStatsUpdated, onPLI)
+	rt := t.AddRemoteTrack(track, minWait, maxWait, stats, onStatsUpdated, onPLI)
 	t.context, t.cancel = context.WithCancel(rt.Context())
 
 	go func() {
@@ -406,7 +406,7 @@ func newSimulcastTrack(ctx context.Context, reordered bool, client *Client, trac
 }
 
 func (t *SimulcastTrack) ClientID() string {
-	return t.base.clientid
+	return t.base.client.id
 }
 
 func (t *SimulcastTrack) Context() context.Context {
@@ -473,7 +473,7 @@ func (t *SimulcastTrack) Kind() webrtc.RTPCodecType {
 	return t.base.kind
 }
 
-func (t *SimulcastTrack) AddRemoteTrack(ctx context.Context, track IRemoteTrack, minWait, maxWait time.Duration, stats stats.Getter, onStatsUpdated func(*stats.Stats), onPLI func()) *remoteTrack {
+func (t *SimulcastTrack) AddRemoteTrack(track IRemoteTrack, minWait, maxWait time.Duration, stats stats.Getter, onStatsUpdated func(*stats.Stats), onPLI func()) *remoteTrack {
 	var remoteTrack *remoteTrack
 
 	quality := RIDToQuality(track.RID())
@@ -541,7 +541,7 @@ func (t *SimulcastTrack) AddRemoteTrack(ctx context.Context, track IRemoteTrack,
 
 	}
 
-	remoteTrack = newRemoteTrack(ctx, t.reordered, track, minWait, maxWait, t.pliInterval, onPLI, stats, onStatsUpdated, onRead, t.onNetworkConditionChanged)
+	remoteTrack = newRemoteTrack(t.Context(), t.reordered, track, minWait, maxWait, t.pliInterval, onPLI, stats, onStatsUpdated, onRead, t.onNetworkConditionChanged)
 
 	switch quality {
 	case QualityHigh:

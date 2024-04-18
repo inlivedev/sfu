@@ -18,11 +18,11 @@ import (
 )
 
 type remoteTrack struct {
-	context context.Context
-	cancel  context.CancelFunc
-	mu      sync.RWMutex
-	track   IRemoteTrack
-
+	context               context.Context
+	cancel                context.CancelFunc
+	mu                    sync.RWMutex
+	track                 IRemoteTrack
+	client                *Client
 	onRead                func(*rtp.Packet)
 	onPLI                 func()
 	bitrate               *atomic.Uint32

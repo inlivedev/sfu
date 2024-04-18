@@ -40,6 +40,7 @@ type clientTrack struct {
 	mimeType    string
 	localTrack  *webrtc.TrackLocalStaticRTP
 	remoteTrack *remoteTrack
+	baseTrack   *baseTrack
 	isScreen    bool
 	ssrc        webrtc.SSRC
 }
@@ -61,6 +62,7 @@ func newClientTrack(c *Client, t *Track, isScreen bool, localTrack *webrtc.Track
 		mimeType:    localTrack.Codec().MimeType,
 		localTrack:  localTrack,
 		remoteTrack: t.remoteTrack,
+		baseTrack:   t.base,
 		isScreen:    isScreen,
 		ssrc:        t.remoteTrack.track.SSRC(),
 	}
@@ -86,7 +88,7 @@ func (t *clientTrack) ReceiveBitrate() uint32 {
 		return 0
 	}
 
-	bitrate, err := t.client.stats.GetReceiverBitrate(t.remoteTrack.track.ID(), t.remoteTrack.track.RID())
+	bitrate, err := t.baseTrack.client.stats.GetReceiverBitrate(t.remoteTrack.track.ID(), t.remoteTrack.track.RID())
 	if err != nil {
 		return 0
 	}

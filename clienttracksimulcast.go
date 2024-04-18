@@ -21,6 +21,7 @@ type simulcastClientTrack struct {
 	mimeType                string
 	localTrack              *webrtc.TrackLocalStaticRTP
 	remoteTrack             *SimulcastTrack
+	baseTrack               *baseTrack
 	lastBlankSequenceNumber *atomic.Uint32
 	sequenceNumber          *atomic.Uint32
 	lastQuality             *atomic.Uint32
@@ -62,6 +63,7 @@ func newSimulcastClientTrack(c *Client, t *SimulcastTrack) *simulcastClientTrack
 		client:                  c,
 		localTrack:              track,
 		remoteTrack:             t,
+		baseTrack:               t.base,
 		sequenceNumber:          sequenceNumber,
 		lastQuality:             lastQuality,
 		paddingTS:               &atomic.Uint32{},
@@ -406,7 +408,7 @@ func (t *simulcastClientTrack) ReceiveBitrateAtQuality(quality QualityLevel) uin
 		return 0
 	}
 
-	bitrate, err := t.client.stats.GetReceiverBitrate(remoteTrack.track.ID(), remoteTrack.track.RID())
+	bitrate, err := t.baseTrack.client.stats.GetReceiverBitrate(remoteTrack.track.ID(), remoteTrack.track.RID())
 	if err != nil {
 		glog.Error("clienttrack: error on get receiver", err)
 		return 0

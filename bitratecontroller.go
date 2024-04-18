@@ -30,20 +30,11 @@ func (c *bitrateClaim) Quality() QualityLevel {
 	return c.quality
 }
 
-func (c *bitrateClaim) Bitrate() uint32 {
+func (c *bitrateClaim) SendBitrate() uint32 {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	var bitrate uint32
-
-	if c.track.IsSimulcast() {
-		bitrate = c.track.(*simulcastClientTrack).ReceiveBitrateAtQuality(c.quality)
-	} else {
-		bitrate = c.track.ReceiveBitrate()
-		bitrate += bitrate * 10 / 100
-	}
-
-	return bitrate
+	return c.track.SendBitrate()
 
 }
 
@@ -136,7 +127,7 @@ func (bc *bitrateController) TotalBitrates() uint32 {
 func (bc *bitrateController) totalBitrates() uint32 {
 	total := uint32(0)
 	for _, claim := range bc.Claims() {
-		total += claim.Bitrate()
+		total += claim.SendBitrate()
 	}
 
 	return total
@@ -316,7 +307,7 @@ func (bc *bitrateController) canDecreaseBitrate() bool {
 	return false
 }
 
-func (bc *bitrateController) needIncreaseBitrate(availableBw uint32) bool {
+func (bc *bitrateController) canIncreaseBitrate(availableBw uint32) bool {
 	claims := bc.Claims()
 
 	for _, claim := range claims {
@@ -340,14 +331,12 @@ func (bc *bitrateController) MonitorBandwidth(estimator cc.BandwidthEstimator) {
 
 		totalSendBitrates := bc.totalSentBitrates()
 
+		glog.Info("bitratecontroller: available bandwidth ", ThousandSeparator(int(bw)), " total bitrate ", ThousandSeparator(int(totalSendBitrates)))
+
 		availableBw := uint32(bw) - totalSendBitrates
 
 		if totalSendBitrates < uint32(bw) {
-			if bw < int(bc.client.sfu.bitrateConfigs.VideoMid-bc.client.sfu.bitrateConfigs.VideoLow) {
-				return
-			}
-
-			needAdjustment = bc.needIncreaseBitrate(availableBw)
+			needAdjustment = bc.canIncreaseBitrate(availableBw)
 		} else {
 			needAdjustment = bc.canDecreaseBitrate()
 		}
@@ -356,7 +345,7 @@ func (bc *bitrateController) MonitorBandwidth(estimator cc.BandwidthEstimator) {
 			return
 		}
 
-		// glog.Info("bitratecontroller: available bandwidth ", ThousandSeparator(int(bw)), " total bitrate ", ThousandSeparator(int(totalSendBitrates)))
+		glog.Info("bitratecontroller: available bandwidth ", ThousandSeparator(int(bw)), " total bitrate ", ThousandSeparator(int(totalSendBitrates)))
 
 		bc.fitBitratesToBandwidth(uint32(bw))
 
@@ -377,40 +366,54 @@ func (bc *bitrateController) fitBitratesToBandwidth(bw uint32) {
 			for _, claim := range claims {
 				if claim.IsAdjustable() &&
 					claim.Quality() == QualityLevel(i) {
+					oldBitrate := claim.SendBitrate()
+					if oldBitrate == 0 {
+						continue
+					}
 
-					// glog.Info("bitratecontroller: reduce bitrate for track ", claim.track.ID(), " from ", claim.Quality(), " to ", claim.Quality()-1)
+					newBitrate := claim.QualityLevelToBitrate(claim.Quality() - 1)
+					bitrateGap := oldBitrate - newBitrate
+					glog.Info("bitratecontroller: reduce bitrate for track ", claim.track.ID(), " from ", claim.Quality(), " to ", claim.Quality()-1)
 					bc.setQuality(claim.track.ID(), claim.Quality()-1)
 
 					claim.track.RequestPLI()
-					totalSentBitrates = bc.totalSentBitrates()
+					totalSentBitrates = totalSentBitrates - bitrateGap
+
+					glog.Info("bitratecontroller: total sent bitrates ", ThousandSeparator(int(totalSentBitrates)), " bandwidth ", ThousandSeparator(int(bw)))
 
 					// check if the reduced bitrate is fit to the available bandwidth
 					if totalSentBitrates <= bw {
-						// glog.Info("bitratecontroller: total sent bitrates ", ThousandSeparator(int(totalSentBitrates)), " available bandwidth ", ThousandSeparator(int(bw)))
+						glog.Info("bitratecontroller: reduce sent bitrates ", ThousandSeparator(int(totalSentBitrates)), " to bandwidth ", ThousandSeparator(int(bw)))
 						return
 					}
 				}
 			}
 		}
-	} else {
+	} else if totalSentBitrates < bw {
 		// increase bitrates
 		for i := QualityLow; i < QualityHigh; i++ {
 			for _, claim := range claims {
 				if claim.IsAdjustable() &&
 					claim.Quality() == QualityLevel(i) {
-					oldBitrate := claim.Bitrate()
+					oldBitrate := claim.SendBitrate()
+					if oldBitrate == 0 {
+						continue
+					}
+
 					newBitrate := claim.QualityLevelToBitrate(claim.Quality() + 1)
 					bitrateIncrease := newBitrate - oldBitrate
 
 					// check if the bitrate increase will more than the available bandwidth
 					if totalSentBitrates+bitrateIncrease >= bw {
+						glog.Info("bitratecontroller: increase sent bitrates ", ThousandSeparator(int(totalSentBitrates)), " to bandwidth ", ThousandSeparator(int(bw)))
 						return
 					}
 
-					// glog.Info("bitratecontroller: increase bitrate for track ", claim.track.ID(), " from ", claim.Quality(), " to ", claim.Quality()+1)
+					glog.Info("bitratecontroller: increase bitrate for track ", claim.track.ID(), " from ", claim.Quality(), " to ", claim.Quality()+1)
 					bc.setQuality(claim.track.ID(), claim.Quality()+1)
 					// update current total bitrates
-					totalSentBitrates = bc.totalSentBitrates()
+					totalSentBitrates = totalSentBitrates + bitrateIncrease
+					glog.Info("bitratecontroller: total sent bitrates ", ThousandSeparator(int(totalSentBitrates)), " bandwidth ", ThousandSeparator(int(bw)))
 					claim.track.RequestPLI()
 				}
 			}
@@ -461,7 +464,7 @@ func (bc *bitrateController) isEnoughBandwidthToIncrase(bandwidthLeft uint32, cl
 	}
 
 	nextBitrate := claim.QualityLevelToBitrate(nextQuality)
-	currentBitrate := claim.Bitrate()
+	currentBitrate := claim.SendBitrate()
 
 	bandwidthGap := nextBitrate - currentBitrate
 

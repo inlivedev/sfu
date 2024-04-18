@@ -498,7 +498,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 
 			if err != nil {
 				// if track not found, add it
-				track = newSimulcastTrack(client.context, client.options.ReorderPackets, client, remoteTrack, opts.JitterBufferMinWait, opts.JitterBufferMaxWait, s.pliInterval, onPLI, client.statsGetter, onStatsUpdated)
+				track = newSimulcastTrack(client, remoteTrack, opts.JitterBufferMinWait, opts.JitterBufferMaxWait, s.pliInterval, onPLI, client.statsGetter, onStatsUpdated)
 				if err := client.tracks.Add(track); err != nil {
 					glog.Error("client: error add track ", err)
 				}
@@ -524,7 +524,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 				}()
 
 			} else if simulcast, ok = track.(*SimulcastTrack); ok {
-				simulcast.AddRemoteTrack(simulcast.context, remoteTrack, opts.JitterBufferMinWait, opts.JitterBufferMaxWait, client.statsGetter, onStatsUpdated, onPLI)
+				simulcast.AddRemoteTrack(remoteTrack, opts.JitterBufferMinWait, opts.JitterBufferMaxWait, client.statsGetter, onStatsUpdated, onPLI)
 			}
 
 			if !track.IsProcessed() {

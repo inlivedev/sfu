@@ -188,6 +188,7 @@ func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 		if ok {
 			return
 		}
+		glog.Info("scalabletrack: packet ", p.SequenceNumber, " cannot be dropped")
 
 	}
 
