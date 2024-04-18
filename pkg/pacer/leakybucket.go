@@ -271,6 +271,7 @@ func (p *LeakyBucketPacer) Close() error {
 	p.qLock.Lock()
 	defer p.qLock.Unlock()
 	for ssrc, queue := range p.queues {
+		queue.mu.RLock()
 		for e := queue.Front(); e != nil; e = e.Next() {
 			i, ok := e.Value.(*item)
 			if !ok {
@@ -284,6 +285,7 @@ func (p *LeakyBucketPacer) Close() error {
 
 			i.packet.Release()
 		}
+		queue.mu.RUnlock()
 
 		queue.Init()
 		delete(p.queues, ssrc)

@@ -22,7 +22,6 @@ type remoteTrack struct {
 	cancel  context.CancelFunc
 	mu      sync.RWMutex
 	track   IRemoteTrack
-	isSVC   bool
 
 	onRead                func(*rtp.Packet)
 	onPLI                 func()
@@ -59,7 +58,7 @@ func newRemoteTrack(ctx context.Context, useBuffer bool, track IRemoteTrack, min
 		monitor:               networkmonitor.Default(),
 	}
 
-	if useBuffer {
+	if useBuffer && track.Kind() == webrtc.RTPCodecTypeVideo {
 		rt.packetBuffers = newPacketBuffers(localctx, minWait, maxWait, true)
 	}
 
@@ -71,7 +70,7 @@ func newRemoteTrack(ctx context.Context, useBuffer bool, track IRemoteTrack, min
 
 	go rt.readRTP()
 
-	if useBuffer && rt.IsAdaptive() {
+	if useBuffer && track.Kind() == webrtc.RTPCodecTypeVideo {
 		go rt.loop()
 	}
 
@@ -84,21 +83,6 @@ func (t *remoteTrack) Buffered() bool {
 
 func (t *remoteTrack) Context() context.Context {
 	return t.context
-}
-
-func (t *remoteTrack) IsAdaptive() bool {
-	return t.Track().RID() != "" || t.isSVC
-}
-
-func (t *remoteTrack) SetSVC(isAdaptive bool) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
-	t.isSVC = isAdaptive
-
-	if t.packetBuffers != nil && isAdaptive {
-		go t.loop()
-	}
 }
 
 func (t *remoteTrack) readRTP() {
@@ -144,13 +128,11 @@ func (t *remoteTrack) readRTP() {
 				go t.updateStats()
 			}
 
-			if t.Buffered() && t.Track().Kind() == webrtc.RTPCodecTypeVideo && t.IsAdaptive() {
-				// 	// adaptive video needs to be reordered
+			if t.Buffered() && t.Track().Kind() == webrtc.RTPCodecTypeVideo {
 				retainablePacket := rtppool.NewPacket(&p.Header, p.Payload)
 				_ = t.packetBuffers.Add(retainablePacket)
 
 			} else {
-				// audio and non adaptive video doesn't need to be reordered
 				t.onRead(p)
 			}
 
@@ -205,11 +187,6 @@ func (t *remoteTrack) loop() {
 		case <-ctx.Done():
 			return
 		default:
-			if !t.IsAdaptive() {
-				t.Flush()
-				return
-			}
-
 			t.packetBuffers.WaitAvailablePacket()
 			t.mu.RLock()
 			for orderedPkt := t.packetBuffers.Pop(); orderedPkt != nil; orderedPkt = t.packetBuffers.Pop() {
@@ -282,21 +259,20 @@ func (t *remoteTrack) Track() IRemoteTrack {
 }
 
 func (t *remoteTrack) sendPLI() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
 	// return if there is a pending PLI request
 	maxGapSeconds := 250 * time.Millisecond
-	t.mu.RLock()
 	requestGap := time.Since(t.lastPLIRequestTime)
-	t.mu.RUnlock()
 
 	if requestGap < maxGapSeconds {
 		return // ignore PLI request
 	}
 
-	t.mu.Lock()
 	t.lastPLIRequestTime = time.Now()
-	t.mu.Unlock()
 
-	t.onPLI()
+	go t.onPLI()
 }
 
 func (t *remoteTrack) enableIntervalPLI(interval time.Duration) {

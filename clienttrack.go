@@ -86,9 +86,8 @@ func (t *clientTrack) ReceiveBitrate() uint32 {
 		return 0
 	}
 
-	bitrate, err := t.client.stats.GetReceiverBitrate(t.ID(), t.remoteTrack.track.RID())
+	bitrate, err := t.client.stats.GetReceiverBitrate(t.remoteTrack.track.ID(), t.remoteTrack.track.RID())
 	if err != nil {
-		glog.Error("clienttrack: error on get receiver", err)
 		return 0
 	}
 

@@ -186,6 +186,7 @@ func DefaultClientOptions() ClientOptions {
 		MaxPlayoutDelay:      200,
 		JitterBufferMinWait:  20 * time.Millisecond,
 		JitterBufferMaxWait:  150 * time.Millisecond,
+		ReorderPackets:       false,
 	}
 }
 
@@ -507,6 +508,8 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 					defer cancel()
 					<-ctx.Done()
 					simulcastTrack := track.(*SimulcastTrack)
+					simulcastTrack.mu.Lock()
+					defer simulcastTrack.mu.Unlock()
 					if simulcastTrack.remoteTrackHigh != nil {
 						client.stats.removeReceiverStats(simulcastTrack.remoteTrackHigh.track.ID() + simulcastTrack.remoteTrackHigh.track.RID())
 					}

@@ -109,19 +109,15 @@ func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 
 	vp9Packet := &codecs.VP9Packet{}
 	if _, err := vp9Packet.Unmarshal(p.Payload); err != nil {
-		return
-	}
+		_ = t.packetmap.Drop(p.SequenceNumber, vp9Packet.PictureID)
 
-	// check if svc packet
-	if vp9Packet.SID > 0 || vp9Packet.TID > 0 {
-		if !t.remoteTrack.IsAdaptive() {
-			t.remoteTrack.SetSVC(true)
-			glog.Info("scalabletrack: remote track is adaptive")
-		}
+		return
 	}
 
 	quality := t.getQuality()
 	if quality == QualityNone {
+		_ = t.packetmap.Drop(p.SequenceNumber, vp9Packet.PictureID)
+
 		glog.Info("scalabletrack: packet ", p.SequenceNumber, " is dropped because of quality none")
 		return
 	}
@@ -182,6 +178,8 @@ func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 
 	if vp9Packet.E && t.tid == targetTID && t.sid == targetSID {
 		t.setLastQuality(quality)
+	} else {
+		t.RequestPLI()
 	}
 
 	if currentTID < vp9Packet.TID || currentSID < vp9Packet.SID {
@@ -190,6 +188,12 @@ func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 		if ok {
 			return
 		}
+
+	}
+
+	// mark packet as a last spatial layer packet
+	if vp9Packet.E && currentSID == vp9Packet.SID && targetSID <= currentSID {
+		p.Marker = true
 	}
 
 	ok, newseqno, _ := t.packetmap.Map(p.SequenceNumber, vp9Packet.PictureID)
@@ -198,11 +202,6 @@ func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 	}
 
 	p.SequenceNumber = newseqno
-
-	// mark packet as a last spatial layer packet
-	if vp9Packet.E && currentSID == vp9Packet.SID && targetSID <= currentSID {
-		p.Marker = true
-	}
 
 	t.send(p)
 }
@@ -254,7 +253,7 @@ func (t *scaleableClientTrack) IsScaleable() bool {
 }
 
 func (t *scaleableClientTrack) RequestPLI() {
-	t.remoteTrack.sendPLI()
+	go t.remoteTrack.sendPLI()
 }
 
 func (t *scaleableClientTrack) getQuality() QualityLevel {

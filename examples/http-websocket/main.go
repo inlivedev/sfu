@@ -207,6 +207,7 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 	// you can also get the client by using r.GetClient(clientID)
 	opts := sfu.DefaultClientOptions()
 	opts.EnableVoiceDetection = true
+	opts.ReorderPackets = false
 	client, err := r.AddClient(clientID, clientID, opts)
 	if err != nil {
 		log.Panic(err)
