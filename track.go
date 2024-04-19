@@ -3,7 +3,6 @@ package sfu
 import (
 	"context"
 	"errors"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -78,15 +77,11 @@ type Track struct {
 func newTrack(ctx context.Context, client *Client, trackRemote IRemoteTrack, minWait, maxWait, pliInterval time.Duration, onPLI func(), stats stats.Getter, onStatsUpdated func(*stats.Stats)) ITrack {
 	ctList := newClientTrackList()
 
-	remoteTrackID := strings.ReplaceAll(strings.ReplaceAll(trackRemote.ID(), "{", ""), "}", "")
-	streamID := strings.ReplaceAll(strings.ReplaceAll(trackRemote.StreamID(), "{", ""), "}", "")
-	msid := strings.ReplaceAll(strings.ReplaceAll(trackRemote.Msid(), "{", ""), "}", "")
-
 	baseTrack := &baseTrack{
-		id:           remoteTrackID,
+		id:           trackRemote.ID(),
 		isScreen:     &atomic.Bool{},
-		msid:         msid,
-		streamid:     streamID,
+		msid:         trackRemote.Msid(),
+		streamid:     trackRemote.StreamID(),
 		client:       client,
 		kind:         trackRemote.Kind(),
 		codec:        trackRemote.Codec(),
@@ -363,17 +358,13 @@ type SimulcastTrack struct {
 }
 
 func newSimulcastTrack(client *Client, track IRemoteTrack, minWait, maxWait, pliInterval time.Duration, onPLI func(), stats stats.Getter, onStatsUpdated func(*stats.Stats)) ITrack {
-	remoteTrackID := strings.ReplaceAll(strings.ReplaceAll(track.ID(), "{", ""), "}", "")
-	streamID := strings.ReplaceAll(strings.ReplaceAll(track.StreamID(), "{", ""), "}", "")
-	msid := strings.ReplaceAll(strings.ReplaceAll(track.Msid(), "{", ""), "}", "")
-
 	t := &SimulcastTrack{
 		mu: sync.RWMutex{},
 		base: &baseTrack{
-			id:           remoteTrackID,
+			id:           track.ID(),
 			isScreen:     &atomic.Bool{},
-			msid:         msid,
-			streamid:     streamID,
+			msid:         track.Msid(),
+			streamid:     track.StreamID(),
 			client:       client,
 			kind:         track.Kind(),
 			codec:        track.Codec(),

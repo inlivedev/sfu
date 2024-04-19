@@ -445,6 +445,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 
 		defer glog.Info("client: ", client.ID(), " new track ", remoteTrackID, " Kind:", remoteTrack.Kind(), " Codec: ", remoteTrack.Codec().MimeType, " RID: ", remoteTrack.RID(), " Direction: ", receiver.RTPTransceiver().Direction())
 
+		// make sure the remote track ID is not empty
 		if remoteTrackID == "" {
 			glog.Error("client: error remote track id is empty")
 			return
