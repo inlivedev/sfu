@@ -178,8 +178,6 @@ func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 
 	if vp9Packet.E && t.tid == targetTID && t.sid == targetSID {
 		t.setLastQuality(quality)
-	} else {
-		t.RequestPLI()
 	}
 
 	if currentTID < vp9Packet.TID || currentSID < vp9Packet.SID {
