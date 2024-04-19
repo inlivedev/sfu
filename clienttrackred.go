@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"github.com/golang/glog"
+	"github.com/inlivedev/sfu/pkg/rtppool"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v3"
 )
@@ -47,7 +48,14 @@ func (t *clientTrackRed) push(p *rtp.Packet, _ QualityLevel) {
 	}
 
 	if !t.isReceiveRed {
-		p = t.getPrimaryEncoding(p)
+		primaryPacket := rtppool.GetPacketAllocationFromPool()
+		primaryPacket.Payload = t.getPrimaryEncoding(p.Payload[:len(p.Payload)])
+		primaryPacket.Header = p.Header
+		if err := t.localTrack.WriteRTP(primaryPacket); err != nil {
+			glog.Error("clienttrack: error on write primary rtp", err)
+		}
+		rtppool.ResetPacketPoolAllocation(primaryPacket)
+		return
 	}
 
 	if err := t.localTrack.WriteRTP(p); err != nil {
@@ -55,17 +63,14 @@ func (t *clientTrackRed) push(p *rtp.Packet, _ QualityLevel) {
 	}
 }
 
-func (t *clientTrackRed) getPrimaryEncoding(p *rtp.Packet) *rtp.Packet {
-	payload, err := extractPrimaryEncodingForRED(p.Payload)
+func (t *clientTrackRed) getPrimaryEncoding(payload []byte) []byte {
+	primaryPayload, err := extractPrimaryEncodingForRED(payload)
 	if err != nil {
 		glog.Error("clienttrack: error on extract primary encoding for red", err)
-		return p
+		return payload
 	}
 
-	p.Payload = payload
-	// set to opus payload type
-	p.PayloadType = 111
-	return p
+	return primaryPayload
 }
 
 // // Credit to Livekit

@@ -197,7 +197,7 @@ func (bc *bitrateController) addClaims(clientTracks []iClientTrack) error {
 	for _, clientTrack := range leftTracks {
 		if clientTrack.Kind() == webrtc.RTPCodecTypeVideo {
 
-			glog.Info("bitratecontroller: track ", clientTrack.ID(), " quality ", trackQuality)
+			// glog.Info("bitratecontroller: track ", clientTrack.ID(), " quality ", trackQuality)
 			bc.mu.RLock()
 			if _, ok := bc.claims[clientTrack.ID()]; ok {
 				errors = append(errors, ErrAlreadyClaimed)
@@ -331,7 +331,7 @@ func (bc *bitrateController) MonitorBandwidth(estimator cc.BandwidthEstimator) {
 
 		totalSendBitrates := bc.totalSentBitrates()
 
-		glog.Info("bitratecontroller: available bandwidth ", ThousandSeparator(int(bw)), " total bitrate ", ThousandSeparator(int(totalSendBitrates)))
+		// glog.Info("bitratecontroller: available bandwidth ", ThousandSeparator(int(bw)), " total bitrate ", ThousandSeparator(int(totalSendBitrates)))
 
 		availableBw := uint32(bw) - totalSendBitrates
 
@@ -345,7 +345,7 @@ func (bc *bitrateController) MonitorBandwidth(estimator cc.BandwidthEstimator) {
 			return
 		}
 
-		glog.Info("bitratecontroller: available bandwidth ", ThousandSeparator(int(bw)), " total bitrate ", ThousandSeparator(int(totalSendBitrates)))
+		// glog.Info("bitratecontroller: available bandwidth ", ThousandSeparator(int(bw)), " total bitrate ", ThousandSeparator(int(totalSendBitrates)))
 
 		bc.fitBitratesToBandwidth(uint32(bw))
 
