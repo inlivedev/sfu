@@ -82,6 +82,8 @@ func newbitrateController(client *Client) *bitrateController {
 		claims: make(map[string]*bitrateClaim, 0),
 	}
 
+	go bc.loopMonitor()
+
 	return bc
 }
 
@@ -323,37 +325,58 @@ func (bc *bitrateController) canIncreaseBitrate(availableBw uint32) bool {
 
 func (bc *bitrateController) MonitorBandwidth(estimator cc.BandwidthEstimator) {
 	estimator.OnTargetBitrateChange(func(bw int) {
-		var needAdjustment bool
+		// overshoot the bandwidth to allow test the bandwidth
+		bw = int(float64(bw) * 1.3)
 
 		bc.mu.Lock()
 		bc.targetBitrate = uint32(bw)
 		bc.mu.Unlock()
-
-		totalSendBitrates := bc.totalSentBitrates()
-
-		// glog.Info("bitratecontroller: available bandwidth ", ThousandSeparator(int(bw)), " total bitrate ", ThousandSeparator(int(totalSendBitrates)))
-
-		availableBw := uint32(bw) - totalSendBitrates
-
-		if totalSendBitrates < uint32(bw) {
-			needAdjustment = bc.canIncreaseBitrate(availableBw)
-		} else {
-			needAdjustment = bc.canDecreaseBitrate()
-		}
-
-		if !needAdjustment {
-			return
-		}
-
-		// glog.Info("bitratecontroller: available bandwidth ", ThousandSeparator(int(bw)), " total bitrate ", ThousandSeparator(int(totalSendBitrates)))
-
-		bc.fitBitratesToBandwidth(uint32(bw))
-
-		bc.mu.Lock()
-		bc.lastBitrateAdjustmentTS = time.Now()
-		bc.mu.Unlock()
-
 	})
+}
+
+func (bc *bitrateController) loopMonitor() {
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
+
+	ctx, cancel := context.WithCancel(bc.client.Context())
+	defer cancel()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			var needAdjustment bool
+
+			bc.mu.RLock()
+			totalSendBitrates := bc.totalSentBitrates()
+			bw := bc.targetBitrate
+			bc.mu.RUnlock()
+
+			// glog.Info("bitratecontroller: available bandwidth ", ThousandSeparator(int(bw)), " total bitrate ", ThousandSeparator(int(totalSendBitrates)))
+
+			availableBw := uint32(bw) - totalSendBitrates
+
+			if totalSendBitrates < uint32(bw) {
+				needAdjustment = bc.canIncreaseBitrate(availableBw)
+			} else {
+				needAdjustment = bc.canDecreaseBitrate()
+			}
+
+			if !needAdjustment {
+				continue
+			}
+
+			// glog.Info("bitratecontroller: available bandwidth ", ThousandSeparator(int(bw)), " total bitrate ", ThousandSeparator(int(totalSendBitrates)))
+
+			bc.fitBitratesToBandwidth(uint32(bw))
+
+			bc.mu.Lock()
+			bc.lastBitrateAdjustmentTS = time.Now()
+			bc.mu.Unlock()
+		}
+	}
+
 }
 
 func (bc *bitrateController) fitBitratesToBandwidth(bw uint32) {
@@ -405,15 +428,15 @@ func (bc *bitrateController) fitBitratesToBandwidth(bw uint32) {
 
 					// check if the bitrate increase will more than the available bandwidth
 					if totalSentBitrates+bitrateIncrease >= bw {
-						glog.Info("bitratecontroller: increase sent bitrates ", ThousandSeparator(int(totalSentBitrates)), " to bandwidth ", ThousandSeparator(int(bw)))
+						// glog.Info("bitratecontroller: increase sent bitrates ", ThousandSeparator(int(totalSentBitrates)), " to bandwidth ", ThousandSeparator(int(bw)))
 						return
 					}
 
-					glog.Info("bitratecontroller: increase bitrate for track ", claim.track.ID(), " from ", claim.Quality(), " to ", claim.Quality()+1)
+					// glog.Info("bitratecontroller: increase bitrate for track ", claim.track.ID(), " from ", claim.Quality(), " to ", claim.Quality()+1)
 					bc.setQuality(claim.track.ID(), claim.Quality()+1)
 					// update current total bitrates
 					totalSentBitrates = totalSentBitrates + bitrateIncrease
-					glog.Info("bitratecontroller: total sent bitrates ", ThousandSeparator(int(totalSentBitrates)), " bandwidth ", ThousandSeparator(int(bw)))
+					// glog.Info("bitratecontroller: total sent bitrates ", ThousandSeparator(int(totalSentBitrates)), " bandwidth ", ThousandSeparator(int(bw)))
 					claim.track.RequestPLI()
 				}
 			}
