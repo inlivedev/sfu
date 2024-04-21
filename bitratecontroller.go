@@ -394,19 +394,20 @@ func (bc *bitrateController) fitBitratesToBandwidth(bw uint32) {
 						continue
 					}
 
-					newBitrate := claim.QualityLevelToBitrate(claim.Quality() - 1)
+					newQuality := QualityLevel(i) - 1
+					newBitrate := claim.QualityLevelToBitrate(newQuality)
 					bitrateGap := oldBitrate - newBitrate
-					glog.Info("bitratecontroller: reduce bitrate for track ", claim.track.ID(), " from ", claim.Quality(), " to ", claim.Quality()-1)
-					bc.setQuality(claim.track.ID(), claim.Quality()-1)
+					// glog.Info("bitratecontroller: reduce bitrate for track ", claim.track.ID(), " from ", claim.Quality(), " to ", newQuality)
+					bc.setQuality(claim.track.ID(), newQuality)
 
 					claim.track.RequestPLI()
 					totalSentBitrates = totalSentBitrates - bitrateGap
 
-					glog.Info("bitratecontroller: total sent bitrates ", ThousandSeparator(int(totalSentBitrates)), " bandwidth ", ThousandSeparator(int(bw)))
+					// glog.Info("bitratecontroller: total sent bitrates ", ThousandSeparator(int(totalSentBitrates)), " bandwidth ", ThousandSeparator(int(bw)))
 
 					// check if the reduced bitrate is fit to the available bandwidth
 					if totalSentBitrates <= bw {
-						glog.Info("bitratecontroller: reduce sent bitrates ", ThousandSeparator(int(totalSentBitrates)), " to bandwidth ", ThousandSeparator(int(bw)))
+						// glog.Info("bitratecontroller: reduce sent bitrates ", ThousandSeparator(int(totalSentBitrates)), " to bandwidth ", ThousandSeparator(int(bw)))
 						return
 					}
 				}
@@ -423,7 +424,8 @@ func (bc *bitrateController) fitBitratesToBandwidth(bw uint32) {
 						continue
 					}
 
-					newBitrate := claim.QualityLevelToBitrate(claim.Quality() + 1)
+					newQuality := QualityLevel(i) + 1
+					newBitrate := claim.QualityLevelToBitrate(newQuality)
 					bitrateIncrease := newBitrate - oldBitrate
 
 					// check if the bitrate increase will more than the available bandwidth
@@ -433,7 +435,7 @@ func (bc *bitrateController) fitBitratesToBandwidth(bw uint32) {
 					}
 
 					// glog.Info("bitratecontroller: increase bitrate for track ", claim.track.ID(), " from ", claim.Quality(), " to ", claim.Quality()+1)
-					bc.setQuality(claim.track.ID(), claim.Quality()+1)
+					bc.setQuality(claim.track.ID(), newQuality)
 					// update current total bitrates
 					totalSentBitrates = totalSentBitrates + bitrateIncrease
 					// glog.Info("bitratecontroller: total sent bitrates ", ThousandSeparator(int(totalSentBitrates)), " bandwidth ", ThousandSeparator(int(bw)))
