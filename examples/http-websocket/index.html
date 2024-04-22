@@ -132,6 +132,8 @@
 
 		let negotiationNeeded = false
 
+		const trackStreamIDs = {}
+
         peerConnection.ondatachannel = function(e) {
             console.log("ondatachannel: ",e.channel.label);
             if (e.channel.label == "internal") {
@@ -245,7 +247,9 @@
         };
 
         function updateVoiceDetected(vad){
-            const videoEl = document.getElementById("video-"+vad.data.stream_id)
+			const streamid = vad.data.streamID
+
+            const videoEl = document.getElementById("video-"+streamid)
             if (!videoEl){
                 return
             }
@@ -321,20 +325,19 @@
 					
                 e.streams.forEach((stream) => {
                     console.log("ontrack", stream, e.track);
-					const streamid = stream.id.replace('{','').replace('}','');
                     
-                    let container = document.getElementById("container-"+streamid);
+                    let container = document.getElementById("container-"+stream.id);
                     if (!container) {
                         container = document.createElement("div");
                         container.className = "container";
-                        container.id = "container-"+streamid;
+                        container.id = "container-"+stream.id;
                         document.querySelector('main').appendChild(container);
                     }
 
-                    let remoteVideo = document.getElementById("video-"+streamid);
+                    let remoteVideo = document.getElementById("video-"+stream.id);
                     if (!remoteVideo) {
                         remoteVideo = document.createElement("video");
-                        remoteVideo.id = "video-"+streamid;
+                        remoteVideo.id = "video-"+stream.id;
                         remoteVideo.autoplay = true;
                         container.appendChild(remoteVideo);
                         if (videoObserver!=null){

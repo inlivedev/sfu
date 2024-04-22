@@ -173,7 +173,7 @@ type Client struct {
 	ingressBandwidth               *atomic.Uint32
 	ingressQualityLimitationReason *atomic.Value
 	isDebug                        bool
-	vad                            *voiceactivedetector.Interceptor
+	vadInterceptor                 *voiceactivedetector.Interceptor
 }
 
 func DefaultClientOptions() ClientOptions {
@@ -192,8 +192,7 @@ func DefaultClientOptions() ClientOptions {
 
 func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Configuration, opts ClientOptions) *Client {
 	var client *Client
-
-	var vad *voiceactivedetector.Interceptor
+	var vadInterceptor *voiceactivedetector.Interceptor
 
 	localCtx, cancel := context.WithCancel(s.context)
 	m := &webrtc.MediaEngine{}
@@ -233,7 +232,16 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 
 		// enable voice detector
 		vadInterceptorFactory.OnNew(func(i *voiceactivedetector.Interceptor) {
-			vad = i
+			vadInterceptor = i
+			i.OnNewVAD(func(vad *voiceactivedetector.VoiceDetector) {
+				glog.Info("track: voice activity detector enabled")
+				vad.OnVoiceDetected(func(activity voiceactivedetector.VoiceActivity) {
+					// send through datachannel
+					if client != nil {
+						client.onVoiceDetected(activity)
+					}
+				})
+			})
 		})
 
 		i.Add(vadInterceptorFactory)
@@ -335,7 +343,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		ingressBandwidth:               &atomic.Uint32{},
 		ingressQualityLimitationReason: &atomic.Value{},
 		onTracksAvailableCallbacks:     make([]func([]ITrack), 0),
-		vad:                            vad,
+		vadInterceptor:                 vadInterceptor,
 	}
 
 	// make sure the exisiting data channels is created on new clients
@@ -906,6 +914,14 @@ func (c *Client) setClientTrack(t ITrack) iClientTrack {
 	if err != nil {
 		glog.Error("client: error on adding track ", err)
 		return nil
+	}
+
+	if t.Kind() == webrtc.RTPCodecTypeAudio {
+		if c.IsVADEnabled() {
+			glog.Info("track: voice activity detector enabled")
+			ssrc := senderTcv.Sender().GetParameters().Encodings[0].SSRC
+			c.vadInterceptor.MapAudioTrack(uint32(ssrc), localTrack)
+		}
 	}
 
 	go func() {

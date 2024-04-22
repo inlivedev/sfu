@@ -36,7 +36,7 @@ type VoiceDetector struct {
 	channel        chan VoicePacketData
 	mu             sync.RWMutex
 	VoicePackets   []VoicePacketData
-	callbacks      []func(activity VoiceActivity)
+	callback       func(activity VoiceActivity)
 }
 
 func newVAD(ctx context.Context, i *Interceptor, streamInfo *interceptor.StreamInfo) *VoiceDetector {
@@ -47,7 +47,6 @@ func newVAD(ctx context.Context, i *Interceptor, streamInfo *interceptor.StreamI
 		channel:      make(chan VoicePacketData),
 		mu:           sync.RWMutex{},
 		VoicePackets: make([]VoicePacketData, 0),
-		callbacks:    make([]func(VoiceActivity), 0),
 	}
 
 	v.run()
@@ -113,8 +112,7 @@ loop:
 }
 
 func (v *VoiceDetector) sendPacketsToCallback() {
-	noCallbacks := len(v.callbacks) == 0
-	if noCallbacks {
+	if v.callback == nil {
 		return
 	}
 
@@ -147,11 +145,11 @@ func (v *VoiceDetector) getPackets() []VoicePacketData {
 }
 
 func (v *VoiceDetector) onVoiceDetected(activity VoiceActivity) {
-	v.mu.Lock()
-	defer v.mu.Unlock()
+	v.mu.RLock()
+	defer v.mu.RUnlock()
 
-	for _, callback := range v.callbacks {
-		callback(activity)
+	if v.callback != nil {
+		v.callback(activity)
 	}
 }
 
@@ -160,9 +158,9 @@ func (v *VoiceDetector) OnVoiceDetected(callback func(VoiceActivity)) {
 		return
 	}
 
-	v.mu.RLock()
-	defer v.mu.RUnlock()
-	v.callbacks = append(v.callbacks, callback)
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.callback = callback
 }
 
 func (v *VoiceDetector) isDetected(vp VoicePacketData) bool {
@@ -249,7 +247,4 @@ func (v *VoiceDetector) updateStreamInfo(streamInfo *interceptor.StreamInfo) {
 	defer v.mu.RUnlock()
 
 	v.streamInfo = streamInfo
-	if streamInfo.ID != "" {
-		v.trackID = streamInfo.ID
-	}
 }

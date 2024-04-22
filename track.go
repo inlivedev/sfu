@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/golang/glog"
-	"github.com/inlivedev/sfu/pkg/interceptors/voiceactivedetector"
 	"github.com/inlivedev/sfu/pkg/networkmonitor"
 	"github.com/inlivedev/sfu/pkg/rtppool"
 	"github.com/pion/interceptor/pkg/stats"
@@ -254,16 +253,7 @@ func (t *Track) subscribe(c *Client) iClientTrack {
 
 	}
 
-	if t.Kind() == webrtc.RTPCodecTypeAudio {
-		if c.IsVADEnabled() {
-			glog.Info("track: voice activity detector enabled")
-			vad := c.vad.AddAudioTrack(ct.LocalTrack())
-			vad.OnVoiceDetected(func(activity voiceactivedetector.VoiceActivity) {
-				// send through datachannel
-				c.onVoiceDetected(activity)
-			})
-		}
-	} else if t.Kind() == webrtc.RTPCodecTypeVideo {
+	if t.Kind() == webrtc.RTPCodecTypeVideo {
 		t.remoteTrack.sendPLI()
 	}
 

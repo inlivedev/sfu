@@ -182,6 +182,9 @@ func (c *ClientStats) SetReceiver(id, rid string, stats stats.Stats) {
 // UpdateVoiceActivity updates voice activity duration
 // 0 timestamp means ended
 func (c *ClientStats) UpdateVoiceActivity(ts uint32) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	if !c.voiceActivity.active && ts != 0 {
 		c.voiceActivity.active = true
 		c.voiceActivity.start = ts
