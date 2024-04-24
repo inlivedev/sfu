@@ -19,10 +19,8 @@ import (
 
 type remoteTrack struct {
 	context               context.Context
-	cancel                context.CancelFunc
 	mu                    sync.RWMutex
 	track                 IRemoteTrack
-	client                *Client
 	onRead                func(*rtp.Packet)
 	onPLI                 func()
 	bitrate               *atomic.Uint32
@@ -41,9 +39,13 @@ type remoteTrack struct {
 func newRemoteTrack(ctx context.Context, useBuffer bool, track IRemoteTrack, minWait, maxWait, pliInterval time.Duration, onPLI func(), statsGetter stats.Getter, onStatsUpdated func(*stats.Stats), onRead func(*rtp.Packet), onNetworkConditionChanged func(networkmonitor.NetworkConditionType)) *remoteTrack {
 	localctx, cancel := context.WithCancel(ctx)
 
+	go func() {
+		defer cancel()
+		<-localctx.Done()
+	}()
+
 	rt := &remoteTrack{
 		context:               localctx,
-		cancel:                cancel,
 		mu:                    sync.RWMutex{},
 		track:                 track,
 		bitrate:               &atomic.Uint32{},
@@ -86,11 +88,12 @@ func (t *remoteTrack) Context() context.Context {
 }
 
 func (t *remoteTrack) readRTP() {
-	defer t.cancel()
+	readCtx, cancel := context.WithCancel(t.context)
+	defer cancel()
 
 	for {
 		select {
-		case <-t.context.Done():
+		case <-readCtx.Done():
 			return
 		default:
 			if err := t.track.SetReadDeadline(time.Now().Add(1 * time.Second)); err != nil {
