@@ -19,9 +19,10 @@ go get github.com/inlivedev/sfu
 - [x] Screen sharing
 - [x] Perfect negotiation
 - [x] Data channel - note: only room channel currenty available
-- [x] Simulcast - note: still need some tuning on bitrate management
-- [ ] Events
-- [ ] Room statistic
+- [x] Simulcast 
+- [x] Scalable Video Coding (SVC)
+- [x] Voice activity detection
+- [x] Room statistic
 
 ## Components:
 This SFU package has four components:

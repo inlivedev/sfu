@@ -138,11 +138,21 @@ func newTrack(ctx context.Context, client *Client, trackRemote IRemoteTrack, min
 
 	var cancel context.CancelFunc
 
-	t.context, cancel = context.WithCancel(t.remoteTrack.Context())
+	t.context, cancel = context.WithCancel(client.Context())
+
+	rtContext, rtCancel := context.WithCancel(t.remoteTrack.Context())
 
 	go func() {
 		defer cancel()
-		<-t.context.Done()
+
+		defer rtCancel()
+
+		select {
+		case <-t.context.Done():
+			return
+		case <-rtContext.Done():
+			return
+		}
 	}()
 
 	return t
@@ -348,6 +358,7 @@ type SimulcastTrack struct {
 }
 
 func newSimulcastTrack(client *Client, track IRemoteTrack, minWait, maxWait, pliInterval time.Duration, onPLI func(), stats stats.Getter, onStatsUpdated func(*stats.Stats)) ITrack {
+
 	t := &SimulcastTrack{
 		mu: sync.RWMutex{},
 		base: &baseTrack{
@@ -375,12 +386,23 @@ func newSimulcastTrack(client *Client, track IRemoteTrack, minWait, maxWait, pli
 		},
 	}
 
+	t.context, t.cancel = context.WithCancel(client.Context())
+
 	rt := t.AddRemoteTrack(track, minWait, maxWait, stats, onStatsUpdated, onPLI)
-	t.context, t.cancel = context.WithCancel(rt.Context())
+
+	rtContext, rtCancel := context.WithCancel(rt.Context())
 
 	go func() {
 		defer t.cancel()
-		<-t.context.Done()
+
+		defer rtCancel()
+
+		select {
+		case <-t.context.Done():
+			return
+		case <-rtContext.Done():
+			return
+		}
 	}()
 
 	return t
