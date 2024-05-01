@@ -48,6 +48,7 @@ func (q *queue) Remove(e *list.Element) *item {
 
 // LeakyBucketPacer implements a leaky bucket pacing algorithm
 type LeakyBucketPacer struct {
+	allowDuplicate    bool
 	f                 float64
 	targetBitrate     int
 	targetBitrateLock sync.Mutex
@@ -63,8 +64,9 @@ type LeakyBucketPacer struct {
 }
 
 // NewLeakyBucketPacer initializes a new LeakyBucketPacer
-func NewLeakyBucketPacer(initialBitrate int) *LeakyBucketPacer {
+func NewLeakyBucketPacer(initialBitrate int, allowDuplicate bool) *LeakyBucketPacer {
 	p := &LeakyBucketPacer{
+		allowDuplicate: allowDuplicate,
 		f:              1.5,
 		targetBitrate:  initialBitrate,
 		pacingInterval: 5 * time.Millisecond,
@@ -165,6 +167,12 @@ Loop:
 		currentCache, _ := e.Value.(*item)
 
 		if currentCache.packet.Header().SequenceNumber == pkt.Header().SequenceNumber {
+			if p.allowDuplicate {
+				queue.InsertAfter(newItem, e)
+
+				break Loop
+			}
+
 			glog.Warning("packet cache: packet sequence ", pkt.Header().SequenceNumber, " already exists in the cache, will not adding the packet")
 
 			return 0, ErrDuplicate

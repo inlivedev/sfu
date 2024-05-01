@@ -259,7 +259,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		// TODO: we need to use packet loss based bandwidth adjuster when the bandwidth is below 100_000
 		return gcc.NewSendSideBWE(
 			gcc.SendSideBWEInitialBitrate(int(s.bitrateConfigs.InitialBandwidth)),
-			gcc.SendSideBWEPacer(pacer.NewLeakyBucketPacer(int(s.bitrateConfigs.InitialBandwidth))),
+			gcc.SendSideBWEPacer(pacer.NewLeakyBucketPacer(int(s.bitrateConfigs.InitialBandwidth), true)),
 			// gcc.SendSideBWEPacer(gcc.NewNoOpPacer()),
 		)
 	})
