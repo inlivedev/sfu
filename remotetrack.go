@@ -19,6 +19,7 @@ import (
 
 type remoteTrack struct {
 	context               context.Context
+	cancel                context.CancelFunc
 	mu                    sync.RWMutex
 	track                 IRemoteTrack
 	onRead                func(*rtp.Packet)
@@ -39,13 +40,9 @@ type remoteTrack struct {
 func newRemoteTrack(ctx context.Context, useBuffer bool, track IRemoteTrack, minWait, maxWait, pliInterval time.Duration, onPLI func(), statsGetter stats.Getter, onStatsUpdated func(*stats.Stats), onRead func(*rtp.Packet), onNetworkConditionChanged func(networkmonitor.NetworkConditionType)) *remoteTrack {
 	localctx, cancel := context.WithCancel(ctx)
 
-	go func() {
-		defer cancel()
-		<-localctx.Done()
-	}()
-
 	rt := &remoteTrack{
 		context:               localctx,
+		cancel:                cancel,
 		mu:                    sync.RWMutex{},
 		track:                 track,
 		bitrate:               &atomic.Uint32{},
@@ -89,7 +86,10 @@ func (t *remoteTrack) Context() context.Context {
 
 func (t *remoteTrack) readRTP() {
 	readCtx, cancel := context.WithCancel(t.context)
+
 	defer cancel()
+
+	defer t.cancel()
 
 	for {
 		select {
