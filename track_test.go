@@ -5,7 +5,6 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/golang/glog"
 	"github.com/pion/interceptor"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v3"
@@ -71,8 +70,8 @@ func createPeerAudio(ctx context.Context, room *Room, iceServers []webrtc.ICESer
 	client, _ = room.AddClient(id, id, opts)
 
 	client.OnAllowedRemoteRenegotiation(func() {
-		glog.Info("allowed remote renegotiation")
-		negotiate(pc, client)
+		TestLogger.Info("allowed remote renegotiation")
+		negotiate(pc, client, TestLogger)
 	})
 
 	client.OnIceCandidate(func(ctx context.Context, candidate *webrtc.ICECandidate) {
@@ -85,14 +84,14 @@ func createPeerAudio(ctx context.Context, room *Room, iceServers []webrtc.ICESer
 
 	client.OnRenegotiation(func(ctx context.Context, offer webrtc.SessionDescription) (answer webrtc.SessionDescription, e error) {
 		if client.state.Load() == ClientStateEnded {
-			glog.Info("test: renegotiation canceled because client has ended")
+			TestLogger.Info("test: renegotiation canceled because client has ended")
 			return webrtc.SessionDescription{}, errors.New("client ended")
 		}
 
 		currentTranscv := len(pc.GetTransceivers())
 
-		glog.Info("test: got renegotiation ", peerName)
-		defer glog.Info("test: renegotiation done ", peerName)
+		TestLogger.Infof("test: got renegotiation ", peerName)
+		defer TestLogger.Infof("test: renegotiation done ", peerName)
 		if err := pc.SetRemoteDescription(offer); err != nil {
 			return webrtc.SessionDescription{}, err
 		}
@@ -104,12 +103,12 @@ func createPeerAudio(ctx context.Context, room *Room, iceServers []webrtc.ICESer
 		}
 
 		newTcv := len(pc.GetTransceivers()) - currentTranscv
-		glog.Info("test: new transceiver ", newTcv, " total tscv ", len(pc.GetTransceivers()))
+		TestLogger.Infof("test: new transceiver ", newTcv, " total tscv ", len(pc.GetTransceivers()))
 
 		return *pc.LocalDescription(), nil
 	})
 
-	negotiate(pc, client)
+	negotiate(pc, client, TestLogger)
 
 	pc.OnICECandidate(func(candidate *webrtc.ICECandidate) {
 		if candidate == nil {
@@ -141,7 +140,7 @@ func sendAudioPackets(ctx context.Context, track *webrtc.TrackLocalStaticRTP) {
 				},
 				Payload: []byte{0x00},
 			}); err != nil {
-				glog.Error("error writing rtp packet: ", err.Error())
+				TestLogger.Errorf("error writing rtp packet: ", err.Error())
 				return
 			}
 		}

@@ -11,6 +11,22 @@ import (
 
 func TestRoomCreateAndClose(t *testing.T) {
 	t.Parallel()
+
+	report := CheckRoutines(t)
+	defer report()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// create room manager first before create new room
+	roomManager := NewManager(ctx, "test", Options{
+		EnableMux:                true,
+		EnableBandwidthEstimator: true,
+		IceServers:               []webrtc.ICEServer{},
+	})
+
+	defer roomManager.Close()
+
 	roomID := roomManager.CreateRoomID()
 	roomName := "test-room"
 
@@ -67,6 +83,21 @@ Loop:
 }
 
 func TestRoomJoinLeftEvent(t *testing.T) {
+	report := CheckRoutines(t)
+	defer report()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// create room manager first before create new room
+	roomManager := NewManager(ctx, "test", Options{
+		EnableMux:                true,
+		EnableBandwidthEstimator: true,
+		IceServers:               []webrtc.ICEServer{},
+	})
+
+	defer roomManager.Close()
+
 	roomID := roomManager.CreateRoomID()
 	roomName := "test-room"
 
@@ -93,11 +124,9 @@ func TestRoomJoinLeftEvent(t *testing.T) {
 		clients[client.ID()] = client
 	})
 
-	ctx := testRoom.sfu.context
-
-	_, client1, _, _ := CreatePeerPair(ctx, testRoom, DefaultTestIceServers(), "peer1", false, false)
-	_, client2, _, _ := CreatePeerPair(ctx, testRoom, DefaultTestIceServers(), "peer1", false, false)
-	_, client3, _, _ := CreatePeerPair(ctx, testRoom, DefaultTestIceServers(), "peer1", false, false)
+	_, client1, _, _ := CreatePeerPair(ctx, TestLogger, testRoom, DefaultTestIceServers(), "peer1", false, false)
+	_, client2, _, _ := CreatePeerPair(ctx, TestLogger, testRoom, DefaultTestIceServers(), "peer1", false, false)
+	_, client3, _, _ := CreatePeerPair(ctx, TestLogger, testRoom, DefaultTestIceServers(), "peer1", false, false)
 
 	timeout, cancelTimeout := context.WithTimeout(ctx, 60*time.Second)
 	defer cancelTimeout()
@@ -145,6 +174,21 @@ func TestRoomJoinLeftEvent(t *testing.T) {
 func TestRoomStats(t *testing.T) {
 	t.Parallel()
 
+	report := CheckRoutines(t)
+	defer report()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// create room manager first before create new room
+	roomManager := NewManager(ctx, "test", Options{
+		EnableMux:                true,
+		EnableBandwidthEstimator: true,
+		IceServers:               []webrtc.ICEServer{},
+	})
+
+	defer roomManager.Close()
+
 	var (
 		totalClientIngressBytes uint64
 		totalClientEgressBytes  uint64
@@ -162,13 +206,11 @@ func TestRoomStats(t *testing.T) {
 	require.NoError(t, err, "error creating room: %v", err)
 	peerCount := 0
 
-	ctx := testRoom.sfu.context
-
 	testRoom.OnClientJoined(func(client *Client) {
 		clients[client.ID()] = client
 	})
 
-	pc1, client1, statsGetter1, done1 := CreatePeerPair(ctx, testRoom, DefaultTestIceServers(), "peer1", false, false)
+	pc1, client1, statsGetter1, done1 := CreatePeerPair(ctx, TestLogger, testRoom, DefaultTestIceServers(), "peer1", false, false)
 
 	client1.OnTracksAdded(func(addedTracks []ITrack) {
 		setTracks := make(map[string]TrackType, 0)
@@ -178,7 +220,7 @@ func TestRoomStats(t *testing.T) {
 		client1.SetTracksSourceType(setTracks)
 	})
 
-	pc2, client2, statsGetter2, done2 := CreatePeerPair(ctx, testRoom, DefaultTestIceServers(), "peer2", false, false)
+	pc2, client2, statsGetter2, done2 := CreatePeerPair(ctx, TestLogger, testRoom, DefaultTestIceServers(), "peer2", false, false)
 
 	client2.OnTracksAdded(func(addedTracks []ITrack) {
 		setTracks := make(map[string]TrackType, 0)
@@ -270,6 +312,21 @@ Loop:
 func TestRoomAddClientTimeout(t *testing.T) {
 	t.Parallel()
 
+	report := CheckRoutines(t)
+	defer report()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// create room manager first before create new room
+	roomManager := NewManager(ctx, "test", Options{
+		EnableMux:                true,
+		EnableBandwidthEstimator: true,
+		IceServers:               []webrtc.ICEServer{},
+	})
+
+	defer roomManager.Close()
+
 	roomID := roomManager.CreateRoomID()
 	roomName := "test-room"
 
@@ -281,8 +338,6 @@ func TestRoomAddClientTimeout(t *testing.T) {
 
 	clientOpts := DefaultClientOptions()
 	clientOpts.IdleTimeout = 5 * time.Second
-
-	ctx := testRoom.sfu.context
 
 	// add a new client to room
 	// you can also get the client by using r.GetClient(clientID)

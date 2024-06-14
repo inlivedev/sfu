@@ -12,7 +12,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/golang/glog"
 	"github.com/inlivedev/sfu/pkg/interceptors/playoutdelay"
 	"github.com/inlivedev/sfu/pkg/interceptors/voiceactivedetector"
 	"github.com/inlivedev/sfu/pkg/networkmonitor"
@@ -22,6 +21,7 @@ import (
 	"github.com/pion/interceptor/pkg/gcc"
 	"github.com/pion/interceptor/pkg/nack"
 	"github.com/pion/interceptor/pkg/stats"
+	"github.com/pion/logging"
 	"github.com/pion/rtcp"
 	"github.com/pion/webrtc/v3"
 )
@@ -80,6 +80,7 @@ type ClientOptions struct {
 	JitterBufferMaxWait time.Duration
 	// On unstable network, the packets can be arrived unordered which may affected the nack and packet loss counts, set this to true to allow the SFU to handle reordered packet
 	ReorderPackets bool
+	Log            logging.LeveledLogger
 }
 
 type internalDataMessage struct {
@@ -174,6 +175,7 @@ type Client struct {
 	ingressQualityLimitationReason *atomic.Value
 	isDebug                        bool
 	vadInterceptor                 *voiceactivedetector.Interceptor
+	log                            logging.LeveledLogger
 }
 
 func DefaultClientOptions() ClientOptions {
@@ -227,14 +229,14 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 	i.Add(statsInterceptorFactory)
 
 	if opts.EnableVoiceDetection {
-		glog.Info("client: voice detection is enabled")
-		vadInterceptorFactory := voiceactivedetector.NewInterceptor(localCtx)
+		opts.Log.Infof("client: voice detection is enabled")
+		vadInterceptorFactory := voiceactivedetector.NewInterceptor(localCtx, opts.Log)
 
 		// enable voice detector
 		vadInterceptorFactory.OnNew(func(i *voiceactivedetector.Interceptor) {
 			vadInterceptor = i
 			i.OnNewVAD(func(vad *voiceactivedetector.VoiceDetector) {
-				glog.Info("track: voice activity detector enabled")
+				opts.Log.Infof("track: voice activity detector enabled")
 				vad.OnVoiceDetected(func(activity voiceactivedetector.VoiceActivity) {
 					// send through datachannel
 					if client != nil {
@@ -259,7 +261,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		// TODO: we need to use packet loss based bandwidth adjuster when the bandwidth is below 100_000
 		return gcc.NewSendSideBWE(
 			gcc.SendSideBWEInitialBitrate(int(s.bitrateConfigs.InitialBandwidth)),
-			gcc.SendSideBWEPacer(pacer.NewLeakyBucketPacer(int(s.bitrateConfigs.InitialBandwidth), true)),
+			gcc.SendSideBWEPacer(pacer.NewLeakyBucketPacer(opts.Log, int(s.bitrateConfigs.InitialBandwidth), true)),
 			// gcc.SendSideBWEPacer(gcc.NewNoOpPacer()),
 		)
 	})
@@ -279,7 +281,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 
 	if opts.EnablePlayoutDelay {
 		playoutdelay.RegisterPlayoutDelayHeaderExtension(m)
-		playoutDelayInterceptor := playoutdelay.NewInterceptor(opts.MinPlayoutDelay, opts.MaxPlayoutDelay)
+		playoutDelayInterceptor := playoutdelay.NewInterceptor(opts.Log, opts.MinPlayoutDelay, opts.MaxPlayoutDelay)
 
 		i.Add(playoutDelayInterceptor)
 	}
@@ -295,7 +297,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		settingEngine.SetICEUDPMux(s.mux.mux)
 	} else {
 		if err := settingEngine.SetEphemeralUDPPortRange(s.portStart, s.portEnd); err != nil {
-			glog.Error("client: error set ephemeral udp port range ", err)
+			opts.Log.Errorf("client: error set ephemeral udp port range ", err)
 		}
 	}
 
@@ -328,13 +330,13 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		negotiationNeeded:              &atomic.Bool{},
 		peerConnection:                 newPeerConnection(peerConnection),
 		state:                          &stateNew,
-		tracks:                         newTrackList(),
+		tracks:                         newTrackList(opts.Log),
 		options:                        opts,
 		pendingReceivedTracks:          make([]SubscribeTrackRequest, 0),
-		pendingPublishedTracks:         newTrackList(),
+		pendingPublishedTracks:         newTrackList(opts.Log),
 		pendingRemoteRenegotiation:     &atomic.Bool{},
-		publishedTracks:                newTrackList(),
-		queue:                          NewQueue(localCtx),
+		publishedTracks:                newTrackList(opts.Log),
+		queue:                          NewQueue(localCtx, opts.Log),
 		sfu:                            s,
 		statsGetter:                    statsGetter,
 		quality:                        &quality,
@@ -344,6 +346,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		ingressQualityLimitationReason: &atomic.Value{},
 		onTracksAvailableCallbacks:     make([]func([]ITrack), 0),
 		vadInterceptor:                 vadInterceptor,
+		log:                            opts.Log,
 	}
 
 	// make sure the exisiting data channels is created on new clients
@@ -352,14 +355,14 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 	var internalDataChannel *webrtc.DataChannel
 
 	if internalDataChannel, err = client.createInternalDataChannel("internal", client.onInternalMessage); err != nil {
-		glog.Error("client: error create internal data channel ", err)
+		client.log.Errorf("client: error create internal data channel ", err)
 	}
 
 	client.internalDataChannel = internalDataChannel
 
 	peerConnection.OnConnectionStateChange(func(connectionState webrtc.PeerConnectionState) {
 
-		glog.Info("client: connection state changed ", connectionState.String())
+		client.log.Infof("client: connection state changed ", connectionState.String())
 
 		client.onConnectionStateChanged(connectionState)
 
@@ -380,7 +383,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 							if err == ErrTrackIsNotExists {
 								availableTracks = append(availableTracks, track)
 							} else {
-								glog.Error("client: track already exists")
+								c.log.Errorf("client: track already exists")
 							}
 						}
 					}
@@ -392,7 +395,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 				}
 
 				if len(availableTracks) > 0 {
-					glog.Info("client: ", client.ID(), " available tracks ", len(availableTracks))
+					client.log.Infof("client: ", client.ID(), " available tracks ", len(availableTracks))
 					client.onTracksAvailable(availableTracks)
 				}
 			}
@@ -451,11 +454,11 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 
 		remoteTrackID := strings.ReplaceAll(strings.ReplaceAll(remoteTrack.ID(), "{", ""), "}", "")
 
-		defer glog.Info("client: ", client.ID(), " new track ", remoteTrackID, " Kind:", remoteTrack.Kind(), " Codec: ", remoteTrack.Codec().MimeType, " RID: ", remoteTrack.RID(), " Direction: ", receiver.RTPTransceiver().Direction())
+		defer client.log.Infof("client: ", client.ID(), " new track ", remoteTrackID, " Kind:", remoteTrack.Kind(), " Codec: ", remoteTrack.Codec().MimeType, " RID: ", remoteTrack.RID(), " Direction: ", receiver.RTPTransceiver().Direction())
 
 		// make sure the remote track ID is not empty
 		if remoteTrackID == "" {
-			glog.Error("client: error remote track id is empty")
+			client.log.Errorf("client: error remote track id is empty")
 			return
 		}
 
@@ -467,7 +470,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 			if err := client.peerConnection.PC().WriteRTCP([]rtcp.Packet{
 				&rtcp.PictureLossIndication{MediaSSRC: uint32(remoteTrack.SSRC())},
 			}); err != nil {
-				glog.Error("client: error write pli ", err)
+				client.log.Errorf("client: error write pli ", err)
 			}
 		}
 
@@ -491,7 +494,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 			}()
 
 			if err := client.tracks.Add(track); err != nil {
-				glog.Error("client: error add track ", err)
+				client.log.Errorf("client: error add track ", err)
 			}
 
 			client.onTrack(track)
@@ -509,7 +512,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 				// if track not found, add it
 				track = newSimulcastTrack(client, remoteTrack, opts.JitterBufferMinWait, opts.JitterBufferMaxWait, s.pliInterval, onPLI, client.statsGetter, onStatsUpdated)
 				if err := client.tracks.Add(track); err != nil {
-					glog.Error("client: error add track ", err)
+					client.log.Errorf("client: error add track ", err)
 				}
 
 				go func() {
@@ -627,8 +630,8 @@ func (c *Client) IsAllowNegotiation() bool {
 
 // SDP negotiation from remote client
 func (c *Client) Negotiate(offer webrtc.SessionDescription) (*webrtc.SessionDescription, error) {
-	glog.Info("client: negotiation started ", c.ID)
-	defer glog.Info("client: negotiation done ", c.ID)
+	c.log.Infof("client: negotiation started ", c.ID)
+	defer c.log.Infof("client: negotiation done ", c.ID)
 
 	answerChan := make(chan webrtc.SessionDescription)
 	errorChan := make(chan error)
@@ -674,7 +677,7 @@ func (c *Client) negotiateQueuOp(offer webrtc.SessionDescription) (*webrtc.Sessi
 	if !c.receiveRED {
 		match, err := regexp.MatchString(`a=rtpmap:63`, offer.SDP)
 		if err != nil {
-			glog.Error("client: error on check RED support in SDP ", err)
+			c.log.Errorf("client: error on check RED support in SDP ", err)
 		} else {
 			c.receiveRED = match
 		}
@@ -683,7 +686,7 @@ func (c *Client) negotiateQueuOp(offer webrtc.SessionDescription) (*webrtc.Sessi
 	// Set the remote SessionDescription
 	err := c.peerConnection.PC().SetRemoteDescription(offer)
 	if err != nil {
-		glog.Error("client: error set remote description ", err)
+		c.log.Errorf("client: error set remote description ", err)
 
 		return nil, err
 	}
@@ -691,14 +694,14 @@ func (c *Client) negotiateQueuOp(offer webrtc.SessionDescription) (*webrtc.Sessi
 	// Create answer
 	answer, err := c.peerConnection.PC().CreateAnswer(nil)
 	if err != nil {
-		glog.Error("client: error create answer ", err)
+		c.log.Errorf("client: error create answer ", err)
 		return nil, err
 	}
 
 	// Sets the LocalDescription, and starts our UDP listeners
 	err = c.peerConnection.PC().SetLocalDescription(answer)
 	if err != nil {
-		glog.Error("client: error set local description ", err)
+		c.log.Errorf("client: error set local description ", err)
 		return nil, err
 	}
 
@@ -709,7 +712,7 @@ func (c *Client) negotiateQueuOp(offer webrtc.SessionDescription) (*webrtc.Sessi
 	for _, iceCandidate := range c.pendingRemoteCandidates {
 		err = c.peerConnection.PC().AddICECandidate(iceCandidate)
 		if err != nil {
-			glog.Error("client: error add ice candidate ", err)
+			c.log.Errorf("client: error add ice candidate ", err)
 			return nil, err
 		}
 	}
@@ -771,7 +774,7 @@ func (c *Client) OnRenegotiation(callback func(context.Context, webrtc.SessionDe
 func (c *Client) renegotiateQueuOp() {
 	c.mu.Lock()
 	if c.onRenegotiation == nil {
-		glog.Error("client: onRenegotiation is not set, can't do renegotiation")
+		c.log.Errorf("client: onRenegotiation is not set, can't do renegotiation")
 		c.mu.Unlock()
 
 		return
@@ -780,7 +783,7 @@ func (c *Client) renegotiateQueuOp() {
 	c.mu.Unlock()
 
 	if c.isInRemoteNegotiation.Load() {
-		glog.Info("sfu: renegotiation is delayed because the remote client is doing negotiation ", c.ID)
+		c.log.Infof("sfu: renegotiation is delayed because the remote client is doing negotiation ", c.ID)
 
 		return
 	}
@@ -789,7 +792,7 @@ func (c *Client) renegotiateQueuOp() {
 
 	// no need to run another negotiation if it's already in progress, it will rerun because we mark the negotiationneeded to true
 	if c.isInRenegotiation.Load() {
-		glog.Info("sfu: renegotiation is delayed because the client is doing negotiation ", c.ID)
+		c.log.Infof("sfu: renegotiation is delayed because the client is doing negotiation ", c.ID)
 		return
 	}
 
@@ -824,14 +827,14 @@ func (c *Client) renegotiateQueuOp() {
 
 					offer, err := c.peerConnection.PC().CreateOffer(nil)
 					if err != nil {
-						glog.Error("sfu: error create offer on renegotiation ", err)
+						c.log.Errorf("sfu: error create offer on renegotiation ", err)
 						return
 					}
 
 					// Sets the LocalDescription, and starts our UDP listeners
 					err = c.peerConnection.PC().SetLocalDescription(offer)
 					if err != nil {
-						glog.Error("sfu: error set local description on renegotiation ", err)
+						c.log.Errorf("sfu: error set local description on renegotiation ", err)
 						_ = c.stop()
 
 						return
@@ -841,14 +844,14 @@ func (c *Client) renegotiateQueuOp() {
 					answer, err := c.onRenegotiation(c.context, *c.peerConnection.PC().LocalDescription())
 					if err != nil {
 						//TODO: when this happen, we need to close the client and ask the remote client to reconnect
-						glog.Error("sfu: error on renegotiation ", err)
+						c.log.Errorf("sfu: error on renegotiation ", err)
 						_ = c.stop()
 
 						return
 					}
 
 					if answer.Type != webrtc.SDPTypeAnswer {
-						glog.Error("sfu: error on renegotiation, the answer is not an answer type")
+						c.log.Errorf("sfu: error on renegotiation, the answer is not an answer type")
 						_ = c.stop()
 
 						return
@@ -912,13 +915,13 @@ func (c *Client) setClientTrack(t ITrack) iClientTrack {
 
 	senderTcv, err := c.peerConnection.PC().AddTransceiverFromTrack(localTrack, webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionSendonly})
 	if err != nil {
-		glog.Error("client: error on adding track ", err)
+		c.log.Errorf("client: error on adding track ", err)
 		return nil
 	}
 
 	if t.Kind() == webrtc.RTPCodecTypeAudio {
 		if c.IsVADEnabled() {
-			glog.Info("track: voice activity detector enabled")
+			c.log.Infof("track: voice activity detector enabled")
 			ssrc := senderTcv.Sender().GetParameters().Encodings[0].SSRC
 			c.vadInterceptor.MapAudioTrack(uint32(ssrc), localTrack)
 		}
@@ -950,7 +953,7 @@ func (c *Client) setClientTrack(t ITrack) iClientTrack {
 
 		err = senderTcv.Stop()
 		if err != nil {
-			glog.Error("client: error stop sender ", err)
+			c.log.Errorf("client: error stop sender ", err)
 		}
 	}()
 
@@ -1025,7 +1028,7 @@ func (c *Client) processPendingTracks() {
 	if len(c.pendingReceivedTracks) > 0 {
 		err := c.SubscribeTracks(c.pendingReceivedTracks)
 		if err != nil {
-			glog.Error("client: error subscribe tracks ", err)
+			c.log.Errorf("client: error subscribe tracks ", err)
 		}
 
 		c.pendingReceivedTracks = make([]SubscribeTrackRequest, 0)
@@ -1089,7 +1092,7 @@ func (c *Client) AddICECandidate(candidate webrtc.ICECandidateInit) error {
 		c.pendingRemoteCandidates = append(c.pendingRemoteCandidates, candidate)
 	} else {
 		if err := c.peerConnection.PC().AddICECandidate(candidate); err != nil {
-			glog.Error("client: error add ice candidate ", err)
+			c.log.Errorf("client: error add ice candidate ", err)
 			return err
 		}
 	}
@@ -1106,7 +1109,7 @@ func (c *Client) OnIceCandidate(callback func(context.Context, *webrtc.ICECandid
 
 func (c *Client) onIceCandidateCallback(candidate *webrtc.ICECandidate) {
 	if c.onIceCandidate == nil {
-		glog.Info("client: on ice candidate callback is not set")
+		c.log.Infof("client: on ice candidate callback is not set")
 		return
 	}
 
@@ -1210,7 +1213,7 @@ func (c *Client) startIdleTimeout(timeout time.Duration) {
 
 		err := c.idleTimeoutContext.Err()
 		if err != nil && err == context.DeadlineExceeded {
-			glog.Info("client: idle timeout reached ", c.ID)
+			c.log.Infof("client: idle timeout reached ", c.ID)
 			c.afterClosed()
 		}
 	}()
@@ -1278,7 +1281,7 @@ func (c *Client) SetTracksSourceType(trackTypes map[string]TrackType) {
 
 	if len(availableTracks) > 0 {
 		// broadcast to other clients available tracks from this client
-		glog.Info("client: ", c.ID(), " set source tracks ", len(availableTracks))
+		c.log.Infof("client: ", c.ID(), " set source tracks ", len(availableTracks))
 		c.sfu.onTracksAvailable(c.ID(), availableTracks)
 	}
 }
@@ -1315,7 +1318,7 @@ func (c *Client) SubscribeTracks(req []SubscribeTrackRequest) error {
 					clientTracks = append(clientTracks, clientTrack)
 				}
 
-				glog.Info("client: subscribe track ", r.TrackID, " from ", r.ClientID, " to ", c.ID())
+				c.log.Infof("client: subscribe track ", r.TrackID, " from ", r.ClientID, " to ", c.ID())
 
 				trackFound = true
 
@@ -1341,7 +1344,7 @@ func (c *Client) SubscribeTracks(req []SubscribeTrackRequest) error {
 	if len(clientTracks) > 0 {
 		// claim bitrates
 		if err := c.bitrateController.addClaims(clientTracks); err != nil {
-			glog.Error("sfu: failed to add claims ", err)
+			c.log.Errorf("sfu: failed to add claims ", err)
 		}
 
 		c.renegotiate()
@@ -1365,7 +1368,7 @@ func (c *Client) SetQuality(quality QualityLevel) {
 		return
 	}
 
-	glog.Infof("client: %s switch quality to %s", c.ID, quality)
+	c.log.Infof("client: %s switch quality to %s", c.ID, quality)
 	c.quality.Store(uint32(quality))
 	for _, claim := range c.bitrateController.Claims() {
 		if claim.track.IsSimulcast() {
@@ -1405,7 +1408,7 @@ func (c *Client) createDataChannel(label string, initOpts *webrtc.DataChannelIni
 		return err
 	}
 
-	glog.Info("client: data channel created ", label, " ", c.ID())
+	c.log.Infof("client: data channel created ", label, " ", c.ID())
 	c.sfu.setupMessageForwarder(c.ID(), newDc)
 	c.dataChannels.Add(newDc)
 
@@ -1432,7 +1435,7 @@ func (c *Client) onInternalMessage(msg webrtc.DataChannelMessage) {
 	var internalMessage internalDataMessage
 
 	if err := json.Unmarshal(msg.Data, &internalMessage); err != nil {
-		glog.Error("client: error unmarshal internal message ", err)
+		c.log.Errorf("client: error unmarshal internal message ", err)
 		return
 	}
 
@@ -1440,7 +1443,7 @@ func (c *Client) onInternalMessage(msg webrtc.DataChannelMessage) {
 	case messageTypeStats:
 		internalStats := internalDataStats{}
 		if err := json.Unmarshal(msg.Data, &internalStats); err != nil {
-			glog.Error("client: error unmarshal messageTypeStats ", err)
+			c.log.Errorf("client: error unmarshal messageTypeStats ", err)
 			return
 		}
 
@@ -1448,7 +1451,7 @@ func (c *Client) onInternalMessage(msg webrtc.DataChannelMessage) {
 	case messageTypeVideoSize:
 		internalData := internalDataVideoSize{}
 		if err := json.Unmarshal(msg.Data, &internalData); err != nil {
-			glog.Error("client: error unmarshal messageTypeStats ", err)
+			c.log.Errorf("client: error unmarshal messageTypeStats ", err)
 			return
 		}
 
@@ -1657,12 +1660,12 @@ func (c *Client) enableSendVADToInternalDataChannel() {
 
 		data, err := json.Marshal(dataMessage)
 		if err != nil {
-			glog.Error("client: error marshal vad data ", err)
+			c.log.Errorf("client: error marshal vad data ", err)
 			return
 		}
 
 		if err := c.internalDataChannel.SendText(string(data)); err != nil {
-			glog.Error("client: error send vad data ", err)
+			c.log.Errorf("client: error send vad data ", err)
 			return
 		}
 	})

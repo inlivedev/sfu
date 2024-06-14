@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golang/glog"
 	"github.com/pion/webrtc/v3"
 	"github.com/stretchr/testify/require"
 )
@@ -63,6 +62,21 @@ func (t *testManagerExtension) OnRoomClosed(manager *Manager, room *Room) {
 }
 
 func TestManagerExtension(t *testing.T) {
+	report := CheckRoutines(t)
+	defer report()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// create room manager first before create new room
+	roomManager := NewManager(ctx, "test", Options{
+		EnableMux:                true,
+		EnableBandwidthEstimator: true,
+		IceServers:               []webrtc.ICEServer{},
+	})
+
+	defer roomManager.Close()
+
 	managerExt := NewTestManagerExtension()
 	roomManager.AddExtension(managerExt)
 	roomID := roomManager.CreateRoomID()
@@ -89,6 +103,21 @@ func TestManagerExtension(t *testing.T) {
 }
 
 func TestExtension(t *testing.T) {
+	report := CheckRoutines(t)
+	defer report()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// create room manager first before create new room
+	roomManager := NewManager(ctx, "test", Options{
+		EnableMux:                true,
+		EnableBandwidthEstimator: true,
+		IceServers:               []webrtc.ICEServer{},
+	})
+
+	defer roomManager.Close()
+
 	// create new room
 	roomOpts := DefaultRoomOptions()
 	roomOpts.Codecs = []string{webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
@@ -102,8 +131,6 @@ func TestExtension(t *testing.T) {
 	leftChan := make(chan bool)
 	joinChan := make(chan bool)
 	peerCount := 0
-
-	ctx := testRoom.sfu.context
 
 	tracks, _ := GetStaticTracks(ctx, "test", true)
 	mediaEngine := GetMediaEngine()
@@ -163,10 +190,10 @@ func TestExtension(t *testing.T) {
 		case <-timeout.Done():
 			t.Fatal("timeout waiting for client left event")
 		case <-leftChan:
-			glog.Info("client left")
+			t.Logf("client left")
 			peerCount--
 		case <-joinChan:
-			glog.Info("client joined")
+			t.Logf("client joined")
 			peerCount++
 			// stop client in go routine so we can receive left event
 			go func() {
@@ -175,7 +202,7 @@ func TestExtension(t *testing.T) {
 
 		}
 
-		glog.Info("peer count", peerCount)
+		t.Log("peer count", peerCount)
 		if peerCount == 0 {
 			break
 		}

@@ -4,7 +4,6 @@ import (
 	"context"
 	"sync"
 
-	"github.com/golang/glog"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v3"
 )
@@ -131,7 +130,7 @@ func (t *clientTrack) push(p *rtp.Packet, _ QualityLevel) {
 	}
 
 	if err := t.localTrack.WriteRTP(p); err != nil {
-		glog.Error("clienttrack: error on write rtp", err)
+		t.client.log.Errorf("clienttrack: error on write rtp", err)
 	}
 }
 

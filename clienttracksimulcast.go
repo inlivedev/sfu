@@ -5,7 +5,6 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/golang/glog"
 	"github.com/inlivedev/sfu/pkg/packetmap"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v3"
@@ -121,14 +120,14 @@ func (t *simulcastClientTrack) send(p *rtp.Packet, quality QualityLevel) {
 
 	t.rewritePacket(p, quality)
 
-	// glog.Info("track: ", t.id, " send packet with quality ", quality, " and sequence number ", p.SequenceNumber)
+	// t.client.log.Infof("track: ", t.id, " send packet with quality ", quality, " and sequence number ", p.SequenceNumber)
 
 	t.writeRTP(p)
 }
 
 func (t *simulcastClientTrack) writeRTP(p *rtp.Packet) {
 	if err := t.localTrack.WriteRTP(p); err != nil {
-		glog.Error("track: error on write rtp", err)
+		t.client.log.Errorf("track: error on write rtp", err)
 	}
 }
 
@@ -206,13 +205,13 @@ func (t *simulcastClientTrack) push(p *rtp.Packet, quality QualityLevel) {
 		})
 	} else if isKeyframe && canSwitch && quality == targetQuality && t.lastQuality.Load() != uint32(targetQuality) {
 		// change quality to target quality if it's a keyframe
-		glog.Info("track: ", t.id, " keyframe ", isKeyframe, " change quality from ", t.lastQuality.Load(), " to ", targetQuality)
+		t.client.log.Infof("track: ", t.id, " keyframe ", isKeyframe, " change quality from ", t.lastQuality.Load(), " to ", targetQuality)
 		currentQuality = targetQuality
 		t.lastQuality.Store(uint32(currentQuality))
 
 	} else if quality == targetQuality && !isKeyframe && t.lastQuality.Load() != uint32(targetQuality) {
 		// request PLI to allow us switch quality to target quality
-		glog.Info("track: ", t.id, " keyframe ", isKeyframe, " send keyframe and sequence number ", p.SequenceNumber)
+		t.client.log.Infof("track: ", t.id, " keyframe ", isKeyframe, " send keyframe and sequence number ", p.SequenceNumber)
 		t.remoteTrack.sendPLI()
 	}
 
@@ -382,7 +381,7 @@ func (t *simulcastClientTrack) ReceiveBitrate() uint32 {
 func (t *simulcastClientTrack) SendBitrate() uint32 {
 	bitrate, err := t.client.stats.GetSenderBitrate(t.ID())
 	if err != nil {
-		glog.Error("clienttrack: error on get sender", err)
+		t.client.log.Errorf("clienttrack: error on get sender", err)
 		return 0
 	}
 
@@ -410,7 +409,7 @@ func (t *simulcastClientTrack) ReceiveBitrateAtQuality(quality QualityLevel) uin
 
 	bitrate, err := t.baseTrack.client.stats.GetReceiverBitrate(remoteTrack.track.ID(), remoteTrack.track.RID())
 	if err != nil {
-		glog.Error("clienttrack: error on get receiver", err)
+		t.client.log.Errorf("clienttrack: error on get receiver", err)
 		return 0
 	}
 

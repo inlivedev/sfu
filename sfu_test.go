@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golang/glog"
 	"github.com/pion/webrtc/v3"
 	"github.com/stretchr/testify/require"
 )
@@ -14,8 +13,20 @@ import (
 func TestLeaveRoom(t *testing.T) {
 	t.Parallel()
 
+	report := CheckRoutines(t)
+	defer report()
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	// create room manager first before create new room
+	roomManager := NewManager(ctx, "test", Options{
+		EnableMux:                true,
+		EnableBandwidthEstimator: true,
+		IceServers:               []webrtc.ICEServer{},
+	})
+
+	defer roomManager.Close()
 
 	roomID := roomManager.CreateRoomID()
 	roomName := "test-leave-room-room"
@@ -34,7 +45,7 @@ func TestLeaveRoom(t *testing.T) {
 
 	for i := 0; i < peerCount; i++ {
 		go func() {
-			pc, client, _, _ := CreatePeerPair(ctx, testRoom, DefaultTestIceServers(), fmt.Sprintf("peer-%d", i), true, false)
+			pc, client, _, _ := CreatePeerPair(ctx, TestLogger, testRoom, DefaultTestIceServers(), fmt.Sprintf("peer-%d", i), true, false)
 
 			clients = append(clients, client)
 
@@ -63,18 +74,18 @@ Loop:
 
 		case <-trackChan:
 			trackReceived++
-			glog.Info("Tracks received: ", trackReceived, " from expected: ", expectedTracks)
+			t.Log("Tracks received: ", trackReceived, " from expected: ", expectedTracks)
 			if trackReceived == expectedTracks {
 				// put in go routine so the channel won't blocking
 				go func() {
 					// when all tracks received, make two peers leave the room
-					glog.Info("all tracks received, make two peers leave the room")
+					t.Logf("all tracks received, make two peers leave the room")
 					for i := 0; i < 2; i++ {
 						err = testRoom.StopClient(clients[i].ID())
 						require.NoError(t, err, "error stopping client: %v", err)
 					}
 					checkReceiverChan <- true
-					glog.Info("two clients left the room")
+					t.Logf("two clients left the room")
 				}()
 			}
 
@@ -108,8 +119,20 @@ Loop:
 func TestRenegotiation(t *testing.T) {
 	t.Parallel()
 
+	report := CheckRoutines(t)
+	defer report()
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	// create room manager first before create new room
+	roomManager := NewManager(ctx, "test", Options{
+		EnableMux:                true,
+		EnableBandwidthEstimator: true,
+		IceServers:               []webrtc.ICEServer{},
+	})
+
+	defer roomManager.Close()
 
 	roomID := roomManager.CreateRoomID()
 	roomName := "test-room"
@@ -132,7 +155,7 @@ func TestRenegotiation(t *testing.T) {
 	pairs := make([]Pair, 0)
 
 	for i := 0; i < peerCount; i++ {
-		pc, client, _, _ := CreatePeerPair(ctx, testRoom, DefaultTestIceServers(), fmt.Sprintf("peer-%d", i), true, false)
+		pc, client, _, _ := CreatePeerPair(ctx, TestLogger, testRoom, DefaultTestIceServers(), fmt.Sprintf("peer-%d", i), true, false)
 
 		pairs = append(pairs, Pair{pc, client})
 
@@ -164,7 +187,7 @@ Loop:
 
 		case <-trackChan:
 			trackReceived++
-			glog.Info("Tracks received: ", trackReceived, " from expected: ", expectedTracks, "or after added: ", expectedTracksAfterAdded)
+			t.Log("Tracks received: ", trackReceived, " from expected: ", expectedTracks, "or after added: ", expectedTracksAfterAdded)
 			if trackReceived == expectedTracks {
 				go func() {
 					// add more tracks to each clients
@@ -172,7 +195,7 @@ Loop:
 						newTrack, _ := GetStaticVideoTrack(timeout, GenerateSecureToken(), GenerateSecureToken(), true, "")
 						_, err := pair.pc.AddTransceiverFromTrack(newTrack)
 						require.NoError(t, err, "error adding track: %v", err)
-						negotiate(pair.pc, pair.client)
+						negotiate(pair.pc, pair.client, TestLogger)
 					}
 				}()
 			}

@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/golang/glog"
 	"github.com/inlivedev/sfu/pkg/rtppool"
+	"github.com/pion/logging"
 )
 
 var (
@@ -41,11 +41,12 @@ type packetBuffers struct {
 	packetAvailableWait  *sync.Cond
 	enableDynamicLatency bool
 	ended                bool
+	log                  logging.LeveledLogger
 }
 
 const waitTimeSize = 2500
 
-func newPacketBuffers(ctx context.Context, minLatency, maxLatency time.Duration, dynamicLatency bool) *packetBuffers {
+func newPacketBuffers(ctx context.Context, minLatency, maxLatency time.Duration, dynamicLatency bool, log logging.LeveledLogger) *packetBuffers {
 	ctx, cancel := context.WithCancel(ctx)
 	p := &packetBuffers{
 		context:              ctx,
@@ -59,6 +60,7 @@ func newPacketBuffers(ctx context.Context, minLatency, maxLatency time.Duration,
 		lastSequenceWaitTime: 0,
 		packetAvailableWait:  sync.NewCond(&sync.Mutex{}),
 		enableDynamicLatency: dynamicLatency,
+		log:                  log,
 	}
 
 	go func() {
@@ -100,7 +102,7 @@ func (p *packetBuffers) Add(pkt *rtppool.RetainablePacket) error {
 
 	if p.init &&
 		(p.lastSequenceNumber == pkt.Header().SequenceNumber || IsRTPPacketLate(pkt.Header().SequenceNumber, p.lastSequenceNumber)) {
-		glog.Warning("packet cache: packet sequence ", pkt.Header().SequenceNumber, " is too late, last sent was ", p.lastSequenceNumber, ", will not adding the packet")
+		p.log.Warnf("packet cache: packet sequence ", pkt.Header().SequenceNumber, " is too late, last sent was ", p.lastSequenceNumber, ", will not adding the packet")
 
 		// add to to front of the list to make sure pop take it first
 		p.buffers.PushFront(pkt)
@@ -124,7 +126,7 @@ Loop:
 		}
 
 		if currentPkt.Header().SequenceNumber == pkt.Header().SequenceNumber {
-			// glog.Warning("packet cache: packet sequence ", pkt.SequenceNumber, " already exists in the cache, will not adding the packet")
+			// p.log.Warnf("packet cache: packet sequence ", pkt.SequenceNumber, " already exists in the cache, will not adding the packet")
 			currentPkt.Release()
 			return ErrPacketDuplicate
 		}
@@ -167,12 +169,12 @@ func (p *packetBuffers) pop(el *list.Element) *rtppool.RetainablePacket {
 
 	// make sure packet is not late
 	if IsRTPPacketLate(pkt.Header().SequenceNumber, p.lastSequenceNumber) {
-		glog.Warning("packet cache: packet sequence ", pkt.Header().SequenceNumber, " is too late, last sent was ", p.lastSequenceNumber)
+		p.log.Warnf("packet cache: packet sequence ", pkt.Header().SequenceNumber, " is too late, last sent was ", p.lastSequenceNumber)
 	}
 
 	if p.init && pkt.Header().SequenceNumber > p.lastSequenceNumber && pkt.Header().SequenceNumber-p.lastSequenceNumber > 1 {
 		// make sure packet has no gap
-		glog.Warning("packet cache: packet sequence ", pkt.Header().SequenceNumber, " has a gap with last sent ", p.lastSequenceNumber)
+		p.log.Warnf("packet cache: packet sequence ", pkt.Header().SequenceNumber, " has a gap with last sent ", p.lastSequenceNumber)
 	}
 
 	p.mu.Lock()
@@ -269,10 +271,10 @@ func (p *packetBuffers) fetch(e *list.Element) *rtppool.RetainablePacket {
 
 	// but check with the latency if there is a packet pass the max latency
 
-	// glog.Info("packet latency: ", packetLatency, " gap: ", gap, " currentSeq: ", currentSeq, " nextSeq: ", nextSeq)
+	// p.log.Infof("packet latency: ", packetLatency, " gap: ", gap, " currentSeq: ", currentSeq, " nextSeq: ", nextSeq)
 	if latency > maxLatency {
 		// we have waited too long, we should send the packets
-		glog.Warning("packet cache: packet sequence ", currentPacket.Header().SequenceNumber, " latency ", latency, ", reached max latency ", maxLatency, ", will sending the packets")
+		p.log.Warnf("packet cache: packet sequence ", currentPacket.Header().SequenceNumber, " latency ", latency, ", reached max latency ", maxLatency, ", will sending the packets")
 		return p.pop(e)
 	}
 
@@ -465,13 +467,13 @@ func (p *packetBuffers) checkWaitTimeAdjuster() {
 
 		if percentile > p.minLatency && percentile < p.maxLatency {
 			// increase the min latency
-			glog.Info("packet cache: set min latency ", percentile, ", increasing min latency from ", p.minLatency)
+			p.log.Infof("packet cache: set min latency ", percentile, ", increasing min latency from ", p.minLatency)
 			p.latencyMu.Lock()
 			p.minLatency = percentile
 			p.latencyMu.Unlock()
 		} else if percentile < p.minLatency && percentile > 0 {
 			// decrease the min latency
-			glog.Info("packet cache: set min latency ", percentile, ", decreasing min latency from ", p.minLatency)
+			p.log.Infof("packet cache: set min latency ", percentile, ", decreasing min latency from ", p.minLatency)
 			p.latencyMu.Lock()
 			p.minLatency = percentile
 			p.latencyMu.Unlock()

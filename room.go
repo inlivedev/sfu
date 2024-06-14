@@ -5,7 +5,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/golang/glog"
 	"github.com/pion/webrtc/v3"
 )
 
@@ -248,7 +247,7 @@ func (r *Room) AddClient(id, name string, opts ClientOptions) (*Client, error) {
 
 		select {
 		case <-timeout.Done():
-			glog.Warning("room: client is not connected after added, stopping client...")
+			r.sfu.log.Warnf("room: client is not connected after added, stopping client...")
 			_ = client.stop()
 			timeoutReached = true
 

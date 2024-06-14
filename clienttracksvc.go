@@ -1,7 +1,6 @@
 package sfu
 
 import (
-	"github.com/golang/glog"
 	"github.com/inlivedev/sfu/pkg/packetmap"
 	"github.com/pion/rtp"
 	"github.com/pion/rtp/codecs"
@@ -118,7 +117,7 @@ func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 	if quality == QualityNone {
 		_ = t.packetmap.Drop(p.SequenceNumber, vp9Packet.PictureID)
 
-		glog.Info("scalabletrack: packet ", p.SequenceNumber, " is dropped because of quality none")
+		t.client.log.Infof("scalabletrack: packet ", p.SequenceNumber, " is dropped because of quality none")
 		return
 	}
 
@@ -181,12 +180,12 @@ func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 	}
 
 	if currentTID < vp9Packet.TID || currentSID < vp9Packet.SID {
-		// glog.Info("scalabletrack: packet ", p.SequenceNumber, " is dropped because of currentTID ", currentTID, "  < vp9Packet.TID", vp9Packet.TID)
+		// t.client.log.Infof("scalabletrack: packet ", p.SequenceNumber, " is dropped because of currentTID ", currentTID, "  < vp9Packet.TID", vp9Packet.TID)
 		ok := t.packetmap.Drop(p.SequenceNumber, vp9Packet.PictureID)
 		if ok {
 			return
 		}
-		glog.Info("scalabletrack: packet ", p.SequenceNumber, " cannot be dropped")
+		t.client.log.Infof("scalabletrack: packet ", p.SequenceNumber, " cannot be dropped")
 
 	}
 
@@ -209,7 +208,7 @@ func (t *scaleableClientTrack) send(p *rtp.Packet) {
 	t.lastTimestamp = p.Timestamp
 
 	if err := t.localTrack.WriteRTP(p); err != nil {
-		glog.Error("scaleabletrack: error on write rtp", err)
+		t.client.log.Errorf("scaleabletrack: error on write rtp", err)
 	}
 
 }
@@ -259,7 +258,7 @@ func (t *scaleableClientTrack) getQuality() QualityLevel {
 	claim := t.client.bitrateController.GetClaim(t.ID())
 
 	if claim == nil {
-		glog.Warning("scalabletrack: claim is nil")
+		t.client.log.Warnf("scalabletrack: claim is nil")
 		return QualityNone
 	}
 

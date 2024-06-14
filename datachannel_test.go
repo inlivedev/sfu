@@ -5,13 +5,27 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golang/glog"
 	"github.com/pion/webrtc/v3"
 	"github.com/stretchr/testify/require"
 )
 
 func TestRoomDataChannel(t *testing.T) {
 	t.Parallel()
+
+	report := CheckRoutines(t)
+	defer report()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// create room manager first before create new room
+	roomManager := NewManager(ctx, "test", Options{
+		EnableMux:                true,
+		EnableBandwidthEstimator: true,
+		IceServers:               []webrtc.ICEServer{},
+	})
+
+	defer roomManager.Close()
 
 	roomID := roomManager.CreateRoomID()
 	roomName := "test-room"
@@ -21,7 +35,6 @@ func TestRoomDataChannel(t *testing.T) {
 	roomOpts.Codecs = []string{webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
 	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal, roomOpts)
 	require.NoError(t, err, "error creating room: %v", err)
-	ctx := testRoom.sfu.context
 
 	err = testRoom.CreateDataChannel("chat", DefaultDataChannelOptions())
 	require.NoError(t, err)
@@ -49,8 +62,8 @@ func TestRoomDataChannel(t *testing.T) {
 		}
 	}
 
-	_, client1, _, connChan1 := CreateDataPair(ctx, testRoom, roomManager.options.IceServers, "peer1", onDataChannel)
-	_, client2, _, connChan2 := CreateDataPair(ctx, testRoom, roomManager.options.IceServers, "peer2", onDataChannel)
+	_, client1, _, connChan1 := CreateDataPair(ctx, TestLogger, testRoom, roomManager.options.IceServers, "peer1", onDataChannel)
+	_, client2, _, connChan2 := CreateDataPair(ctx, TestLogger, testRoom, roomManager.options.IceServers, "peer2", onDataChannel)
 
 	defer func() {
 		_ = testRoom.StopClient(client1.id)
@@ -108,7 +121,7 @@ Loop:
 			break Loop
 		case chat := <-chatChan:
 			messages += chat
-			glog.Info("chat: ", messages)
+			t.Log("chat: ", messages)
 			if len(messages) == len(expectedMessages) {
 				break Loop
 			}
@@ -121,6 +134,21 @@ Loop:
 func TestRoomDataChannelWithClientID(t *testing.T) {
 	t.Parallel()
 
+	report := CheckRoutines(t)
+	defer report()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// create room manager first before create new room
+	roomManager := NewManager(ctx, "test", Options{
+		EnableMux:                true,
+		EnableBandwidthEstimator: true,
+		IceServers:               []webrtc.ICEServer{},
+	})
+
+	defer roomManager.Close()
+
 	roomID := roomManager.CreateRoomID()
 	roomName := "test-room"
 
@@ -129,7 +157,6 @@ func TestRoomDataChannelWithClientID(t *testing.T) {
 	roomOpts.Codecs = []string{webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
 	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal, roomOpts)
 	require.NoError(t, err, "error creating room: %v", err)
-	ctx := testRoom.sfu.context
 
 	chatChan := make(chan string)
 
@@ -179,9 +206,9 @@ func TestRoomDataChannelWithClientID(t *testing.T) {
 		}
 	}
 
-	_, client1, _, connChan1 := CreateDataPair(ctx, testRoom, roomManager.options.IceServers, "peer1", onDataChannel)
-	_, client2, _, connChan2 := CreateDataPair(ctx, testRoom, roomManager.options.IceServers, "peer2", onDataChannel2)
-	_, client3, _, connChan3 := CreateDataPair(ctx, testRoom, roomManager.options.IceServers, "peer2", onDataChannel)
+	_, client1, _, connChan1 := CreateDataPair(ctx, TestLogger, testRoom, roomManager.options.IceServers, "peer1", onDataChannel)
+	_, client2, _, connChan2 := CreateDataPair(ctx, TestLogger, testRoom, roomManager.options.IceServers, "peer2", onDataChannel2)
+	_, client3, _, connChan3 := CreateDataPair(ctx, TestLogger, testRoom, roomManager.options.IceServers, "peer2", onDataChannel)
 
 	defer func() {
 		_ = testRoom.StopClient(client1.id)
@@ -263,7 +290,7 @@ Loop:
 			break Loop
 		case chat := <-chatChan:
 			messages += chat
-			glog.Info("chat: ", messages)
+			t.Log("chat: ", messages)
 			if len(messages) == len(expectedMessages) {
 				break Loop
 			}

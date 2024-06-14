@@ -5,7 +5,7 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/golang/glog"
+	"github.com/pion/logging"
 	"github.com/pion/webrtc/v3"
 )
 
@@ -29,6 +29,7 @@ type Manager struct {
 	mutex      sync.RWMutex
 	options    Options
 	extension  []IManagerExtension
+	log        logging.LeveledLogger
 }
 
 func NewManager(ctx context.Context, name string, options Options) *Manager {
@@ -49,9 +50,14 @@ func NewManager(ctx context.Context, name string, options Options) *Manager {
 		mutex:      sync.RWMutex{},
 		options:    options,
 		extension:  make([]IManagerExtension, 0),
+		log:        logging.NewDefaultLoggerFactory().NewLogger("sfu"),
 	}
 
 	return m
+}
+
+func (m *Manager) Log() logging.LeveledLogger {
+	return m.log
 }
 
 func (m *Manager) AddExtension(extension IManagerExtension) {
@@ -90,6 +96,7 @@ func (m *Manager) NewRoom(id, name, roomType string, opts RoomOptions) (*Room, e
 		QualityPresets:          opts.QualityPresets,
 		PublicIP:                m.options.PublicIP,
 		NAT1To1IPsCandidateType: m.options.NAT1To1IPsCandidateType,
+		Log:                     m.log,
 	}
 
 	newSFU := New(m.context, sfuOpts)
@@ -228,7 +235,7 @@ func startRoomTimeout(m *Manager, room *Room) (context.Context, context.CancelFu
 			defer m.mutex.Unlock()
 			room.Close()
 			delete(m.rooms, room.id)
-			glog.Info("room ", room.id, " is closed because it's empty and idle for ", room.options.EmptyRoomTimeout)
+			m.log.Infof("room ", room.id, " is closed because it's empty and idle for ", room.options.EmptyRoomTimeout)
 		}
 	}()
 

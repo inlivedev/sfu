@@ -10,11 +10,11 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/golang/glog"
 	"github.com/google/uuid"
 	"github.com/inlivedev/sfu/pkg/interceptors/simulcast"
 	"github.com/pion/interceptor"
 	"github.com/pion/interceptor/pkg/stats"
+	"github.com/pion/logging"
 	"github.com/pion/webrtc/v3"
 	"github.com/pion/webrtc/v3/pkg/media"
 
@@ -267,6 +267,11 @@ func SetPeerConnectionTracks(ctx context.Context, peerConnection *webrtc.PeerCon
 				case <-ctxx.Done():
 					return
 				default:
+					err := rtpTranscv.Sender().SetReadDeadline(time.Now().Add(10 * time.Millisecond))
+					if err != nil {
+						return
+					}
+
 					if _, _, rtcpErr := rtpTranscv.Sender().Read(rtcpBuf); rtcpErr != nil {
 						return
 					}
@@ -343,7 +348,7 @@ func GetMediaEngine() *webrtc.MediaEngine {
 	return mediaEngine
 }
 
-func CreatePeerPair(ctx context.Context, room *Room, iceServers []webrtc.ICEServer, peerName string, loop, isSimulcast bool) (*webrtc.PeerConnection, *Client, stats.Getter, chan bool) {
+func CreatePeerPair(ctx context.Context, log logging.LeveledLogger, room *Room, iceServers []webrtc.ICEServer, peerName string, loop, isSimulcast bool) (*webrtc.PeerConnection, *Client, stats.Getter, chan bool) {
 	clientContext, cancelClient := context.WithCancel(ctx)
 	var (
 		client      *Client
@@ -405,14 +410,14 @@ func CreatePeerPair(ctx context.Context, room *Room, iceServers []webrtc.ICEServ
 
 	} else {
 		tracks, done = GetStaticTracks(clientContext, peerName, loop)
-		SetPeerConnectionTracks(ctx, pc, tracks)
+		SetPeerConnectionTracks(clientContext, pc, tracks)
 	}
 
 	allDone := make(chan bool)
 
 	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
 		if state == webrtc.PeerConnectionStateClosed || state == webrtc.PeerConnectionStateFailed {
-			glog.Info("test: peer connection ", peerName, " stated changed ", state)
+			log.Infof("test: peer connection ", peerName, " stated changed ", state)
 			if client != nil {
 				_ = room.StopClient(client.ID())
 				cancelClient()
@@ -483,14 +488,14 @@ func CreatePeerPair(ctx context.Context, room *Room, iceServers []webrtc.ICEServ
 
 	client.OnRenegotiation(func(ctx context.Context, offer webrtc.SessionDescription) (answer webrtc.SessionDescription, e error) {
 		if client.state.Load() == ClientStateEnded {
-			glog.Info("test: renegotiation canceled because client has ended")
+			log.Infof("test: renegotiation canceled because client has ended")
 			return webrtc.SessionDescription{}, errors.New("client ended")
 		}
 
 		currentTranscv := len(pc.GetTransceivers())
 
-		glog.Info("test: got renegotiation ", peerName)
-		defer glog.Info("test: renegotiation done ", peerName)
+		log.Infof("test: got renegotiation ", peerName)
+		defer log.Infof("test: renegotiation done ", peerName)
 		if err = pc.SetRemoteDescription(offer); err != nil {
 			return webrtc.SessionDescription{}, err
 		}
@@ -502,14 +507,14 @@ func CreatePeerPair(ctx context.Context, room *Room, iceServers []webrtc.ICEServ
 		}
 
 		newTcv := len(pc.GetTransceivers()) - currentTranscv
-		glog.Info("test: new transceiver ", newTcv, " total tscv ", len(pc.GetTransceivers()))
+		log.Infof("test: new transceiver ", newTcv, " total tscv ", len(pc.GetTransceivers()))
 
 		return *pc.LocalDescription(), nil
 	})
 
 	client.OnAllowedRemoteRenegotiation(func() {
-		glog.Info("allowed remote renegotiation")
-		negotiate(pc, client)
+		log.Infof("allowed remote renegotiation")
+		negotiate(pc, client, log)
 	})
 
 	client.OnIceCandidate(func(ctx context.Context, candidate *webrtc.ICECandidate) {
@@ -520,7 +525,7 @@ func CreatePeerPair(ctx context.Context, room *Room, iceServers []webrtc.ICEServ
 		_ = pc.AddICECandidate(candidate.ToJSON())
 	})
 
-	negotiate(pc, client)
+	negotiate(pc, client, log)
 
 	pc.OnICECandidate(func(candidate *webrtc.ICECandidate) {
 		if candidate == nil {
@@ -532,14 +537,14 @@ func CreatePeerPair(ctx context.Context, room *Room, iceServers []webrtc.ICEServ
 	return pc, client, statsGetter, allDone
 }
 
-func negotiate(pc *webrtc.PeerConnection, client *Client) {
+func negotiate(pc *webrtc.PeerConnection, client *Client, log logging.LeveledLogger) {
 	if pc.SignalingState() != webrtc.SignalingStateStable {
-		glog.Info("test: signaling state is not stable, skip renegotiation")
+		log.Infof("test: signaling state is not stable, skip renegotiation")
 		return
 	}
 
 	if !client.IsAllowNegotiation() {
-		glog.Info("test: client is not allowed to renegotiate")
+		log.Infof("test: client is not allowed to renegotiate")
 		return
 	}
 
@@ -553,7 +558,7 @@ func negotiate(pc *webrtc.PeerConnection, client *Client) {
 	}
 }
 
-func CreateDataPair(ctx context.Context, room *Room, iceServers []webrtc.ICEServer, peerName string, onDataChannel func(d *webrtc.DataChannel)) (*webrtc.PeerConnection, *Client, stats.Getter, chan webrtc.PeerConnectionState) {
+func CreateDataPair(ctx context.Context, log logging.LeveledLogger, room *Room, iceServers []webrtc.ICEServer, peerName string, onDataChannel func(d *webrtc.DataChannel)) (*webrtc.PeerConnection, *Client, stats.Getter, chan webrtc.PeerConnectionState) {
 	var (
 		client      *Client
 		mediaEngine *webrtc.MediaEngine = GetMediaEngine()
@@ -599,7 +604,7 @@ func CreateDataPair(ctx context.Context, room *Room, iceServers []webrtc.ICEServ
 
 	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
 		if state == webrtc.PeerConnectionStateClosed || state == webrtc.PeerConnectionStateFailed {
-			glog.Info("test: peer connection closed ", peerName)
+			log.Infof("test: peer connection closed ", peerName)
 			if client != nil {
 				_ = room.StopClient(client.ID())
 			}
@@ -615,8 +620,8 @@ func CreateDataPair(ctx context.Context, room *Room, iceServers []webrtc.ICEServ
 	client, _ = room.AddClient(id, id, DefaultClientOptions())
 
 	client.OnAllowedRemoteRenegotiation(func() {
-		glog.Info("allowed remote renegotiation")
-		go negotiate(pc, client)
+		log.Infof("allowed remote renegotiation")
+		go negotiate(pc, client, log)
 	})
 
 	client.OnIceCandidate(func(ctx context.Context, candidate *webrtc.ICECandidate) {
@@ -629,19 +634,19 @@ func CreateDataPair(ctx context.Context, room *Room, iceServers []webrtc.ICEServ
 
 	client.OnRenegotiation(func(ctx context.Context, offer webrtc.SessionDescription) (answer webrtc.SessionDescription, e error) {
 		if client.state.Load() == ClientStateEnded {
-			glog.Info("test: renegotiation canceled because client has ended")
+			log.Infof("test: renegotiation canceled because client has ended")
 			return webrtc.SessionDescription{}, errors.New("client ended")
 		}
 
-		glog.Info("test: got renegotiation ", peerName)
-		defer glog.Info("test: renegotiation done ", peerName)
+		log.Infof("test: got renegotiation ", peerName)
+		defer log.Infof("test: renegotiation done ", peerName)
 		_ = pc.SetRemoteDescription(offer)
 		answer, _ = pc.CreateAnswer(nil)
 		_ = pc.SetLocalDescription(answer)
 		return *pc.LocalDescription(), nil
 	})
 
-	negotiate(pc, client)
+	negotiate(pc, client, log)
 
 	pc.OnICECandidate(func(candidate *webrtc.ICECandidate) {
 		if candidate == nil {
@@ -653,11 +658,11 @@ func CreateDataPair(ctx context.Context, room *Room, iceServers []webrtc.ICEServ
 	return pc, client, statsGetter, connChan
 }
 
-func LoadVp9Track(ctx context.Context, pc *webrtc.PeerConnection, videoFileName string, loop bool) *webrtc.RTPSender {
+func LoadVp9Track(ctx context.Context, log logging.LeveledLogger, pc *webrtc.PeerConnection, videoFileName string, loop bool) *webrtc.RTPSender {
 	iceConnectedCtx, iceConnectedCtxCancel := context.WithCancel(ctx)
 
 	pc.OnICEConnectionStateChange(func(connectionState webrtc.ICEConnectionState) {
-		glog.Info("Connection State has changed %s \n", connectionState.String())
+		log.Infof("Connection State has changed %s \n", connectionState.String())
 		if connectionState == webrtc.ICEConnectionStateConnected {
 			iceConnectedCtxCancel()
 		}
@@ -733,7 +738,7 @@ func LoadVp9Track(ctx context.Context, pc *webrtc.PeerConnection, videoFileName 
 
 		// Wait for connection established
 		<-iceConnectedCtx.Done()
-		glog.Info("Connection established, start sending track: %s \n", header.FourCC)
+		log.Infof("Connection established, start sending track: %s \n", header.FourCC)
 
 		// Send our video file frame at a time. Pace our sending so we send it at the same speed it should be played back as.
 		// This isn't required since the video is timestamped, but we will such much higher loss if we send all at once.
@@ -750,7 +755,7 @@ func LoadVp9Track(ctx context.Context, pc *webrtc.PeerConnection, videoFileName 
 			case <-ticker.C:
 				frame, _, ivfErr := ivf.ParseNextFrame()
 				if errors.Is(ivfErr, io.EOF) {
-					glog.Info("All video frames parsed and sent")
+					log.Infof("All video frames parsed and sent")
 					if !loop {
 						return
 					} else {

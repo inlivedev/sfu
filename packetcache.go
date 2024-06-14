@@ -5,7 +5,7 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/golang/glog"
+	"github.com/pion/logging"
 )
 
 type packetCaches struct {
@@ -13,6 +13,7 @@ type packetCaches struct {
 	caches *list.List
 	init   bool
 	Size   uint16
+	log    logging.LeveledLogger
 }
 
 type Cache struct {
@@ -41,12 +42,13 @@ var (
 	ErrDuplicate  = errors.New("packet sequence already exists in the cache")
 )
 
-func newPacketCaches() *packetCaches {
+func newPacketCaches(log logging.LeveledLogger) *packetCaches {
 	return &packetCaches{
 		mu:     sync.RWMutex{},
 		caches: &list.List{},
 		init:   false,
 		Size:   1000,
+		log:    log,
 	}
 }
 
@@ -81,7 +83,7 @@ Loop:
 	for e := p.caches.Back(); e != nil; e = e.Prev() {
 		currentCache := e.Value.(Cache)
 		if currentCache.SeqNum == seqNum {
-			glog.Warning("packet cache: packet sequence ", seqNum, " already exists in the cache, will not adding the packet")
+			p.log.Warnf("packet cache: packet sequence ", seqNum, " already exists in the cache, will not adding the packet")
 
 			return
 		}

@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/golang/glog"
+	"github.com/pion/logging"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v3"
 	"golang.org/x/exp/slices"
@@ -126,6 +126,7 @@ type SFU struct {
 	onClientAddedCallbacks    []func(*Client)
 	relayTracks               map[string]ITrack
 	clientStats               map[string]*ClientStats
+	log                       logging.LeveledLogger
 }
 
 type PublishedTrack struct {
@@ -144,6 +145,7 @@ type sfuOptions struct {
 	PLIInterval             time.Duration
 	PublicIP                string
 	NAT1To1IPsCandidateType webrtc.ICECandidateType
+	Log                     logging.LeveledLogger
 }
 
 // @Param muxPort: port for udp mux
@@ -170,6 +172,7 @@ func New(ctx context.Context, opts sfuOptions) *SFU {
 		onClientRemovedCallbacks:  make([]func(*Client), 0),
 		onClientAddedCallbacks:    make([]func(*Client), 0),
 		nat1To1IPsCandidateType:   opts.NAT1To1IPsCandidateType,
+		log:                       opts.Log,
 	}
 
 	return sfu
@@ -177,7 +180,7 @@ func New(ctx context.Context, opts sfuOptions) *SFU {
 
 func (s *SFU) addClient(client *Client) {
 	if err := s.clients.Add(client); err != nil {
-		glog.Error("sfu: failed to add client ", err)
+		s.log.Errorf("sfu: failed to add client ", err)
 		return
 	}
 
@@ -199,11 +202,13 @@ func (s *SFU) NewClient(id, name string, opts ClientOptions) *Client {
 		peerConnectionConfig.ICEServers = s.iceServers
 	}
 
+	opts.Log = s.log
+
 	client := s.createClient(id, name, peerConnectionConfig, opts)
 
 	client.onTrack = func(track ITrack) {
 		if err := client.pendingPublishedTracks.Add(track); err == ErrTrackExists {
-			glog.Error("sfu: client ", id, " track already added ", track.ID())
+			s.log.Errorf("sfu: client ", id, " track already added ", track.ID())
 			// not an error could be because a simulcast track already added
 			return
 		}
@@ -213,11 +218,11 @@ func (s *SFU) NewClient(id, name string, opts ClientOptions) *Client {
 		// 1. need to handle simulcast track because  it will be counted as single track
 		initialReceiverCount := client.initialReceiverCount.Load()
 		if client.Type() == ClientTypePeer && int(initialReceiverCount) > client.pendingPublishedTracks.Length() {
-			glog.Info("sfu: client ", id, " pending published tracks: ", client.pendingPublishedTracks.Length(), " initial tracks count: ", initialReceiverCount)
+			s.log.Infof("sfu: client ", id, " pending published tracks: ", client.pendingPublishedTracks.Length(), " initial tracks count: ", initialReceiverCount)
 			return
 		}
 
-		glog.Info("sfu: client ", id, " publish tracks, initial tracks count: ", initialReceiverCount, " pending published tracks: ", client.pendingPublishedTracks.Length())
+		s.log.Infof("sfu: client ", id, " publish tracks, initial tracks count: ", initialReceiverCount, " pending published tracks: ", client.pendingPublishedTracks.Length())
 
 		addedTracks := client.pendingPublishedTracks.GetTracks()
 
@@ -276,7 +281,7 @@ func (s *SFU) syncTrack(client *Client) {
 	if len(subscribes) > 0 {
 		err := client.SubscribeTracks(subscribes)
 		if err != nil {
-			glog.Error("client: failed to subscribe tracks ", err)
+			s.log.Errorf("client: failed to subscribe tracks ", err)
 		}
 	}
 }
@@ -320,7 +325,7 @@ func (s *SFU) OnClientRemoved(callback func(*Client)) {
 
 func (s *SFU) onAfterClientStopped(client *Client) {
 	if err := s.removeClient(client); err != nil {
-		glog.Error("sfu: failed to remove client ", err)
+		s.log.Errorf("sfu: failed to remove client ", err)
 	}
 }
 
@@ -343,7 +348,7 @@ func (s *SFU) onTracksAvailable(clientId string, tracks []ITrack) {
 	for _, client := range s.clients.GetClients() {
 		if client.ID() != clientId {
 			client.onTracksAvailable(tracks)
-			glog.Info("sfu: client ", client.ID(), " tracks available ", len(tracks))
+			s.log.Infof("sfu: client ", client.ID(), " tracks available ", len(tracks))
 		}
 	}
 
@@ -366,7 +371,7 @@ func (s *SFU) broadcastTracksToAutoSubscribeClients(ownerID string, tracks []ITr
 	for _, client := range s.clients.GetClients() {
 		if ownerID != client.ID() {
 			if err := client.SubscribeTracks(trackReq); err != nil {
-				glog.Error("client: failed to subscribe tracks ", err)
+				s.log.Errorf("client: failed to subscribe tracks ", err)
 			}
 		}
 	}
@@ -381,7 +386,7 @@ func (s *SFU) GetClient(id string) (*Client, error) {
 
 func (s *SFU) removeClient(client *Client) error {
 	if err := s.clients.Remove(client); err != nil {
-		glog.Error("sfu: failed to remove client ", err)
+		s.log.Errorf("sfu: failed to remove client ", err)
 		return err
 	}
 
@@ -465,7 +470,7 @@ func (s *SFU) createExistingDataChannels(c *Client) {
 		}
 
 		if err := c.createDataChannel(dc.label, initOpts); err != nil {
-			glog.Error("datachanel: error on create existing data channels, ", err)
+			s.log.Errorf("datachanel: error on create existing data channels, ", err)
 		}
 	}
 }

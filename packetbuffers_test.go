@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golang/glog"
 	"github.com/inlivedev/sfu/pkg/rtppool"
+	"github.com/pion/logging"
 	"github.com/pion/rtp"
 	"github.com/stretchr/testify/require"
 )
@@ -35,7 +35,7 @@ func TestAdd(t *testing.T) {
 	minLatency := 10 * time.Millisecond
 	maxLatency := 100 * time.Millisecond
 
-	caches := newPacketBuffers(ctx, minLatency, maxLatency, false)
+	caches := newPacketBuffers(ctx, minLatency, maxLatency, false, logging.NewDefaultLoggerFactory().NewLogger("sfu"))
 
 	for i, pkt := range packets {
 		rp := rtppool.NewPacket(&pkt.Header, pkt.Payload)
@@ -75,7 +75,7 @@ func TestAddLost(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	caches := newPacketBuffers(ctx, minLatency, maxLatency, false)
+	caches := newPacketBuffers(ctx, minLatency, maxLatency, false, logging.NewDefaultLoggerFactory().NewLogger("sfu"))
 
 	for i, pkt := range packets {
 		if pkt.SequenceNumber == 65533 {
@@ -124,11 +124,11 @@ func TestDuplicateAdd(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	caches := newPacketBuffers(ctx, minLatency, maxLatency, false)
+	caches := newPacketBuffers(ctx, minLatency, maxLatency, false, logging.NewDefaultLoggerFactory().NewLogger("sfu"))
 
 	for i, pkt := range packets {
 		if i == 9 {
-			glog.Info("packet sequence ", pkt.Header.SequenceNumber)
+			t.Log("packet sequence ", pkt.Header.SequenceNumber)
 		}
 
 		rp := rtppool.NewPacket(&pkt.Header, pkt.Payload)
@@ -174,7 +174,7 @@ func TestFlush(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	caches := newPacketBuffers(ctx, minLatency, maxLatency, false)
+	caches := newPacketBuffers(ctx, minLatency, maxLatency, false, logging.NewDefaultLoggerFactory().NewLogger("sfu"))
 
 	for i, pkt := range packets {
 		rp := rtppool.NewPacket(&pkt.Header, pkt.Payload)
@@ -216,7 +216,7 @@ func TestFlushBetweenAdded(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	caches := newPacketBuffers(ctx, minLatency, maxLatency, false)
+	caches := newPacketBuffers(ctx, minLatency, maxLatency, false, logging.NewDefaultLoggerFactory().NewLogger("sfu"))
 
 	sorted := make([]*rtppool.RetainablePacket, 0)
 
@@ -264,7 +264,7 @@ func TestLatency(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	caches := newPacketBuffers(ctx, minLatency, maxLatency, false)
+	caches := newPacketBuffers(ctx, minLatency, maxLatency, false, logging.NewDefaultLoggerFactory().NewLogger("sfu"))
 
 	sorted := make([]*rtppool.RetainablePacket, 0)
 	seqs := make([]uint16, 0)
@@ -276,7 +276,7 @@ func TestLatency(t *testing.T) {
 
 		if pkt.Header.SequenceNumber == 65535 {
 			// last sort call should return immediately
-			glog.Info("packet sequence ", pkt.Header.SequenceNumber)
+			t.Log("packet sequence ", pkt.Header.SequenceNumber)
 			time.Sleep(2 * maxLatency)
 			rp := rtppool.NewPacket(&pkt.Header, pkt.Payload)
 			err := caches.Add(rp)
@@ -337,7 +337,7 @@ func BenchmarkPushPool(b *testing.B) {
 		}
 	}
 
-	packetBuffers := newPacketBuffers(ctx, 10*time.Millisecond, 100*time.Millisecond, false)
+	packetBuffers := newPacketBuffers(ctx, 10*time.Millisecond, 100*time.Millisecond, false, logging.NewDefaultLoggerFactory().NewLogger("sfu"))
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -351,7 +351,7 @@ func BenchmarkPushPool(b *testing.B) {
 func BenchmarkPopPool(b *testing.B) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	packetBuffers := newPacketBuffers(ctx, 10*time.Millisecond, 100*time.Millisecond, false)
+	packetBuffers := newPacketBuffers(ctx, 10*time.Millisecond, 100*time.Millisecond, false, logging.NewDefaultLoggerFactory().NewLogger("sfu"))
 
 	for i := 0; i < b.N; i++ {
 		rp := rtppool.NewPacket(&rtp.Header{}, make([]byte, 1400))

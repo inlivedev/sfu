@@ -1,30 +1,22 @@
 package sfu
 
 import (
-	"context"
 	"flag"
 	"os"
 	"testing"
 
-	"github.com/pion/webrtc/v3"
+	"github.com/pion/logging"
 )
 
-var roomManager *Manager
+var TestLogger logging.LeveledLogger
 
 func TestMain(m *testing.M) {
 	flag.Set("logtostderr", "true")
 	flag.Set("stderrthreshold", "INFO")
 
 	flag.Parse()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
-	// create room manager first before create new room
-	roomManager = NewManager(ctx, "test", Options{
-		EnableMux:                true,
-		EnableBandwidthEstimator: true,
-		IceServers:               []webrtc.ICEServer{},
-	})
+	TestLogger = logging.NewDefaultLoggerFactory().NewLogger("sfu")
 
 	result := m.Run()
 

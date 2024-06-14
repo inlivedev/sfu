@@ -1,26 +1,28 @@
 package playoutdelay
 
 import (
-	"github.com/golang/glog"
 	"github.com/pion/interceptor"
+	"github.com/pion/logging"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v3"
 )
 
 type InterceptorFactory struct {
 	minDelay, maxDelay uint16
+	log                logging.LeveledLogger
 }
 
-func NewInterceptor(minDelay, maxDelay uint16) *InterceptorFactory {
+func NewInterceptor(log logging.LeveledLogger, minDelay, maxDelay uint16) *InterceptorFactory {
 	return &InterceptorFactory{
 		minDelay: minDelay,
 		maxDelay: maxDelay,
+		log:      log,
 	}
 }
 
 // NewInterceptor constructs a new ReceiverInterceptor
 func (g *InterceptorFactory) NewInterceptor(_ string) (interceptor.Interceptor, error) {
-	i := new(g.minDelay, g.maxDelay)
+	i := new(g.log, g.minDelay, g.maxDelay)
 
 	return i, nil
 }
@@ -28,12 +30,14 @@ func (g *InterceptorFactory) NewInterceptor(_ string) (interceptor.Interceptor, 
 type Interceptor struct {
 	minDelay uint16
 	maxDelay uint16
+	log      logging.LeveledLogger
 }
 
-func new(min, max uint16) *Interceptor {
+func new(log logging.LeveledLogger, min, max uint16) *Interceptor {
 	return &Interceptor{
 		minDelay: min,
 		maxDelay: max,
+		log:      log,
 	}
 }
 
@@ -46,7 +50,7 @@ func (v *Interceptor) BindLocalStream(info *interceptor.StreamInfo, writer inter
 
 	payloadDelay, err := playOutDelay.Marshal()
 	if err != nil {
-		glog.Error("error on marshal playout delay payload", err)
+		v.log.Errorf("error on marshal playout delay payload", err)
 		return writer
 	}
 
@@ -99,7 +103,7 @@ func (v *Interceptor) addPlayoutDelay(info *interceptor.StreamInfo, header *rtp.
 
 	err := header.SetExtension(extID, payload)
 	if err != nil {
-		glog.Error("error on set playout delay extension: ", err)
+		v.log.Errorf("error on set playout delay extension: ", err)
 		return header
 	}
 

@@ -6,7 +6,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/golang/glog"
+	"github.com/pion/logging"
 	"github.com/pion/webrtc/v3"
 )
 
@@ -18,6 +18,7 @@ type queue struct {
 	mutex  sync.Mutex
 	opChan chan interface{}
 	IsOpen *atomic.Bool
+	log    logging.LeveledLogger
 }
 
 type negotiationQueue struct {
@@ -35,7 +36,7 @@ type allowRemoteRenegotiationQueue struct {
 	Client *Client
 }
 
-func NewQueue(ctx context.Context) *queue {
+func NewQueue(ctx context.Context, log logging.LeveledLogger) *queue {
 	var isOpen atomic.Bool
 	isOpen.Store(true)
 
@@ -43,6 +44,7 @@ func NewQueue(ctx context.Context) *queue {
 		mutex:  sync.Mutex{},
 		IsOpen: &isOpen,
 		opChan: make(chan interface{}, 10),
+		log:    log,
 	}
 
 	go q.run(ctx)
@@ -56,7 +58,7 @@ func (q *queue) Push(item interface{}) {
 		defer q.mutex.Unlock()
 
 		if !q.IsOpen.Load() {
-			glog.Warning("sfu: queue is closed when push renegotiation")
+			q.log.Warnf("sfu: queue is closed when push renegotiation")
 			if opItem, ok := item.(negotiationQueue); ok {
 				opItem.ErrorChan <- ErrQueueIsClosed
 			}

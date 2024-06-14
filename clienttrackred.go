@@ -4,7 +4,6 @@ import (
 	"encoding/binary"
 	"errors"
 
-	"github.com/golang/glog"
 	"github.com/inlivedev/sfu/pkg/rtppool"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v3"
@@ -52,21 +51,21 @@ func (t *clientTrackRed) push(p *rtp.Packet, _ QualityLevel) {
 		primaryPacket.Payload = t.getPrimaryEncoding(p.Payload[:len(p.Payload)])
 		primaryPacket.Header = p.Header
 		if err := t.localTrack.WriteRTP(primaryPacket); err != nil {
-			glog.Error("clienttrack: error on write primary rtp", err)
+			t.client.log.Errorf("clienttrack: error on write primary rtp", err)
 		}
 		rtppool.ResetPacketPoolAllocation(primaryPacket)
 		return
 	}
 
 	if err := t.localTrack.WriteRTP(p); err != nil {
-		glog.Error("clienttrack: error on write rtp", err)
+		t.client.log.Errorf("clienttrack: error on write rtp", err)
 	}
 }
 
 func (t *clientTrackRed) getPrimaryEncoding(payload []byte) []byte {
 	primaryPayload, err := extractPrimaryEncodingForRED(payload)
 	if err != nil {
-		glog.Error("clienttrack: error on extract primary encoding for red", err)
+		t.client.log.Errorf("clienttrack: error on extract primary encoding for red", err)
 		return payload
 	}
 

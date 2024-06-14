@@ -9,10 +9,10 @@ import (
 
 	"sync/atomic"
 
-	"github.com/golang/glog"
 	"github.com/inlivedev/sfu/pkg/networkmonitor"
 	"github.com/inlivedev/sfu/pkg/rtppool"
 	"github.com/pion/interceptor/pkg/stats"
+	"github.com/pion/logging"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v3"
 )
@@ -35,9 +35,10 @@ type remoteTrack struct {
 	packetBuffers         *packetBuffers
 	looping               bool
 	monitor               *networkmonitor.NetworkMonitor
+	log                   logging.LeveledLogger
 }
 
-func newRemoteTrack(ctx context.Context, useBuffer bool, track IRemoteTrack, minWait, maxWait, pliInterval time.Duration, onPLI func(), statsGetter stats.Getter, onStatsUpdated func(*stats.Stats), onRead func(*rtp.Packet), onNetworkConditionChanged func(networkmonitor.NetworkConditionType)) *remoteTrack {
+func newRemoteTrack(ctx context.Context, log logging.LeveledLogger, useBuffer bool, track IRemoteTrack, minWait, maxWait, pliInterval time.Duration, onPLI func(), statsGetter stats.Getter, onStatsUpdated func(*stats.Stats), onRead func(*rtp.Packet), onNetworkConditionChanged func(networkmonitor.NetworkConditionType)) *remoteTrack {
 	localctx, cancel := context.WithCancel(ctx)
 
 	rt := &remoteTrack{
@@ -55,10 +56,11 @@ func newRemoteTrack(ctx context.Context, useBuffer bool, track IRemoteTrack, min
 		onPLI:                 onPLI,
 		onRead:                onRead,
 		monitor:               networkmonitor.Default(),
+		log:                   log,
 	}
 
 	if useBuffer && track.Kind() == webrtc.RTPCodecTypeVideo {
-		rt.packetBuffers = newPacketBuffers(localctx, minWait, maxWait, true)
+		rt.packetBuffers = newPacketBuffers(localctx, minWait, maxWait, true, log)
 	}
 
 	rt.monitor.OnNetworkConditionChanged(onNetworkConditionChanged)
@@ -97,7 +99,7 @@ func (t *remoteTrack) readRTP() {
 			return
 		default:
 			if err := t.track.SetReadDeadline(time.Now().Add(1 * time.Second)); err != nil {
-				glog.Error("remotetrack: set read deadline error: ", err)
+				t.log.Errorf("remotetrack: set read deadline error: ", err)
 				return
 			}
 			buffer, ok := rtppool.GetPacketManager().PayloadPool.Get().(*[]byte)
@@ -108,7 +110,7 @@ func (t *remoteTrack) readRTP() {
 
 			n, _, readErr := t.track.Read(*buffer)
 			if readErr == io.EOF {
-				glog.Info("remotetrack: track ended: ", t.track.ID())
+				t.log.Infof("remotetrack: track ended: ", t.track.ID())
 				rtppool.GetPacketManager().PayloadPool.Put(buffer)
 				return
 			}
@@ -235,7 +237,7 @@ func (t *remoteTrack) Flush() {
 func (t *remoteTrack) updateStats() {
 	s := t.statsGetter.Get(uint32(t.track.SSRC()))
 	if s == nil {
-		glog.Warning("remotetrack: stats not found for track: ", t.track.SSRC())
+		t.log.Warnf("remotetrack: stats not found for track: ", t.track.SSRC())
 		return
 	}
 

@@ -5,8 +5,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/golang/glog"
 	"github.com/pion/interceptor"
+	"github.com/pion/logging"
 	"github.com/pion/rtp"
 	"github.com/pion/sdp/v3"
 	"github.com/pion/webrtc/v3"
@@ -17,17 +17,19 @@ const ATTRIBUTE_KEY = "audioLevel"
 type InterceptorFactory struct {
 	onNew   func(i *Interceptor)
 	context context.Context
+	log     logging.LeveledLogger
 }
 
-func NewInterceptor(ctx context.Context) *InterceptorFactory {
+func NewInterceptor(ctx context.Context, log logging.LeveledLogger) *InterceptorFactory {
 	return &InterceptorFactory{
 		context: ctx,
+		log:     log,
 	}
 }
 
 // NewInterceptor constructs a new ReceiverInterceptor
 func (g *InterceptorFactory) NewInterceptor(_ string) (interceptor.Interceptor, error) {
-	i := new(g.context)
+	i := new(g.context, g.log)
 
 	if g.onNew != nil {
 		g.onNew(i)
@@ -60,14 +62,16 @@ type Interceptor struct {
 	vads    map[uint32]*VoiceDetector
 	config  Config
 	onNew   func(vad *VoiceDetector)
+	log     logging.LeveledLogger
 }
 
-func new(ctx context.Context) *Interceptor {
+func new(ctx context.Context, log logging.LeveledLogger) *Interceptor {
 	return &Interceptor{
 		context: ctx,
 		mu:      sync.RWMutex{},
 		config:  DefaultConfig(),
 		vads:    make(map[uint32]*VoiceDetector),
+		log:     log,
 	}
 }
 
@@ -176,7 +180,7 @@ func (v *Interceptor) processPacket(ssrc uint32, header *rtp.Header) rtp.AudioLe
 
 	vad := v.getVadBySSRC(ssrc)
 	if vad == nil {
-		glog.Error("vad: not found vad for track ssrc", ssrc)
+		v.log.Errorf("vad: not found vad for track ssrc", ssrc)
 		return rtp.AudioLevelExtension{}
 	}
 
@@ -225,7 +229,7 @@ func (v *Interceptor) getAudioLevelExtensionID(ssrc uint32) uint8 {
 // AddAudioTrack adds audio track to interceptor
 func (v *Interceptor) MapAudioTrack(ssrc uint32, t webrtc.TrackLocal) *VoiceDetector {
 	if t.Kind() != webrtc.RTPCodecTypeAudio {
-		glog.Error("vad: track is not audio track")
+		v.log.Errorf("vad: track is not audio track")
 		return nil
 	}
 

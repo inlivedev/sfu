@@ -7,10 +7,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/golang/glog"
 	"github.com/inlivedev/sfu/pkg/networkmonitor"
 	"github.com/inlivedev/sfu/pkg/rtppool"
 	"github.com/pion/interceptor/pkg/stats"
+	"github.com/pion/logging"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v3"
 )
@@ -134,7 +134,7 @@ func newTrack(ctx context.Context, client *Client, trackRemote IRemoteTrack, min
 		client.onNetworkConditionChanged(condition)
 	}
 
-	t.remoteTrack = newRemoteTrack(ctx, client.options.ReorderPackets, trackRemote, minWait, maxWait, pliInterval, onPLI, stats, onStatsUpdated, onRead, onNetworkConditionChanged)
+	t.remoteTrack = newRemoteTrack(ctx, client.log, client.options.ReorderPackets, trackRemote, minWait, maxWait, pliInterval, onPLI, stats, onStatsUpdated, onRead, onNetworkConditionChanged)
 
 	var cancel context.CancelFunc
 
@@ -255,7 +255,7 @@ func (t *Track) subscribe(c *Client) iClientTrack {
 	if t.MimeType() == webrtc.MimeTypeVP9 {
 		ct = newScaleableClientTrack(c, t, c.SFU().QualityPresets())
 	} else if t.Kind() == webrtc.RTPCodecTypeAudio && t.PayloadType() == 63 {
-		glog.Info("track: red enabled", c.receiveRED)
+		t.base.client.log.Infof("track: red enabled", c.receiveRED)
 
 		ct = newClientTrackRed(c, t)
 	} else {
@@ -544,7 +544,7 @@ func (t *SimulcastTrack) AddRemoteTrack(track IRemoteTrack, minWait, maxWait tim
 
 	}
 
-	remoteTrack = newRemoteTrack(t.Context(), t.reordered, track, minWait, maxWait, t.pliInterval, onPLI, stats, onStatsUpdated, onRead, t.onNetworkConditionChanged)
+	remoteTrack = newRemoteTrack(t.Context(), t.base.client.log, t.reordered, track, minWait, maxWait, t.pliInterval, onPLI, stats, onStatsUpdated, onRead, t.onNetworkConditionChanged)
 
 	switch quality {
 	case QualityHigh:
@@ -592,7 +592,7 @@ func (t *SimulcastTrack) AddRemoteTrack(track IRemoteTrack, minWait, maxWait tim
 			t.cancel()
 		}()
 	default:
-		glog.Warning("client: unknown track quality ", track.RID())
+		t.base.client.log.Warnf("client: unknown track quality ", track.RID())
 		return nil
 	}
 
@@ -690,40 +690,40 @@ func (t *SimulcastTrack) isTrackActive(quality QualityLevel) bool {
 	switch quality {
 	case QualityHigh:
 		if t.remoteTrackHigh == nil {
-			glog.Warning("track: remote track high is nil")
+			t.base.client.log.Warnf("track: remote track high is nil")
 			return false
 		}
 
 		delta := time.Since(time.Unix(0, t.lastReadHighTS.Load()))
 
 		if delta > threshold {
-			glog.Warningf("track: remote track %s high is not active, last read was %d ms ago", t.base.id, delta.Milliseconds())
+			t.base.client.log.Warnf("track: remote track %s high is not active, last read was %d ms ago", t.base.id, delta.Milliseconds())
 			return false
 		}
 
 		return true
 	case QualityMid:
 		if t.remoteTrackMid == nil {
-			glog.Warning("track: remote track medium is nil")
+			t.base.client.log.Warnf("track: remote track medium is nil")
 			return false
 		}
 
 		delta := time.Since(time.Unix(0, t.lastReadMidTS.Load()))
 		if delta > threshold {
-			glog.Warningf("track: remote track %s mid is not active, last read was %d ms ago", delta.Milliseconds())
+			t.base.client.log.Warnf("track: remote track %s mid is not active, last read was %d ms ago", delta.Milliseconds())
 			return false
 		}
 
 		return true
 	case QualityLow:
 		if t.remoteTrackLow == nil {
-			glog.Warning("track: remote track low is nil")
+			t.base.client.log.Warnf("track: remote track low is nil")
 			return false
 		}
 
 		delta := time.Since(time.Unix(0, t.lastReadLowTS.Load()))
 		if delta > threshold {
-			glog.Warningf("track: remote track %s low is not active, last read was %d ms ago", delta.Milliseconds())
+			t.base.client.log.Warnf("track: remote track %s low is not active, last read was %d ms ago", delta.Milliseconds())
 			return false
 		}
 
@@ -740,19 +740,19 @@ func (t *SimulcastTrack) sendPLI() {
 	if t.remoteTrackHigh != nil {
 		t.remoteTrackHigh.sendPLI()
 	} else {
-		glog.Warning("track: remote track high is nil")
+		t.base.client.log.Warnf("track: remote track high is nil")
 	}
 
 	if t.remoteTrackMid != nil {
 		t.remoteTrackMid.sendPLI()
 	} else {
-		glog.Warning("track: remote track mid is nil")
+		t.base.client.log.Warnf("track: remote track mid is nil")
 	}
 
 	if t.remoteTrackLow != nil {
 		t.remoteTrackLow.sendPLI()
 	} else {
-		glog.Warning("track: remote track low is nil")
+		t.base.client.log.Warnf("track: remote track low is nil")
 	}
 }
 
@@ -879,11 +879,13 @@ type SubscribeTrackRequest struct {
 type trackList struct {
 	tracks map[string]ITrack
 	mu     sync.RWMutex
+	log    logging.LeveledLogger
 }
 
-func newTrackList() *trackList {
+func newTrackList(log logging.LeveledLogger) *trackList {
 	return &trackList{
 		tracks: make(map[string]ITrack),
+		log:    log,
 	}
 }
 
@@ -893,7 +895,7 @@ func (t *trackList) Add(track ITrack) error {
 
 	id := track.ID()
 	if _, ok := t.tracks[id]; ok {
-		glog.Warning("client: track already added ", id)
+		t.log.Warnf("client: track already added ", id)
 		return ErrTrackExists
 	}
 

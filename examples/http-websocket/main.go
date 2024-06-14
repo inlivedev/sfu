@@ -13,11 +13,11 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/golang/glog"
 	"github.com/inlivedev/sfu"
 	"github.com/inlivedev/sfu/pkg/fakeclient"
 	"github.com/inlivedev/sfu/pkg/interceptors/voiceactivedetector"
 	"github.com/inlivedev/sfu/pkg/networkmonitor"
+	"github.com/pion/logging"
 	"github.com/pion/webrtc/v3"
 	"golang.org/x/net/websocket"
 )
@@ -67,9 +67,13 @@ const (
 	TypeVoiceDetected        = "voice_detected"
 )
 
+var logger logging.LeveledLogger
+
 func main() {
 	flag.Set("logtostderr", "true")
 	flag.Set("stderrthreshold", "INFO")
+
+	logger = logging.NewDefaultLoggerFactory().NewLogger("sfu")
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -122,7 +126,7 @@ func main() {
 
 	for i := 0; i < fakeClientCount; i++ {
 		// create a fake client
-		fc := fakeclient.Create(ctx, defaultRoom, iceServers, fmt.Sprintf("fake-client-%d", i), true)
+		fc := fakeclient.Create(ctx, roomManager.Log(), defaultRoom, iceServers, fmt.Sprintf("fake-client-%d", i), true)
 
 		fc.Client.OnTracksAdded(func(addedTracks []sfu.ITrack) {
 			setTracks := make(map[string]sfu.TrackType, 0)
@@ -150,7 +154,7 @@ func main() {
 		statsHandler(w, r, defaultRoom)
 	})
 
-	log.Print("Listening on http://localhost:8000 ...")
+	logger.Info("Listening on http://localhost:8000 ...")
 
 	err := http.ListenAndServe(":8000", nil)
 	if err != nil {
@@ -187,7 +191,7 @@ MessageLoop:
 						continue
 					}
 
-					glog.Info("error decoding message", err)
+					logger.Infof("error decoding message", err)
 				}
 				messageChan <- req
 			}
@@ -244,7 +248,7 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 
 	client.OnTracksAvailable(func(tracks []sfu.ITrack) {
 		if client.IsDebugEnabled() {
-			glog.Info("tracks available", tracks)
+			logger.Infof("tracks available", tracks)
 		}
 		tracksAvailable := map[string]map[string]interface{}{}
 		for _, track := range tracks {
@@ -270,7 +274,7 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 
 	client.OnRenegotiation(func(ctx context.Context, offer webrtc.SessionDescription) (webrtc.SessionDescription, error) {
 		// SFU request a renegotiation, send the offer to client
-		glog.Info("receive renegotiation offer from SFU")
+		logger.Infof("receive renegotiation offer from SFU")
 
 		resp := Respose{
 			Status: true,
@@ -290,17 +294,17 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 		// this will wait for answer from client in 30 seconds or timeout
 		select {
 		case <-ctxTimeout.Done():
-			glog.Error("timeout on renegotiation")
+			logger.Errorf("timeout on renegotiation")
 			return webrtc.SessionDescription{}, errors.New("timeout on renegotiation")
 		case answer := <-answerChan:
-			glog.Info("received answer from client ", client.Type(), client.ID())
+			logger.Infof("received answer from client ", client.Type(), client.ID())
 			return answer, nil
 		}
 	})
 
 	client.OnAllowedRemoteRenegotiation(func() {
 		// SFU allow a remote renegotiation
-		glog.Info("receive allow remote renegotiation from SFU")
+		logger.Infof("receive allow remote renegotiation from SFU")
 
 		resp := Respose{
 			Status: true,
@@ -372,7 +376,7 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 					// handle as offer SDP
 					answer, err := client.Negotiate(webrtc.SessionDescription{SDP: sdp, Type: webrtc.SDPTypeOffer})
 					if err != nil {
-						glog.Error("error on negotiate", err)
+						logger.Errorf("error on negotiate", err)
 
 						resp = Respose{
 							Status: false,
@@ -392,7 +396,7 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 
 					conn.Write(respBytes)
 				} else {
-					glog.Info("receive renegotiation answer from client")
+					logger.Infof("receive renegotiation answer from client")
 					// handle as answer SDP as part of renegotiation request from SFU
 					// pass the answer to onRenegotiation handler above
 					answerChan <- webrtc.SessionDescription{SDP: sdp, Type: webrtc.SDPTypeAnswer}
@@ -435,10 +439,10 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 					}
 
 					if err := client.SubscribeTracks(subTracks); err != nil {
-						glog.Error("error on subscribe tracks", err)
+						logger.Errorf("error on subscribe tracks", err)
 					}
 				} else {
-					glog.Error("error on subscribe tracks wrong data format ", req.Data)
+					logger.Errorf("error on subscribe tracks wrong data format ", req.Data)
 				}
 
 			} else if req.Type == TypeSwitchQuality {
@@ -475,7 +479,7 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 				conn.Write(respBytes)
 
 			} else {
-				glog.Error("unknown message type", req)
+				logger.Errorf("unknown message type", req)
 			}
 		}
 	}

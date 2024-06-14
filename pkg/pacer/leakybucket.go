@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/golang/glog"
 	"github.com/inlivedev/sfu/pkg/rtppool"
 	"github.com/pion/interceptor"
+	"github.com/pion/logging"
 	"github.com/pion/rtp"
 )
 
@@ -61,10 +61,11 @@ type LeakyBucketPacer struct {
 
 	ssrcToWriter map[uint32]interceptor.RTPWriter
 	writerLock   sync.RWMutex
+	log          logging.LeveledLogger
 }
 
 // NewLeakyBucketPacer initializes a new LeakyBucketPacer
-func NewLeakyBucketPacer(initialBitrate int, allowDuplicate bool) *LeakyBucketPacer {
+func NewLeakyBucketPacer(log logging.LeveledLogger, initialBitrate int, allowDuplicate bool) *LeakyBucketPacer {
 	p := &LeakyBucketPacer{
 		allowDuplicate: allowDuplicate,
 		f:              1.5,
@@ -74,6 +75,7 @@ func NewLeakyBucketPacer(initialBitrate int, allowDuplicate bool) *LeakyBucketPa
 		done:           make(chan struct{}),
 		ssrcToWriter:   map[uint32]interceptor.RTPWriter{},
 		queues:         map[uint32]*queue{},
+		log:            log,
 	}
 
 	go p.Run()
@@ -116,7 +118,7 @@ func (p *LeakyBucketPacer) getWriter(ssrc uint32) interceptor.RTPWriter {
 	writer, ok := p.ssrcToWriter[ssrc]
 
 	if !ok {
-		glog.Warningf("no writer found for ssrc: %v", ssrc)
+		p.log.Warnf("no writer found for ssrc: %v", ssrc)
 		return nil
 	}
 
@@ -141,7 +143,7 @@ func (p *LeakyBucketPacer) Write(header *rtp.Header, payload []byte, attributes 
 
 	queue := p.getQueue(header.SSRC)
 	if queue == nil {
-		glog.Error("no queue found for ssrc: ", header.SSRC)
+		p.log.Errorf("no queue found for ssrc: ", header.SSRC)
 
 		return 0, ErrNoQueueFound
 	}
@@ -173,7 +175,7 @@ Loop:
 				break Loop
 			}
 
-			glog.Warning("packet cache: packet sequence ", pkt.Header().SequenceNumber, " already exists in the cache, will not adding the packet")
+			p.log.Warnf("packet cache: packet sequence ", pkt.Header().SequenceNumber, " already exists in the cache, will not adding the packet")
 
 			return 0, ErrDuplicate
 		}
@@ -241,7 +243,7 @@ func (p *LeakyBucketPacer) Run() {
 
 					next := queue.Remove(front)
 					if next == nil {
-						glog.Warningf("failed to access leaky bucket pacer queue, cast failed")
+						p.log.Warnf("failed to access leaky bucket pacer queue, cast failed")
 						emptyQueueCount++
 
 						continue
@@ -249,16 +251,16 @@ func (p *LeakyBucketPacer) Run() {
 
 					writer := p.getWriter(next.packet.Header().SSRC)
 					if writer == nil {
-						glog.Warningf("no writer found for ssrc: %v", next.packet.Header().SSRC)
+						p.log.Warnf("no writer found for ssrc: %v", next.packet.Header().SSRC)
 						next.packet.Release()
 
 						continue
 					}
 
-					// glog.Info("sending packet SSRC ", next.packet.Header().SSRC, ": ", next.packet.Header().SequenceNumber)
+					// p.log.Info("sending packet SSRC ", next.packet.Header().SSRC, ": ", next.packet.Header().SequenceNumber)
 					n, err := writer.Write(next.packet.Header(), next.packet.Payload(), next.attributes)
 					if err != nil {
-						glog.Error("failed to write packet: ", err)
+						p.log.Errorf("failed to write packet: ", err)
 					}
 
 					lastSent = now

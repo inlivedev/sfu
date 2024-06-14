@@ -6,13 +6,27 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golang/glog"
 	"github.com/pion/webrtc/v3"
 	"github.com/stretchr/testify/require"
 )
 
 func TestTracksSubscribe(t *testing.T) {
 	t.Parallel()
+
+	report := CheckRoutines(t)
+	defer report()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// create room manager first before create new room
+	roomManager := NewManager(ctx, "test", Options{
+		EnableMux:                true,
+		EnableBandwidthEstimator: true,
+		IceServers:               []webrtc.ICEServer{},
+	})
+
+	defer roomManager.Close()
 
 	roomID := roomManager.CreateRoomID()
 	roomName := "test-room"
@@ -24,14 +38,13 @@ func TestTracksSubscribe(t *testing.T) {
 	roomOpts.Codecs = []string{webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
 	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal, roomOpts)
 	require.NoError(t, err, "error creating room: %v", err)
-	ctx := testRoom.sfu.context
 
 	tracksAddedChan := make(chan int)
 	tracksAvailableChan := make(chan int)
 	trackChan := make(chan bool)
 
 	for i := 0; i < peerCount; i++ {
-		pc, client, _, _ := CreatePeerPair(ctx, testRoom, DefaultTestIceServers(), fmt.Sprintf("peer-%d", i), true, false)
+		pc, client, _, _ := CreatePeerPair(ctx, TestLogger, testRoom, DefaultTestIceServers(), fmt.Sprintf("peer-%d", i), true, false)
 
 		client.OnTracksAdded(func(addedTracks []ITrack) {
 			tracksAddedChan <- len(addedTracks)
@@ -84,6 +97,21 @@ Loop:
 func TestSimulcastTrack(t *testing.T) {
 	t.Parallel()
 
+	report := CheckRoutines(t)
+	defer report()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// create room manager first before create new room
+	roomManager := NewManager(ctx, "test", Options{
+		EnableMux:                true,
+		EnableBandwidthEstimator: true,
+		IceServers:               []webrtc.ICEServer{},
+	})
+
+	defer roomManager.Close()
+
 	roomID := roomManager.CreateRoomID()
 	roomName := "test-room"
 
@@ -92,7 +120,6 @@ func TestSimulcastTrack(t *testing.T) {
 	roomOpts.Codecs = []string{webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
 	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal, roomOpts)
 	require.NoError(t, err, "error creating room: %v", err)
-	ctx := testRoom.sfu.context
 
 	client1, pc1 := addSimulcastPair(t, ctx, testRoom, "peer1")
 	client2, pc2 := addSimulcastPair(t, ctx, testRoom, "peer2")
@@ -125,7 +152,7 @@ Loop:
 			break Loop
 		case <-trackChan:
 			trackCount++
-			glog.Info("track added ", trackCount)
+			t.Log("track added ", trackCount)
 			if trackCount == 2 {
 				break Loop
 			}
@@ -134,7 +161,7 @@ Loop:
 }
 
 func addSimulcastPair(t *testing.T, ctx context.Context, room *Room, peerName string) (*Client, *webrtc.PeerConnection) {
-	pc, client, _, _ := CreatePeerPair(ctx, room, DefaultTestIceServers(), peerName, true, true)
+	pc, client, _, _ := CreatePeerPair(ctx, TestLogger, room, DefaultTestIceServers(), peerName, true, true)
 	client.OnTracksAvailable(func(availableTracks []ITrack) {
 
 		tracksReq := make([]SubscribeTrackRequest, 0)
@@ -157,7 +184,7 @@ func addSimulcastPair(t *testing.T, ctx context.Context, room *Room, peerName st
 	})
 
 	pc.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
-		glog.Info("test: on track", track.Msid())
+		t.Log("test: on track", track.Msid())
 	})
 
 	return client, pc
@@ -165,6 +192,21 @@ func addSimulcastPair(t *testing.T, ctx context.Context, room *Room, peerName st
 
 func TestClientDataChannel(t *testing.T) {
 	t.Parallel()
+
+	report := CheckRoutines(t)
+	defer report()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// create room manager first before create new room
+	roomManager := NewManager(ctx, "test", Options{
+		EnableMux:                true,
+		EnableBandwidthEstimator: true,
+		IceServers:               []webrtc.ICEServer{},
+	})
+
+	defer roomManager.Close()
 
 	roomID := roomManager.CreateRoomID()
 	roomName := "test-room"
@@ -174,9 +216,9 @@ func TestClientDataChannel(t *testing.T) {
 	roomOpts.Codecs = []string{webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
 	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal, roomOpts)
 	require.NoError(t, err, "error creating room: %v", err)
-	ctx := testRoom.sfu.context
+
 	dcChan := make(chan *webrtc.DataChannel)
-	pc, client, _, connChan := CreateDataPair(ctx, testRoom, roomManager.options.IceServers, "peer1", func(c *webrtc.DataChannel) {
+	pc, client, _, connChan := CreateDataPair(ctx, TestLogger, testRoom, roomManager.options.IceServers, "peer1", func(c *webrtc.DataChannel) {
 		dcChan <- c
 	})
 
@@ -191,7 +233,7 @@ func TestClientDataChannel(t *testing.T) {
 		if state == webrtc.PeerConnectionStateConnected {
 			_, _ = pc.CreateDataChannel("test", nil)
 
-			negotiate(pc, client)
+			negotiate(pc, client, TestLogger)
 		}
 	case dc := <-dcChan:
 		require.Equal(t, "internal", dc.Label())
