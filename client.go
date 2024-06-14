@@ -1034,10 +1034,14 @@ func (c *Client) processPendingTracks() {
 
 // make sure to call this when client's done to clean everything
 func (c *Client) afterClosed() {
+	c.mu.Lock()
 	state := c.state.Load()
-	if state != ClientStateEnded {
-		c.state.Store(ClientStateEnded)
+	if state == ClientStateEnded {
+		return
 	}
+	c.mu.Unlock()
+
+	c.state.Store(ClientStateEnded)
 
 	c.internalDataChannel.Close()
 
