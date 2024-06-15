@@ -1214,7 +1214,7 @@ func (c *Client) startIdleTimeout(timeout time.Duration) {
 			
 			err := c.stop()
 			if err != nil {
-				c.log.Errorf("client: error stop client ", err)
+				glog.Error("client: error stop client ", err)
 			}
 		}
 	}()
