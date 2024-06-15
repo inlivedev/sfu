@@ -1214,7 +1214,11 @@ func (c *Client) startIdleTimeout(timeout time.Duration) {
 		err := c.idleTimeoutContext.Err()
 		if err != nil && err == context.DeadlineExceeded {
 			c.log.Infof("client: idle timeout reached ", c.ID)
-			c.afterClosed()
+
+			err := c.stop()
+			if err != nil {
+				c.log.Errorf("client: error stop client ", err)
+			}
 		}
 	}()
 }
