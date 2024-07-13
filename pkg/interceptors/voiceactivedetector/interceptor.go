@@ -9,7 +9,7 @@ import (
 	"github.com/pion/logging"
 	"github.com/pion/rtp"
 	"github.com/pion/sdp/v3"
-	"github.com/pion/webrtc/v3"
+	"github.com/pion/webrtc/v4"
 )
 
 const ATTRIBUTE_KEY = "audioLevel"

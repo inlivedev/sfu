@@ -4,7 +4,7 @@ import (
 	"github.com/pion/interceptor"
 	"github.com/pion/logging"
 	"github.com/pion/rtp"
-	"github.com/pion/webrtc/v3"
+	"github.com/pion/webrtc/v4"
 )
 
 type InterceptorFactory struct {

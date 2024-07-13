@@ -23,7 +23,7 @@ import (
 	"github.com/pion/interceptor/pkg/stats"
 	"github.com/pion/logging"
 	"github.com/pion/rtcp"
-	"github.com/pion/webrtc/v3"
+	"github.com/pion/webrtc/v4"
 )
 
 type ClientState int
@@ -416,7 +416,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		case webrtc.PeerConnectionStateNew:
 			// do nothing
 			client.startIdleTimeout(opts.IdleTimeout)
-		case webrtc.PeerConnectionState(webrtc.Unknown):
+		case webrtc.PeerConnectionState(webrtc.PeerConnectionStateUnknown):
 			// clean up
 			client.afterClosed()
 		}

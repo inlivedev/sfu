@@ -7,7 +7,7 @@ import (
 
 	"github.com/inlivedev/sfu/pkg/packetmap"
 	"github.com/pion/rtp"
-	"github.com/pion/webrtc/v3"
+	"github.com/pion/webrtc/v4"
 )
 
 type simulcastClientTrack struct {

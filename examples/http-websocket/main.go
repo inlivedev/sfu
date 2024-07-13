@@ -18,7 +18,7 @@ import (
 	"github.com/inlivedev/sfu/pkg/interceptors/voiceactivedetector"
 	"github.com/inlivedev/sfu/pkg/networkmonitor"
 	"github.com/pion/logging"
-	"github.com/pion/webrtc/v3"
+	"github.com/pion/webrtc/v4"
 	"golang.org/x/net/websocket"
 )
 
