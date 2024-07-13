@@ -37,14 +37,23 @@ func TestTracksSubscribe(t *testing.T) {
 	roomOpts := DefaultRoomOptions()
 	roomOpts.Codecs = []string{webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
 	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal, roomOpts)
+
+	defer testRoom.Close()
+
 	require.NoError(t, err, "error creating room: %v", err)
 
 	tracksAddedChan := make(chan int)
 	tracksAvailableChan := make(chan int)
 	trackChan := make(chan bool)
 
+	peers := make([]*PC, 0)
+	clients := make([]*Client, 0)
+
 	for i := 0; i < peerCount; i++ {
 		pc, client, _, _ := CreatePeerPair(ctx, TestLogger, testRoom, DefaultTestIceServers(), fmt.Sprintf("peer-%d", i), true, false)
+
+		peers = append(peers, pc)
+		clients = append(clients, client)
 
 		client.OnTracksAdded(func(addedTracks []ITrack) {
 			tracksAddedChan <- len(addedTracks)
@@ -57,7 +66,7 @@ func TestTracksSubscribe(t *testing.T) {
 			client.SetTracksSourceType(setTracks)
 		})
 
-		pc.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
+		pc.PeerConnection.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
 			trackChan <- true
 		})
 	}
@@ -90,6 +99,15 @@ Loop:
 
 	require.Equal(t, peerCount*2, tracksAdded)
 	require.Equal(t, expectedTracks, trackReceived)
+
+	for _, client := range clients {
+		require.NoError(t, testRoom.StopClient(client.id))
+	}
+
+	for _, pc := range peers {
+		require.NoError(t, pc.PeerConnection.Close())
+	}
+
 }
 
 // TODO: this is can't be work without a new SimulcastLocalTrack that can add header extension to the packet
@@ -183,11 +201,11 @@ func addSimulcastPair(t *testing.T, ctx context.Context, room *Room, peerName st
 		client.SetTracksSourceType(setTracks)
 	})
 
-	pc.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
+	pc.PeerConnection.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
 		t.Log("test: on track", track.Msid())
 	})
 
-	return client, pc
+	return client, pc.PeerConnection
 }
 
 func TestClientDataChannel(t *testing.T) {

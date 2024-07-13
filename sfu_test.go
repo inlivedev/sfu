@@ -49,7 +49,7 @@ func TestLeaveRoom(t *testing.T) {
 
 			clients = append(clients, client)
 
-			pc.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
+			pc.PeerConnection.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
 				trackChan <- true
 			})
 		}()
@@ -157,7 +157,7 @@ func TestRenegotiation(t *testing.T) {
 	for i := 0; i < peerCount; i++ {
 		pc, client, _, _ := CreatePeerPair(ctx, TestLogger, testRoom, DefaultTestIceServers(), fmt.Sprintf("peer-%d", i), true, false)
 
-		pairs = append(pairs, Pair{pc, client})
+		pairs = append(pairs, Pair{pc.PeerConnection, client})
 
 		client.OnTracksAdded(func(addedTracks []ITrack) {
 			setTracks := make(map[string]TrackType, 0)
@@ -167,7 +167,7 @@ func TestRenegotiation(t *testing.T) {
 			client.SetTracksSourceType(setTracks)
 		})
 
-		pc.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
+		pc.PeerConnection.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
 			trackChan <- true
 		})
 	}

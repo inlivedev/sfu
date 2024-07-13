@@ -8,6 +8,7 @@ import (
 	"os"
 	"path"
 	"runtime"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -34,6 +35,12 @@ const (
 	oggPageDuration      = time.Millisecond * 20
 	h264FrameDuration    = time.Millisecond * 33
 )
+
+type PC struct {
+	Mu                *sync.Mutex
+	PeerConnection    *webrtc.PeerConnection
+	IsInRenegotiation bool
+}
 
 func GetStaticTracks(ctx context.Context, streamID string, loop bool) ([]*webrtc.TrackLocalStaticSample, chan bool) {
 	audioTrackID := GenerateSecureToken()
@@ -261,7 +268,10 @@ func SetPeerConnectionTracks(ctx context.Context, peerConnection *webrtc.PeerCon
 		go func() {
 			rtcpBuf := make([]byte, 1500)
 			ctxx, cancel := context.WithCancel(ctx)
+
 			defer cancel()
+			defer rtpTranscv.Stop()
+
 			for {
 				select {
 				case <-ctxx.Done():
@@ -348,7 +358,7 @@ func GetMediaEngine() *webrtc.MediaEngine {
 	return mediaEngine
 }
 
-func CreatePeerPair(ctx context.Context, log logging.LeveledLogger, room *Room, iceServers []webrtc.ICEServer, peerName string, loop, isSimulcast bool) (*webrtc.PeerConnection, *Client, stats.Getter, chan bool) {
+func CreatePeerPair(ctx context.Context, log logging.LeveledLogger, room *Room, iceServers []webrtc.ICEServer, peerName string, loop, isSimulcast bool) (*PC, *Client, stats.Getter, chan bool) {
 	clientContext, cancelClient := context.WithCancel(ctx)
 	var (
 		client      *Client
@@ -398,6 +408,12 @@ func CreatePeerPair(ctx context.Context, log logging.LeveledLogger, room *Room, 
 		ICEServers: iceServers,
 	})
 
+	peer := &PC{
+		Mu:                &sync.Mutex{},
+		PeerConnection:    pc,
+		IsInRenegotiation: false,
+	}
+
 	if isSimulcast {
 		_ = AddSimulcastVideoTracks(ctx, pc, GenerateSecureToken(), peerName)
 
@@ -437,6 +453,11 @@ func CreatePeerPair(ctx context.Context, log logging.LeveledLogger, room *Room, 
 				case <-ctxx.Done():
 					return
 				default:
+					err := track.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+					if err != nil {
+						log.Errorf("set read deadline error:%v", err)
+						return
+					}
 					_, _, err = track.Read(rtpBuff)
 					if err == io.EOF {
 						return
@@ -509,6 +530,10 @@ func CreatePeerPair(ctx context.Context, log logging.LeveledLogger, room *Room, 
 		newTcv := len(pc.GetTransceivers()) - currentTranscv
 		log.Infof("test: new transceiver ", newTcv, " total tscv ", len(pc.GetTransceivers()))
 
+		peer.Mu.Lock()
+		peer.IsInRenegotiation = false
+		peer.Mu.Unlock()
+
 		return *pc.LocalDescription(), nil
 	})
 
@@ -534,7 +559,7 @@ func CreatePeerPair(ctx context.Context, log logging.LeveledLogger, room *Room, 
 		err = client.PeerConnection().PC().AddICECandidate(candidate.ToJSON())
 	})
 
-	return pc, client, statsGetter, allDone
+	return peer, client, statsGetter, allDone
 }
 
 func negotiate(pc *webrtc.PeerConnection, client *Client, log logging.LeveledLogger) {
@@ -709,6 +734,7 @@ func LoadVp9Track(ctx context.Context, log logging.LeveledLogger, pc *webrtc.Pee
 	// Before these packets are returned they are processed by interceptors. For things
 	// like NACK this needs to be called.
 	ctxx, cancell := context.WithCancel(ctx)
+	defer cancell()
 
 	sender := transcv.Sender()
 
@@ -718,7 +744,6 @@ func LoadVp9Track(ctx context.Context, log logging.LeveledLogger, pc *webrtc.Pee
 		for {
 			select {
 			case <-ctxx.Done():
-				cancell()
 				return
 			default:
 				if _, _, rtcpErr := sender.Read(rtcpBuf); rtcpErr != nil {

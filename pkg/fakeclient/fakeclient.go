@@ -21,7 +21,7 @@ func Create(ctx context.Context, log logging.LeveledLogger, room *sfu.Room, iceS
 
 	return &FakeClient{
 		ID:             id,
-		PeerConnection: pc,
+		PeerConnection: pc.PeerConnection,
 		Client:         client,
 		Stats:          stats,
 	}

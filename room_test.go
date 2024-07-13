@@ -108,6 +108,9 @@ func TestRoomJoinLeftEvent(t *testing.T) {
 	roomOpts.Codecs = []string{webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
 	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal, roomOpts)
 	require.NoError(t, err, "error creating room: %v", err)
+
+	defer testRoom.Close()
+
 	leftChan := make(chan bool)
 	joinChan := make(chan string)
 	peerCount := 0
@@ -124,9 +127,13 @@ func TestRoomJoinLeftEvent(t *testing.T) {
 		clients[client.ID()] = client
 	})
 
-	_, client1, _, _ := CreatePeerPair(ctx, TestLogger, testRoom, DefaultTestIceServers(), "peer1", false, false)
-	_, client2, _, _ := CreatePeerPair(ctx, TestLogger, testRoom, DefaultTestIceServers(), "peer1", false, false)
-	_, client3, _, _ := CreatePeerPair(ctx, TestLogger, testRoom, DefaultTestIceServers(), "peer1", false, false)
+	pc1, client1, _, _ := CreatePeerPair(ctx, TestLogger, testRoom, DefaultTestIceServers(), "peer1", false, false)
+	pc2, client2, _, _ := CreatePeerPair(ctx, TestLogger, testRoom, DefaultTestIceServers(), "peer1", false, false)
+	pc3, client3, _, _ := CreatePeerPair(ctx, TestLogger, testRoom, DefaultTestIceServers(), "peer1", false, false)
+
+	defer pc1.PeerConnection.Close()
+	defer pc2.PeerConnection.Close()
+	defer pc3.PeerConnection.Close()
 
 	timeout, cancelTimeout := context.WithTimeout(ctx, 60*time.Second)
 	defer cancelTimeout()
@@ -167,8 +174,6 @@ func TestRoomJoinLeftEvent(t *testing.T) {
 	}
 
 	require.Equal(t, 0, len(testRoom.sfu.clients.clients))
-
-	_ = testRoom.Close()
 }
 
 func TestRoomStats(t *testing.T) {
@@ -249,10 +254,10 @@ Loop:
 
 			if peerCount == 2 {
 				time.Sleep(2 * time.Second)
-				pc1ReceiverStats := GetReceiverStats(pc1, statsGetter1)
-				pc1SenderStats := GetSenderStats(pc1, statsGetter1)
-				pc2ReceiverStats := GetReceiverStats(pc2, statsGetter2)
-				pc2SenderStats := GetSenderStats(pc2, statsGetter2)
+				pc1ReceiverStats := GetReceiverStats(pc1.PeerConnection, statsGetter1)
+				pc1SenderStats := GetSenderStats(pc1.PeerConnection, statsGetter1)
+				pc2ReceiverStats := GetReceiverStats(pc2.PeerConnection, statsGetter2)
+				pc2SenderStats := GetSenderStats(pc2.PeerConnection, statsGetter2)
 
 				totalClientIngressBytes = 0
 				totalClientEgressBytes = 0
