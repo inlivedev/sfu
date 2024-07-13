@@ -153,6 +153,30 @@
 
         const maxBw = 2500*1000
 
+		let mutedMic = false
+
+		let mutedCam = false
+
+		const toggleMic = async (e) => {
+			peerConnection.getSenders().forEach(sender => {
+				if (sender.track.kind === 'audio') {
+					sender.track.enabled = !mutedMic
+					mutedMic = !mutedMic
+					e.target.innerText = !sender.track.enabled?'Unmute Mic':'Mute Mic'
+				}
+			})
+		}
+
+		const toggleCam = async (e) => {
+			peerConnection.getSenders().forEach(sender => {
+				if (sender.track.kind === 'video') {
+					sender.track.enabled = !mutedCam
+					mutedCam = !mutedCam
+					e.target.innerText = !sender.track.enabled?'Unmute Cam':'Mute Cam'
+				}
+			})
+		}
+
         const startWs =async ()=>{
             let debug = false
             const urlParams = new URLSearchParams(window.location.search);
@@ -272,6 +296,49 @@
         function startVP9() {
             start('vp9')
         }
+
+		function setOpusSDP(sdp){
+			let fmtlineOpus = ''
+
+			let fmtNo = null
+			// find fmtline for opus from SDP
+			const opusFmtLines = sdp.match(/a=rtpmap:(\d+) opus\/(\d+)\/(\d+)/)
+			if (opusFmtLines) {
+				// extract only the first digit
+				const matchesNo = opusFmtLines[0].match(/(\d+)/)
+				if (matchesNo) {
+				fmtNo = matchesNo[0]
+				}
+			}
+
+			console.log('fmtNo', fmtNo)
+
+			// find fmtp line for opus from SDP
+			const opusFmtpLines = sdp.match(new RegExp(`a=fmtp:${fmtNo} .+`))
+			if (opusFmtpLines) {
+				fmtlineOpus = opusFmtpLines[0]
+			}
+
+			// check if DTX is enabled and if not, add it to the SDP
+			if (!fmtlineOpus.includes('usedtx=1')) {
+				fmtlineOpus += ';usedtx=1'
+			}
+
+			// check if inbandfec is enabled and if not, add it to the SDP
+			if (!fmtlineOpus.includes('useinbandfec=1')) {
+				fmtlineOpus += ';useinbandfec=1'
+			}
+
+			console.log('fmtlineOpus', fmtlineOpus)
+
+			// replace the old fmtp line with the new one
+			sdp = sdp.replace(
+				new RegExp(`a=fmtp:${fmtNo} .+`),
+				`a=fmtp:${fmtNo} ${fmtlineOpus}`
+			)
+
+			return sdp
+			}
 
         async function start(codec) {
             await startWs()
@@ -553,6 +620,8 @@
             }
 
             const offer=await peerConnection.createOffer()
+
+			// offer.sdp = setOpusSDP(offer.sdp)
           
             await peerConnection.setLocalDescription(offer)
 
@@ -957,6 +1026,8 @@
         document.addEventListener("DOMContentLoaded", function(event) {
             document.getElementById("btnStart").onclick = startH264;
             document.getElementById("btnStartVP9").onclick = startVP9;
+			document.getElementById("btnToggleMic").onclick = toggleMic;
+			document.getElementById("btnToggleCam").onclick = toggleCam;
             document.getElementById("btnShareScreen").onclick = shareScreen;
             document.getElementById("btnStats").onclick = toggleStats;
             document.getElementById("selectQuality").onchange = switchQuality;
@@ -979,6 +1050,8 @@
     <footer>
         <button id="btnStart">Start H264</button>
         <button id="btnStartVP9">Start with VP9</button>
+		<button id="btnToggleMic">Mute Mic</button>
+		<button id="btnToggleCam">Mute Cam</button>
 		<span><input id="simulcast" type="checkbox" value="simulcast">Simulcast</span>
 		<span><input id="svc" type="checkbox" value="svc" checked>SVC</span>
         <button id="btnShareScreen">Share Screen</button>

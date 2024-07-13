@@ -16,13 +16,13 @@ import (
 	"github.com/pion/interceptor"
 	"github.com/pion/interceptor/pkg/stats"
 	"github.com/pion/logging"
-	"github.com/pion/webrtc/v3"
-	"github.com/pion/webrtc/v3/pkg/media"
+	"github.com/pion/webrtc/v4"
+	"github.com/pion/webrtc/v4/pkg/media"
 
-	"github.com/pion/webrtc/v3/pkg/media/h264reader"
-	"github.com/pion/webrtc/v3/pkg/media/ivfreader"
+	"github.com/pion/webrtc/v4/pkg/media/h264reader"
+	"github.com/pion/webrtc/v4/pkg/media/ivfreader"
 
-	"github.com/pion/webrtc/v3/pkg/media/oggreader"
+	"github.com/pion/webrtc/v4/pkg/media/oggreader"
 )
 
 var mediaEngine *webrtc.MediaEngine
@@ -617,11 +617,11 @@ func CreateDataPair(ctx context.Context, log logging.LeveledLogger, room *Room, 
 
 	pc.OnDataChannel(onDataChannel)
 
-	if _, err := pc.AddTransceiverFromKind(webrtc.RTPCodecTypeVideo, webrtc.RtpTransceiverInit{Direction: webrtc.RTPTransceiverDirectionRecvonly}); err != nil {
+	if _, err := pc.AddTransceiverFromKind(webrtc.RTPCodecTypeVideo, webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionRecvonly}); err != nil {
 		panic(err)
 	}
 
-	if _, err := pc.AddTransceiverFromKind(webrtc.RTPCodecTypeAudio, webrtc.RtpTransceiverInit{Direction: webrtc.RTPTransceiverDirectionRecvonly}); err != nil {
+	if _, err := pc.AddTransceiverFromKind(webrtc.RTPCodecTypeAudio, webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionRecvonly}); err != nil {
 		panic(err)
 	}
 
@@ -722,7 +722,7 @@ func LoadVp9Track(ctx context.Context, log logging.LeveledLogger, pc *webrtc.Pee
 		panic(videoTrackErr)
 	}
 
-	transcv, videoTrackErr := pc.AddTransceiverFromTrack(videoTrack, webrtc.RtpTransceiverInit{
+	transcv, videoTrackErr := pc.AddTransceiverFromTrack(videoTrack, webrtc.RTPTransceiverInit{
 		Direction: webrtc.RTPTransceiverDirectionSendrecv,
 	})
 

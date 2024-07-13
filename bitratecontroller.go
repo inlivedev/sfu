@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/pion/interceptor/pkg/cc"
-	"github.com/pion/webrtc/v3"
+	"github.com/pion/webrtc/v4"
 )
 
 var (

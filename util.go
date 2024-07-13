@@ -18,7 +18,7 @@ import (
 	"github.com/pion/rtp/codecs"
 	"github.com/pion/sdp/v3"
 	"github.com/pion/turn/v2"
-	"github.com/pion/webrtc/v3"
+	"github.com/pion/webrtc/v4"
 	"golang.org/x/text/language"
 	"golang.org/x/text/message"
 )
