@@ -60,26 +60,28 @@ var (
 )
 
 type ClientOptions struct {
-	IdleTimeout          time.Duration
-	Type                 string
-	EnableVoiceDetection bool
-	EnablePlayoutDelay   bool
+	IdleTimeout          time.Duration `json:"idle_timeout"`
+	Type                 string        `json:"type"`
+	EnableVoiceDetection bool          `json:"enable_voice_detection"`
+	EnablePlayoutDelay   bool          `json:"enable_playout_delay"`
+	EnableOpusDTX        bool          `json:"enable_opus_dtx"`
+	EnableOpusInbandFEC  bool          `json:"enable_opus_inband_fec"`
 	// Configure the minimum playout delay that will be used by the client
 	// Recommendation:
 	// 0 ms: Certain gaming scenarios (likely without audio) where we will want to play the frame as soon as possible. Also, for remote desktop without audio where rendering a frame asap makes sense
 	// 100/150/200 ms: These could be the max target latency for interactive streaming use cases depending on the actual application (gaming, remoting with audio, interactive scenarios)
 	// 400 ms: Application that want to ensure a network glitch has very little chance of causing a freeze can start with a minimum delay target that is high enough to deal with network issues. Video streaming is one example.
-	MinPlayoutDelay uint16
+	MinPlayoutDelay uint16 `json:"min_playout_delay"`
 	// Configure the minimum playout delay that will be used by the client
 	// Recommendation:
 	// 0 ms: Certain gaming scenarios (likely without audio) where we will want to play the frame as soon as possible. Also, for remote desktop without audio where rendering a frame asap makes sense
 	// 100/150/200 ms: These could be the max target latency for interactive streaming use cases depending on the actual application (gaming, remoting with audio, interactive scenarios)
 	// 400 ms: Application that want to ensure a network glitch has very little chance of causing a freeze can start with a minimum delay target that is high enough to deal with network issues. Video streaming is one example.
-	MaxPlayoutDelay     uint16
-	JitterBufferMinWait time.Duration
-	JitterBufferMaxWait time.Duration
+	MaxPlayoutDelay     uint16        `json:"max_playout_delay"`
+	JitterBufferMinWait time.Duration `json:"jitter_buffer_min_wait"`
+	JitterBufferMaxWait time.Duration `json:"jitter_buffer_max_wait"`
 	// On unstable network, the packets can be arrived unordered which may affected the nack and packet loss counts, set this to true to allow the SFU to handle reordered packet
-	ReorderPackets bool
+	ReorderPackets bool `json:"reorder_packets"`
 	Log            logging.LeveledLogger
 }
 
@@ -184,6 +186,8 @@ func DefaultClientOptions() ClientOptions {
 		Type:                 ClientTypePeer,
 		EnableVoiceDetection: true,
 		EnablePlayoutDelay:   true,
+		EnableOpusDTX:        true,
+		EnableOpusInbandFEC:  true,
 		MinPlayoutDelay:      100,
 		MaxPlayoutDelay:      200,
 		JitterBufferMinWait:  20 * time.Millisecond,
@@ -742,7 +746,65 @@ func (c *Client) negotiateQueuOp(offer webrtc.SessionDescription) (*webrtc.Sessi
 
 	c.pendingRemoteCandidates = nil
 
-	return c.peerConnection.PC().LocalDescription(), nil
+	sdp := c.setOpusSDP(*c.peerConnection.PC().LocalDescription())
+
+	return &sdp, nil
+}
+
+func (c *Client) setOpusSDP(sdp webrtc.SessionDescription) webrtc.SessionDescription {
+	if c.options.EnableOpusDTX {
+		var regex, err = regexp.Compile(`a=rtpmap:(\d+) opus\/(\d+)\/(\d+)`)
+		if err != nil {
+			c.log.Errorf("client: error on compile regex ", err)
+			return sdp
+		}
+		var opusLine = regex.FindString(sdp.SDP)
+
+		if opusLine == "" {
+			c.log.Errorf("client: error opus line not found")
+			return sdp
+		}
+
+		regex, err = regexp.Compile(`(\d+)`)
+		if err != nil {
+			c.log.Errorf("client: error on compile regex ", err)
+			return sdp
+		}
+
+		var opusNo = regex.FindString(opusLine)
+		if opusNo == "" {
+			c.log.Errorf("client: error opus no not found")
+			return sdp
+		}
+
+		fmtpRegex, err := regexp.Compile(`a=fmtp:` + opusNo + ` .+`)
+		if err != nil {
+			c.log.Errorf("client: error on compile regex ", err)
+			return sdp
+		}
+
+		var fmtpLine = fmtpRegex.FindString(sdp.SDP)
+		if fmtpLine == "" {
+			c.log.Errorf("client: error fmtp line not found")
+			return sdp
+		}
+
+		var newFmtpLine = ""
+
+		if c.options.EnableOpusDTX && !strings.Contains(fmtpLine, "usedtx=1") {
+			newFmtpLine += ";usedtx=1"
+		}
+
+		if c.options.EnableOpusInbandFEC && !strings.Contains(fmtpLine, "useinbandfec=1") {
+			newFmtpLine += ";useinbandfec=1"
+		}
+
+		if newFmtpLine != "" {
+			sdp.SDP = strings.Replace(sdp.SDP, fmtpLine, fmtpLine+newFmtpLine, -1)
+		}
+	}
+
+	return sdp
 }
 
 func (c *Client) renegotiate() {
