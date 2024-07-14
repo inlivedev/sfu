@@ -115,10 +115,11 @@ func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 
 	quality := t.getQuality()
 	if quality == QualityNone {
-		_ = t.packetmap.Drop(p.SequenceNumber, vp9Packet.PictureID)
+		// TODO: need to do if
+		// _ = t.packetmap.Drop(p.SequenceNumber, vp9Packet.PictureID)
 
-		t.client.log.Infof("scalabletrack: packet ", p.SequenceNumber, " is dropped because of quality none")
-		return
+		// t.client.log.Infof("scalabletrack: packet ", p.SequenceNumber, " is dropped because of quality none")
+		// return
 	}
 
 	switch quality {
@@ -126,7 +127,7 @@ func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 		qualityPreset = t.qualityPresets.High
 	case QualityMid:
 		qualityPreset = t.qualityPresets.Mid
-	case QualityLow:
+	default:
 		qualityPreset = t.qualityPresets.Low
 	}
 

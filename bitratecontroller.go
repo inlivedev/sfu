@@ -464,19 +464,19 @@ func (bc *bitrateController) onRemoteViewedSizeChanged(videoSize videoSize) {
 
 	// TODO: check if it is necessary to set max quality to none
 	if videoSize.Width == 0 || videoSize.Height == 0 {
-		bc.client.log.Infof("bitrate: track ", videoSize.TrackID, " video size is 0, set max quality to low")
+		bc.client.log.Infof("bitrate: track  %s video size is 0, set max quality to low", videoSize.TrackID)
 		claim.track.SetMaxQuality(QualityNone)
 		return
 	}
 
-	if videoSize.Width*videoSize.Height <= bc.client.sfu.bitrateConfigs.VideoMidPixels {
-		bc.client.log.Infof("bitrate: track ", videoSize.TrackID, " video size is low, set max quality to low")
+	if videoSize.Width*videoSize.Height < bc.client.sfu.bitrateConfigs.VideoMidPixels {
+		bc.client.log.Infof("bitrate: track %s video size is low, set max quality to low", videoSize.TrackID)
 		claim.track.SetMaxQuality(QualityLow)
-	} else if videoSize.Width*videoSize.Height <= bc.client.sfu.bitrateConfigs.VideoHighPixels {
-		bc.client.log.Infof("bitrate: track ", videoSize.TrackID, " video size is mid, set max quality to mid")
+	} else if videoSize.Width*videoSize.Height < bc.client.sfu.bitrateConfigs.VideoHighPixels {
+		bc.client.log.Infof("bitrate: track %s video size is mid, set max quality to mid", videoSize.TrackID)
 		claim.track.SetMaxQuality(QualityMid)
 	} else {
-		bc.client.log.Infof("bitrate: track ", videoSize.TrackID, " video size is high, set max quality to high")
+		bc.client.log.Infof("bitrate: track %s video size is high, set max quality to high", videoSize.TrackID)
 		claim.track.SetMaxQuality(QualityHigh)
 	}
 }

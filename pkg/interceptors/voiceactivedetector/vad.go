@@ -166,8 +166,6 @@ func (v *VoiceDetector) sendPacketsToCallback() int {
 		}
 
 		v.onVoiceDetected(activity)
-
-		v.log.Debugf("voice detected: %v", activity)
 	}
 
 	// clear packets
@@ -255,7 +253,6 @@ func (v *VoiceDetector) isDetected(vp *RetainablePacket) bool {
 	// detected true after the audio level stay below threshold until pass the head margin
 	if !v.detected && v.startDetected != 0 && isHeadMarginPassed {
 		// start send packet to callback
-		v.log.Debugf("voice start detected %d ms ago", durationGap)
 		v.detected = true
 		v.lastDetectedTS = vp.Data().Timestamp
 

@@ -141,7 +141,9 @@ func (t *simulcastClientTrack) push(p *rtp.Packet, quality QualityLevel) {
 	targetQuality := t.getQuality()
 
 	if targetQuality == QualityNone {
-		return
+		// TODO: figure out what to do if the target quality is none
+		// probably we should send a blank frame
+		targetQuality = QualityLow
 	}
 
 	if !t.client.bitrateController.exists(t.ID()) {
