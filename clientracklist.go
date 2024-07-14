@@ -57,6 +57,8 @@ func (l *clientTrackList) Length() int {
 }
 
 func (l *clientTrackList) GetTracks() []iClientTrack {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
 	return l.tracks
 }
 

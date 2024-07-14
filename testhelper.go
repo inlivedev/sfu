@@ -270,20 +270,27 @@ func SetPeerConnectionTracks(ctx context.Context, peerConnection *webrtc.PeerCon
 			ctxx, cancel := context.WithCancel(ctx)
 
 			defer cancel()
-			defer rtpTranscv.Stop()
+			defer func() {
+				if rtpTranscv != nil {
+					rtpTranscv.Stop()
+				}
+			}()
 
 			for {
 				select {
 				case <-ctxx.Done():
 					return
 				default:
-					err := rtpTranscv.Sender().SetReadDeadline(time.Now().Add(10 * time.Millisecond))
-					if err != nil {
-						return
-					}
+					if rtpTranscv != nil && rtpTranscv.Sender() != nil {
+						err := rtpTranscv.Sender().SetReadDeadline(time.Now().Add(10 * time.Millisecond))
+						if err != nil {
+							return
+						}
 
-					if _, _, rtcpErr := rtpTranscv.Sender().Read(rtcpBuf); rtcpErr != nil {
-						return
+						if _, _, rtcpErr := rtpTranscv.Sender().Read(rtcpBuf); rtcpErr != nil {
+							return
+						}
+
 					}
 				}
 

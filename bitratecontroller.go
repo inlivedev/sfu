@@ -465,13 +465,14 @@ func (bc *bitrateController) onRemoteViewedSizeChanged(videoSize videoSize) {
 	// TODO: check if it is necessary to set max quality to none
 	if videoSize.Width == 0 || videoSize.Height == 0 {
 		bc.client.log.Infof("bitrate: track ", videoSize.TrackID, " video size is 0, set max quality to low")
-		claim.track.SetMaxQuality(QualityLow)
+		claim.track.SetMaxQuality(QualityNone)
+		return
 	}
 
-	if videoSize.Width*videoSize.Height <= bc.client.sfu.bitrateConfigs.VideoLowPixels {
+	if videoSize.Width*videoSize.Height <= bc.client.sfu.bitrateConfigs.VideoMidPixels {
 		bc.client.log.Infof("bitrate: track ", videoSize.TrackID, " video size is low, set max quality to low")
 		claim.track.SetMaxQuality(QualityLow)
-	} else if videoSize.Width*videoSize.Height <= bc.client.sfu.bitrateConfigs.VideoMidPixels {
+	} else if videoSize.Width*videoSize.Height <= bc.client.sfu.bitrateConfigs.VideoHighPixels {
 		bc.client.log.Infof("bitrate: track ", videoSize.TrackID, " video size is mid, set max quality to mid")
 		claim.track.SetMaxQuality(QualityMid)
 	} else {

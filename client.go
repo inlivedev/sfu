@@ -1358,7 +1358,9 @@ func (c *Client) SetTracksSourceType(trackTypes map[string]TrackType) {
 // Make sure you already listen for `client.OnRenegotiation()` before calling this method to track subscription can complete.
 func (c *Client) SubscribeTracks(req []SubscribeTrackRequest) error {
 	if c.peerConnection.PC().ConnectionState() != webrtc.PeerConnectionStateConnected {
+		c.mu.Lock()
 		c.pendingReceivedTracks = append(c.pendingReceivedTracks, req...)
+		c.mu.Unlock()
 
 		return nil
 	}
@@ -1732,6 +1734,7 @@ func (c *Client) enableSendVADToInternalDataChannel() {
 
 		if err := c.internalDataChannel.SendText(string(data)); err != nil {
 			c.log.Errorf("client: error send vad data ", err)
+			c.log.Errorf("client: voice activity count ", len(activity.AudioLevels))
 			return
 		}
 	})

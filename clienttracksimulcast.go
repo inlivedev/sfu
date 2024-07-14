@@ -102,6 +102,8 @@ func newSimulcastClientTrack(c *Client, t *SimulcastTrack) *simulcastClientTrack
 }
 
 func (t *simulcastClientTrack) Client() *Client {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
 	return t.client
 }
 
@@ -132,9 +134,6 @@ func (t *simulcastClientTrack) writeRTP(p *rtp.Packet) {
 }
 
 func (t *simulcastClientTrack) push(p *rtp.Packet, quality QualityLevel) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
 	isKeyframe := IsKeyframe(t.mimeType, p)
 
 	currentQuality := t.LastQuality()
@@ -343,13 +342,13 @@ func (t *simulcastClientTrack) RequestPLI() {
 func (t *simulcastClientTrack) getQuality() QualityLevel {
 	track := t.remoteTrack
 
-	claim := t.client.bitrateController.GetClaim(t.ID())
+	claim := t.Client().bitrateController.GetClaim(t.ID())
 
 	if claim == nil {
 		return QualityNone
 	}
 
-	quality := min(claim.quality, t.MaxQuality(), Uint32ToQualityLevel(t.client.quality.Load()))
+	quality := min(claim.Quality(), t.MaxQuality(), Uint32ToQualityLevel(t.client.quality.Load()))
 
 	if quality != QualityNone && !track.isTrackActive(quality) {
 		if quality != QualityLow && track.isTrackActive(QualityLow) {

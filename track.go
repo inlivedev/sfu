@@ -95,8 +95,6 @@ func newTrack(ctx context.Context, client *Client, trackRemote IRemoteTrack, min
 	}
 
 	onRead := func(p *rtp.Packet) {
-		t.base.clientTracks.mu.RLock()
-
 		tracks := t.base.clientTracks.GetTracks()
 
 		for _, track := range tracks {
@@ -113,8 +111,6 @@ func newTrack(ctx context.Context, client *Client, trackRemote IRemoteTrack, min
 
 			packet.Release()
 		}
-
-		t.base.clientTracks.mu.RUnlock()
 
 		//nolint:ineffassign // this is required
 		packet := rtppool.NewPacket(&p.Header, p.Payload)
@@ -482,11 +478,12 @@ func (t *SimulcastTrack) AddRemoteTrack(track IRemoteTrack, minWait, maxWait tim
 	quality := RIDToQuality(track.RID())
 
 	onRead := func(p *rtp.Packet) {
-
+		t.mu.Lock()
 		// set the base timestamp for the track if it is not set yet
 		if t.baseTS == 0 {
 			t.baseTS = p.Timestamp
 		}
+		t.mu.Unlock()
 
 		if quality == QualityHigh && t.remoteTrackHighBaseTS == 0 {
 			t.remoteTrackHighBaseTS = p.Timestamp
