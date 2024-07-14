@@ -47,7 +47,7 @@ func newVAD(ctx context.Context, config Config, streamInfo *interceptor.StreamIn
 		context:       ctx,
 		config:        config,
 		streamInfo:    streamInfo,
-		channel:       make(chan *RetainablePacket),
+		channel:       make(chan *RetainablePacket, 1024),
 		mu:            sync.RWMutex{},
 		VoicePackets:  make([]*RetainablePacket, 0),
 		packetManager: newPacketManager(),
@@ -82,6 +82,7 @@ func (v *VoiceDetector) run() {
 			case <-ctx.Done():
 				return
 			case voicePacket := <-v.channel:
+
 				if v.isDetected(voicePacket) {
 					// send all packets to callback
 					v.sendPacketsToCallback()

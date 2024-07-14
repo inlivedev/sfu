@@ -3,16 +3,12 @@ package voiceactivedetector
 import (
 	"errors"
 	"sync"
-	"time"
 )
 
 var (
-	errPacketReleased          = errors.New("packet has been released")
-	errFailedToCastHeaderPool  = errors.New("failed to cast header pool")
-	errFailedToCastPayloadPool = errors.New("failed to cast payload pool")
+	errPacketReleased       = errors.New("packet has been released")
+	errFailedToCastDataPool = errors.New("failed to cast pool")
 )
-
-const maxPayloadLen = 1460
 
 type PacketManager struct {
 	Pool *sync.Pool
@@ -33,8 +29,7 @@ func (m *PacketManager) NewPacket(seqNo uint16, timestamp uint32, audioLevel uin
 	p := &RetainablePacket{
 		onRelease: m.releasePacket,
 		// new packets have retain count of 1
-		count:     1,
-		addedTime: time.Now(),
+		count: 1,
 	}
 
 	p.mu.Lock()
@@ -43,8 +38,12 @@ func (m *PacketManager) NewPacket(seqNo uint16, timestamp uint32, audioLevel uin
 	var ok bool
 	p.data, ok = m.Pool.Get().(*VoicePacketData)
 	if !ok {
-		return nil, errFailedToCastHeaderPool
+		return nil, errFailedToCastDataPool
 	}
+
+	p.data.SequenceNo = seqNo
+	p.data.Timestamp = timestamp
+	p.data.AudioLevel = audioLevel
 
 	return p, nil
 }
@@ -58,8 +57,7 @@ type RetainablePacket struct {
 	mu        sync.RWMutex
 	count     int
 
-	data      *VoicePacketData
-	addedTime time.Time
+	data *VoicePacketData
 }
 
 func (p *RetainablePacket) Data() *VoicePacketData {
@@ -67,13 +65,6 @@ func (p *RetainablePacket) Data() *VoicePacketData {
 	defer p.mu.RUnlock()
 
 	return p.data
-}
-
-func (p *RetainablePacket) AddedTime() time.Time {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-
-	return p.addedTime
 }
 
 func (p *RetainablePacket) Retain() error {
