@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/pion/interceptor"
+	"github.com/pion/logging"
 	"github.com/pion/rtp"
 )
 
@@ -16,16 +17,16 @@ type VoicePacketData struct {
 }
 
 type VoiceActivity struct {
-	TrackID     string            `json:"trackID"`
-	StreamID    string            `json:"streamID"`
-	SSRC        uint32            `json:"ssrc"`
-	ClockRate   uint32            `json:"clockRate"`
-	AudioLevels []VoicePacketData `json:"audioLevels"`
+	TrackID     string             `json:"trackID"`
+	StreamID    string             `json:"streamID"`
+	SSRC        uint32             `json:"ssrc"`
+	ClockRate   uint32             `json:"clockRate"`
+	AudioLevels []*VoicePacketData `json:"audioLevels"`
 }
 
 type VoiceDetector struct {
 	streamInfo     *interceptor.StreamInfo
-	interceptor    *Interceptor
+	config         Config
 	streamID       string
 	trackID        string
 	context        context.Context
@@ -33,20 +34,24 @@ type VoiceDetector struct {
 	detected       bool
 	startDetected  uint32
 	lastDetectedTS uint32
-	channel        chan VoicePacketData
+	channel        chan *RetainablePacket
 	mu             sync.RWMutex
-	VoicePackets   []VoicePacketData
+	VoicePackets   []*RetainablePacket
+	packetManager  *PacketManager
 	callback       func(activity VoiceActivity)
+	log            logging.LeveledLogger
 }
 
-func newVAD(ctx context.Context, i *Interceptor, streamInfo *interceptor.StreamInfo) *VoiceDetector {
+func newVAD(ctx context.Context, config Config, streamInfo *interceptor.StreamInfo, log logging.LeveledLogger) *VoiceDetector {
 	v := &VoiceDetector{
-		context:      ctx,
-		interceptor:  i,
-		streamInfo:   streamInfo,
-		channel:      make(chan VoicePacketData),
-		mu:           sync.RWMutex{},
-		VoicePackets: make([]VoicePacketData, 0),
+		context:       ctx,
+		config:        config,
+		streamInfo:    streamInfo,
+		channel:       make(chan *RetainablePacket),
+		mu:            sync.RWMutex{},
+		VoicePackets:  make([]*RetainablePacket, 0),
+		packetManager: newPacketManager(),
+		log:           log,
 	}
 
 	v.run()
@@ -100,8 +105,9 @@ loop:
 		lastPacket := v.VoicePackets[len(v.VoicePackets)-1]
 
 		packet := v.VoicePackets[0]
-		if packet.Timestamp*1000/v.streamInfo.ClockRate+uint32(v.interceptor.getConfig().HeadMargin.Milliseconds()) < lastPacket.Timestamp*1000/v.streamInfo.ClockRate {
-			// drop packet
+		if packet.Data().Timestamp*1000/v.streamInfo.ClockRate+uint32(v.config.HeadMargin.Milliseconds()) < lastPacket.Data().Timestamp*1000/v.streamInfo.ClockRate {
+			// release and packet
+			packet.Release()
 			v.VoicePackets = v.VoicePackets[1:]
 		} else {
 			v.mu.Unlock()
@@ -129,17 +135,29 @@ func (v *VoiceDetector) sendPacketsToCallback() {
 	})
 
 	// clear packets
-	v.mu.RLock()
-	v.VoicePackets = make([]VoicePacketData, 0)
-	v.mu.RUnlock()
+	v.clearPackets()
+
 }
 
-func (v *VoiceDetector) getPackets() []VoicePacketData {
+func (v *VoiceDetector) clearPackets() {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	for _, packet := range v.VoicePackets {
+		packet.Release()
+	}
+
+	v.VoicePackets = make([]*RetainablePacket, 0)
+}
+
+func (v *VoiceDetector) getPackets() []*VoicePacketData {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 
-	packets := make([]VoicePacketData, 0)
-	packets = append(packets, v.VoicePackets...)
+	var packets []*VoicePacketData
+	for _, packet := range v.VoicePackets {
+		packets = append(packets, packet.Data())
+	}
 
 	return packets
 }
@@ -163,25 +181,25 @@ func (v *VoiceDetector) OnVoiceDetected(callback func(VoiceActivity)) {
 	v.callback = callback
 }
 
-func (v *VoiceDetector) isDetected(vp VoicePacketData) bool {
+func (v *VoiceDetector) isDetected(vp *RetainablePacket) bool {
 	v.mu.RLock()
 	v.VoicePackets = append(v.VoicePackets, vp)
 	v.mu.RUnlock()
 
 	clockRate := v.streamInfo.ClockRate
 
-	isThresholdPassed := vp.AudioLevel < v.interceptor.getConfig().Threshold
+	isThresholdPassed := vp.Data().AudioLevel < v.config.Threshold
 
 	// check if voice detected
 	if !v.detected && v.startDetected == 0 && isThresholdPassed {
-		v.startDetected = vp.Timestamp
+		v.startDetected = vp.Data().Timestamp
 
 		return v.detected
 	}
 
-	isHeadMarginPassed := vp.Timestamp*1000/clockRate > (v.startDetected*1000/clockRate)+uint32(v.interceptor.getConfig().HeadMargin.Milliseconds())
+	isHeadMarginPassed := vp.Data().Timestamp*1000/clockRate > (v.startDetected*1000/clockRate)+uint32(v.config.HeadMargin.Milliseconds())
 
-	isTailMarginPassedAfterStarted := vp.Timestamp*1000/clockRate > (v.startDetected*1000/clockRate)+uint32(v.interceptor.getConfig().TailMargin.Milliseconds())
+	isTailMarginPassedAfterStarted := vp.Data().Timestamp*1000/clockRate > (v.startDetected*1000/clockRate)+uint32(v.config.TailMargin.Milliseconds())
 
 	// rest start detected timestamp if audio level above threshold after previously start detected
 	if !v.detected && v.startDetected != 0 && isTailMarginPassedAfterStarted && !isThresholdPassed {
@@ -193,12 +211,12 @@ func (v *VoiceDetector) isDetected(vp VoicePacketData) bool {
 	if !v.detected && v.startDetected != 0 && isHeadMarginPassed {
 		// start send packet to callback
 		v.detected = true
-		v.lastDetectedTS = vp.Timestamp
+		v.lastDetectedTS = vp.Data().Timestamp
 
 		return v.detected
 	}
 
-	isTailMarginPassed := vp.Timestamp*1000/clockRate > (v.lastDetectedTS*1000/clockRate)+uint32(v.interceptor.getConfig().TailMargin.Milliseconds())
+	isTailMarginPassed := vp.Data().Timestamp*1000/clockRate > (v.lastDetectedTS*1000/clockRate)+uint32(v.config.TailMargin.Milliseconds())
 
 	if v.detected && !isThresholdPassed && isTailMarginPassed {
 		// stop send packet to callback
@@ -216,18 +234,19 @@ func (v *VoiceDetector) isDetected(vp VoicePacketData) bool {
 
 	if v.detected && isThresholdPassed {
 		// keep send packets to callback
-		v.lastDetectedTS = vp.Timestamp
+		v.lastDetectedTS = vp.Data().Timestamp
 	}
 
 	return v.detected
 }
 
 func (v *VoiceDetector) addPacket(header *rtp.Header, audioLevel uint8) {
-	v.channel <- VoicePacketData{
-		SequenceNo: header.SequenceNumber,
-		Timestamp:  header.Timestamp,
-		AudioLevel: audioLevel,
+	vp, err := v.packetManager.NewPacket(header.SequenceNumber, header.Timestamp, audioLevel)
+	if err != nil {
+		v.log.Errorf("failed to create new packet: %v", err)
+		return
 	}
+	v.channel <- vp
 }
 
 func (v *VoiceDetector) UpdateTrack(trackID, streamID string) {
