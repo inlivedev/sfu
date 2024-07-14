@@ -478,12 +478,11 @@ func (t *SimulcastTrack) AddRemoteTrack(track IRemoteTrack, minWait, maxWait tim
 	quality := RIDToQuality(track.RID())
 
 	onRead := func(p *rtp.Packet) {
-		t.mu.Lock()
+
 		// set the base timestamp for the track if it is not set yet
 		if t.baseTS == 0 {
 			t.baseTS = p.Timestamp
 		}
-		t.mu.Unlock()
 
 		if quality == QualityHigh && t.remoteTrackHighBaseTS == 0 {
 			t.remoteTrackHighBaseTS = p.Timestamp
