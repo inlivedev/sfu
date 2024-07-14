@@ -19,7 +19,7 @@ func BenchmarkVAD(b *testing.B) {
 	vad := newVAD(ctx, intc.config, &interceptor.StreamInfo{
 		ID:        "streamID",
 		ClockRate: 48000,
-	}, leveledLogger)
+	})
 
 	vad.OnVoiceDetected(func(activity VoiceActivity) {
 		// Do nothing
@@ -27,7 +27,7 @@ func BenchmarkVAD(b *testing.B) {
 
 	for i := 0; i < b.N; i++ {
 		header := &rtp.Header{}
-		vad.addPacket(header, 30)
+		vad.addPacket(header, 3, false)
 	}
 
 	vad.cancel()

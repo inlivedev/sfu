@@ -71,10 +71,13 @@ var logger logging.LeveledLogger
 
 func main() {
 	flag.Set("logtostderr", "true")
-	flag.Set("stderrthreshold", "INFO")
-	flag.Set("PIONS_LOG_INFO", "sfu")
-	flag.Set("PIONS_LOG_DEBUG", "sfu")
-	flag.Set("PIONS_LOG_TRACE", "sfu")
+	flag.Set("stderrthreshold", "DEBUG")
+	flag.Set("PIONS_LOG_INFO", "sfu,vad")
+
+	flag.Set("PIONS_LOG_ERROR", "sfu,vad")
+	flag.Set("PIONS_LOG_WARN", "sfu,vad")
+	flag.Set("PIONS_LOG_DEBUG", "sfu,vad")
+	flag.Set("PIONS_LOG_TRACE", "sfu,vad")
 
 	flag.Parse()
 

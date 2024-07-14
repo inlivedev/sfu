@@ -11,9 +11,14 @@
             "mode": "auto",
             "program": "${workspaceFolder}/examples/http-websocket/main.go",
             "env": {
-                // "PIONS_LOG_DEBUG":"all",
-                // "PIONS_LOG_TRACE":"all",
-                // "PIONS_LOG_INFO":"all",
+                "PIONS_LOG_DEBUG":"sfu,vad",
+                "PIONS_LOG_TRACE":"sfu,vad",
+                "PIONS_LOG_INFO":"sfu,vad",
+				"PIONS_LOG_WARN":"sfu,vad",
+				"PIONS_LOG_ERROR":"sfu,vad",
+				"stderrthreshold":"DEBUG",
+				"logtostderr":"true",
+
             },
             "buildFlags": "-race"
 

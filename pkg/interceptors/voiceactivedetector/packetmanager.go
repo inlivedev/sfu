@@ -24,7 +24,7 @@ func newPacketManager() *PacketManager {
 	}
 }
 
-func (m *PacketManager) NewPacket(seqNo uint16, timestamp uint32, audioLevel uint8) (*RetainablePacket, error) {
+func (m *PacketManager) NewPacket(seqNo uint16, timestamp uint32, audioLevel uint8, isVoice bool) (*RetainablePacket, error) {
 
 	p := &RetainablePacket{
 		onRelease: m.releasePacket,
@@ -44,6 +44,7 @@ func (m *PacketManager) NewPacket(seqNo uint16, timestamp uint32, audioLevel uin
 	p.data.SequenceNo = seqNo
 	p.data.Timestamp = timestamp
 	p.data.AudioLevel = audioLevel
+	p.data.IsVoice = isVoice
 
 	return p, nil
 }

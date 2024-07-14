@@ -105,7 +105,7 @@ func (v *Interceptor) BindLocalStream(info *interceptor.StreamInfo, writer inter
 	defer v.mu.Unlock()
 
 	if vad == nil {
-		v.vads[info.SSRC] = newVAD(v.context, v.config, info, v.log)
+		v.vads[info.SSRC] = newVAD(v.context, v.config, info)
 		vad = v.vads[info.SSRC]
 	}
 
@@ -185,9 +185,12 @@ func (v *Interceptor) processPacket(ssrc uint32, header *rtp.Header) rtp.AudioLe
 		return rtp.AudioLevelExtension{}
 	}
 
-	vad.addPacket(header, audioData.Level)
+	if audioData.Voice {
+		vad.addPacket(header, audioData.Level, audioData.Voice)
+	}
 
 	return audioData
+
 }
 
 func (v *Interceptor) getConfig() Config {
@@ -243,7 +246,7 @@ func (v *Interceptor) MapAudioTrack(ssrc uint32, t webrtc.TrackLocal) *VoiceDete
 
 	vad := v.getVadBySSRC(ssrc)
 	if vad == nil {
-		vad = newVAD(v.context, v.config, nil, v.log)
+		vad = newVAD(v.context, v.config, nil)
 		v.mu.Lock()
 		v.vads[ssrc] = vad
 		v.mu.Unlock()

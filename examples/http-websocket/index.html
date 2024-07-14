@@ -275,6 +275,7 @@
 
             const videoEl = document.getElementById("video-"+streamid)
             if (!videoEl){
+				console.log("video element not found ",streamid)
                 return
             }
 
@@ -287,7 +288,24 @@
                 videoEl.style.border = "5px solid green"
             }
 
-        }
+			let vadEl = document.getElementById("vad-"+streamid)
+			if (!vadEl){
+				vadEl = document.createElement("div");
+				vadEl.id = "vad-"+streamid
+				const container = document.getElementById("container-"+streamid)
+				container.appendChild(vadEl)
+			}
+			
+			if (vad.data.audioLevels!==null){
+				vadEl.innerText = Math.floor(vad.data.audioLevels.reduce(function (sum, value) {
+									return sum + value.audioLevel;
+								}, 0) / vad.data.audioLevels.length);
+
+			} else {
+				vadEl.innerText = "0"
+			}
+		}
+
 
         function startH264() {
             start('h264')
