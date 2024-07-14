@@ -15,7 +15,7 @@ type Map struct {
 	delta     uint16
 	pidDelta  uint16
 	lastEntry uint16
-	entries   []entry
+	entries   []*entry
 }
 
 type entry struct {
@@ -24,11 +24,17 @@ type entry struct {
 	pidDelta     uint16
 }
 
+var pool = sync.Pool{
+	New: func() interface{} {
+		return &entry{}
+	},
+}
+
 // New creates a new Map.
 func New() *Map {
 	return &Map{
 		mu:      sync.Mutex{},
-		entries: make([]entry, 0, maxEntries),
+		entries: make([]*entry, 0, maxEntries),
 	}
 }
 
@@ -76,6 +82,11 @@ func (m *Map) reset() {
 	m.delta = 0
 	m.pidDelta = 0
 	m.lastEntry = 0
+
+	for i := range m.entries {
+		pool.Put(m.entries[i])
+	}
+
 	m.entries = nil
 }
 
@@ -101,12 +112,12 @@ func addMapping(m *Map, seqno, delta, pidDelta uint16) {
 			f = ff
 		}
 	}
-	e := entry{
-		first:    f,
-		count:    seqno - f + 1,
-		delta:    delta,
-		pidDelta: pidDelta,
-	}
+	e := pool.Get().(*entry)
+
+	e.first = f
+	e.count = seqno - f + 1
+	e.delta = delta
+	e.pidDelta = pidDelta
 
 	if len(m.entries) < maxEntries {
 		m.entries = append(m.entries, e)
@@ -115,6 +126,11 @@ func addMapping(m *Map, seqno, delta, pidDelta uint16) {
 	}
 
 	j := (m.lastEntry + 1) % maxEntries
+
+	if m.entries[j] != nil {
+		pool.Put(m.entries[j])
+	}
+
 	m.entries[j] = e
 	m.lastEntry = j
 }
@@ -200,14 +216,12 @@ func (m *Map) Drop(seqno uint16, pid uint16) bool {
 	}
 
 	if len(m.entries) == 0 {
-		m.entries = []entry{
-			entry{
-				first:    seqno - 8192,
-				count:    8192,
-				delta:    0,
-				pidDelta: 0,
-			},
-		}
+		e, _ := pool.Get().(*entry)
+		e.first = seqno - 8192
+		e.count = 8192
+		e.delta = 0
+		e.pidDelta = 0
+		m.entries = []*entry{e}
 	}
 
 	m.pidDelta += pid - m.nextPid
