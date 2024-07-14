@@ -903,7 +903,8 @@ func (c *Client) renegotiateQueuOp() {
 					}
 
 					// this will be blocking until the renegotiation is done
-					answer, err := c.onRenegotiation(c.context, *c.peerConnection.PC().LocalDescription())
+					sdp := c.setOpusSDP(*c.peerConnection.PC().LocalDescription())
+					answer, err := c.onRenegotiation(c.context, sdp)
 					if err != nil {
 						//TODO: when this happen, we need to close the client and ask the remote client to reconnect
 						c.log.Errorf("sfu: error on renegotiation ", err)
@@ -1680,6 +1681,8 @@ func (c *Client) OnTracksAvailable(callback func([]ITrack)) {
 }
 
 func (c *Client) onTracksAvailable(tracks []ITrack) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	for _, callback := range c.onTracksAvailableCallbacks {
 		callback(tracks)
 	}
@@ -1715,29 +1718,52 @@ func (c *Client) enableSendVADToInternalDataChannel() {
 		}
 
 		var dataType string
+
 		if len(activity.AudioLevels) > 0 {
 			dataType = messageTypeVADStarted
 		} else {
 			dataType = messageTypeVADEnded
 		}
 
-		dataMessage := internalDataVAD{
-			Type: dataType,
-			Data: activity,
-		}
-
-		data, err := json.Marshal(dataMessage)
-		if err != nil {
-			c.log.Errorf("client: error marshal vad data ", err)
+		if len(activity.AudioLevels) == 0 {
+			c.sendVad(dataType, activity)
 			return
 		}
 
-		if err := c.internalDataChannel.SendText(string(data)); err != nil {
-			c.log.Errorf("client: error send vad data ", err)
-			c.log.Errorf("client: voice activity count ", len(activity.AudioLevels))
-			return
+		maxLength := 2048
+
+		for len(activity.AudioLevels) > 0 {
+			dataLength := min(len(activity.AudioLevels), maxLength)
+			audioLevels := activity.AudioLevels[:dataLength]
+			activity.AudioLevels = activity.AudioLevels[dataLength:]
+			c.sendVad(dataType, voiceactivedetector.VoiceActivity{
+				TrackID:     activity.TrackID,
+				StreamID:    activity.StreamID,
+				SSRC:        activity.SSRC,
+				ClockRate:   activity.ClockRate,
+				AudioLevels: audioLevels,
+			})
 		}
 	})
+}
+
+func (c *Client) sendVad(dataType string, activity voiceactivedetector.VoiceActivity) {
+	dataMessage := internalDataVAD{
+		Type: dataType,
+		Data: activity,
+	}
+
+	data, err := json.Marshal(dataMessage)
+	if err != nil {
+		c.log.Errorf("client: error marshal vad data ", err)
+		return
+	}
+
+	if err := c.internalDataChannel.SendText(string(data)); err != nil {
+		c.log.Errorf("client: error send vad data ", err)
+		c.log.Errorf("client: voice activity count ", len(activity.AudioLevels))
+		return
+	}
 }
 
 func (c *Client) enableVADStatUpdate() {
