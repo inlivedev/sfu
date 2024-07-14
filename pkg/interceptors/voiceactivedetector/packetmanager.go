@@ -11,11 +11,17 @@ var (
 )
 
 type PacketManager struct {
-	Pool *sync.Pool
+	RPool *sync.Pool
+	Pool  *sync.Pool
 }
 
 func newPacketManager() *PacketManager {
 	return &PacketManager{
+		RPool: &sync.Pool{
+			New: func() interface{} {
+				return &RetainablePacket{}
+			},
+		},
 		Pool: &sync.Pool{
 			New: func() interface{} {
 				return &VoicePacketData{}
@@ -25,22 +31,21 @@ func newPacketManager() *PacketManager {
 }
 
 func (m *PacketManager) NewPacket(seqNo uint16, timestamp uint32, audioLevel uint8, isVoice bool) (*RetainablePacket, error) {
-
-	p := &RetainablePacket{
-		onRelease: m.releasePacket,
-		// new packets have retain count of 1
-		count: 1,
+	p, ok := m.RPool.Get().(*RetainablePacket)
+	if !ok {
+		return nil, errFailedToCastDataPool
 	}
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	var ok bool
 	p.data, ok = m.Pool.Get().(*VoicePacketData)
 	if !ok {
 		return nil, errFailedToCastDataPool
 	}
 
+	p.count = 1
+	p.onRelease = m.releasePacket
 	p.data.SequenceNo = seqNo
 	p.data.Timestamp = timestamp
 	p.data.AudioLevel = audioLevel
@@ -49,12 +54,13 @@ func (m *PacketManager) NewPacket(seqNo uint16, timestamp uint32, audioLevel uin
 	return p, nil
 }
 
-func (m *PacketManager) releasePacket(data *VoicePacketData) {
-	m.Pool.Put(data)
+func (m *PacketManager) releasePacket(p *RetainablePacket) {
+	m.RPool.Put(p)
+	m.Pool.Put(p.data)
 }
 
 type RetainablePacket struct {
-	onRelease func(*VoicePacketData)
+	onRelease func(*RetainablePacket)
 	mu        sync.RWMutex
 	count     int
 
@@ -86,7 +92,7 @@ func (p *RetainablePacket) Release() {
 
 	if p.count == 0 {
 		// release back to pool
-		p.onRelease(p.data)
+		p.onRelease(p)
 		p.data = nil
 	}
 }

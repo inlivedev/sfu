@@ -99,9 +99,9 @@ func (v *VoiceDetector) run() {
 					v.onVoiceDetected(activity)
 					lastSent = time.Now()
 					active = true
-
-					voicePacket.Release()
 				}
+
+				voicePacket.Release()
 			case <-ticker.C:
 				if active && time.Since(lastSent) > v.config.TailMargin {
 					// we need to notify that the voice is stopped
