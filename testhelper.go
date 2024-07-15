@@ -269,29 +269,23 @@ func SetPeerConnectionTracks(ctx context.Context, peerConnection *webrtc.PeerCon
 			rtcpBuf := make([]byte, 1500)
 			ctxx, cancel := context.WithCancel(ctx)
 
-			defer cancel()
 			defer func() {
 				if rtpTranscv != nil {
-					rtpTranscv.Stop()
+					_ = rtpTranscv.Stop()
 				}
 			}()
+
+			defer cancel()
 
 			for {
 				select {
 				case <-ctxx.Done():
 					return
 				default:
-					if rtpTranscv != nil && rtpTranscv.Sender() != nil {
-						err := rtpTranscv.Sender().SetReadDeadline(time.Now().Add(10 * time.Millisecond))
-						if err != nil {
-							return
-						}
-
-						if _, _, rtcpErr := rtpTranscv.Sender().Read(rtcpBuf); rtcpErr != nil {
-							return
-						}
-
+					if _, _, rtcpErr := rtpTranscv.Sender().Read(rtcpBuf); rtcpErr != nil {
+						return
 					}
+
 				}
 
 			}
@@ -415,6 +409,16 @@ func CreatePeerPair(ctx context.Context, log logging.LeveledLogger, room *Room, 
 		ICEServers: iceServers,
 	})
 
+	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
+		if state == webrtc.PeerConnectionStateClosed || state == webrtc.PeerConnectionStateFailed {
+			log.Infof("test: peer connection ", peerName, " stated changed ", state)
+			if client != nil {
+				_ = room.StopClient(client.ID())
+			}
+			cancelClient()
+		}
+	})
+
 	peer := &PC{
 		Mu:                &sync.Mutex{},
 		PeerConnection:    pc,
@@ -437,17 +441,6 @@ func CreatePeerPair(ctx context.Context, log logging.LeveledLogger, room *Room, 
 	}
 
 	allDone := make(chan bool)
-
-	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
-		if state == webrtc.PeerConnectionStateClosed || state == webrtc.PeerConnectionStateFailed {
-			log.Infof("test: peer connection ", peerName, " stated changed ", state)
-			if client != nil {
-				_ = room.StopClient(client.ID())
-				cancelClient()
-			}
-		}
-
-	})
 
 	pc.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
 		go func() {
@@ -476,6 +469,8 @@ func CreatePeerPair(ctx context.Context, log logging.LeveledLogger, room *Room, 
 	})
 
 	go func() {
+		ctxx, cancell := context.WithCancel(clientContext)
+		defer cancell()
 
 		for {
 			select {
@@ -483,7 +478,12 @@ func CreatePeerPair(ctx context.Context, log logging.LeveledLogger, room *Room, 
 				return
 
 			case <-done:
-				allDone <- true
+				select {
+				case <-ctxx.Done():
+					return
+				case allDone <- true:
+					return
+				}
 			}
 		}
 	}()

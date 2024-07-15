@@ -126,6 +126,7 @@ type Client struct {
 	cancel                context.CancelFunc
 	canAddCandidate       *atomic.Bool
 	clientTracks          map[string]iClientTrack
+	muTracks              sync.Mutex
 	internalDataChannel   *webrtc.DataChannel
 	dataChannels          *DataChannelList
 	estimator             cc.BandwidthEstimator
@@ -149,6 +150,7 @@ type Client struct {
 	receiveRED                        bool
 	state                             *atomic.Value
 	sfu                               *SFU
+	muCallback                        sync.Mutex
 	onConnectionStateChangedCallbacks []func(webrtc.PeerConnectionState)
 	onJoinedCallbacks                 []func()
 	onLeftCallbacks                   []func()
@@ -1001,9 +1003,9 @@ func (c *Client) setClientTrack(t ITrack) iClientTrack {
 		}
 
 		defer func() {
-			c.mu.Lock()
+			c.muTracks.Lock()
 			delete(c.clientTracks, outputTrack.ID())
-			c.mu.Unlock()
+			c.muTracks.Unlock()
 
 			c.renegotiate()
 		}()
@@ -1023,16 +1025,16 @@ func (c *Client) setClientTrack(t ITrack) iClientTrack {
 	// enable RTCP report and stats
 	c.enableReportAndStats(senderTcv.Sender(), outputTrack)
 
-	c.mu.Lock()
+	c.muTracks.Lock()
 	c.clientTracks[outputTrack.ID()] = outputTrack
-	c.mu.Unlock()
+	c.muTracks.Unlock()
 
 	return outputTrack
 }
 
 func (c *Client) ClientTracks() map[string]iClientTrack {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+	c.muTracks.Lock()
+	defer c.muTracks.Unlock()
 
 	clientTracks := make(map[string]iClientTrack, 0)
 	for k, v := range c.clientTracks {
@@ -1113,15 +1115,12 @@ func (c *Client) afterClosed() {
 
 	c.onLeft()
 
-	c.cancel()
-
 	c.sfu.onAfterClientStopped(c)
+
+	c.cancel()
 }
 
 func (c *Client) stop() error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	if c.peerConnection.pc.ConnectionState() == webrtc.PeerConnectionStateClosed {
 		return nil
 	}
@@ -1193,15 +1192,15 @@ func (c *Client) sendPendingLocalCandidates() {
 // OnConnectionStateChanged event is called when the SFU connection state is changed.
 // The callback will receive the connection state as the new state.
 func (c *Client) OnConnectionStateChanged(callback func(webrtc.PeerConnectionState)) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.muCallback.Lock()
+	defer c.muCallback.Unlock()
 
 	c.onConnectionStateChangedCallbacks = append(c.onConnectionStateChangedCallbacks, callback)
 }
 
 func (c *Client) onConnectionStateChanged(state webrtc.PeerConnectionState) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+	c.muCallback.Lock()
+	defer c.muCallback.Unlock()
 
 	for _, callback := range c.onConnectionStateChangedCallbacks {
 		go callback(webrtc.PeerConnectionState(state))
@@ -1552,9 +1551,6 @@ func (c *Client) SetName(name string) {
 
 // TODO: fix the panic nil here when the client is ended
 func (c *Client) Stats() ClientTrackStats {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	if c.peerConnection.PC().ConnectionState() == webrtc.PeerConnectionStateClosed {
 		return ClientTrackStats{}
 	}
@@ -1625,7 +1621,9 @@ func (c *Client) Stats() ClientTrackStats {
 	}
 
 	for id, stat := range c.stats.Senders() {
+		c.muTracks.Lock()
 		track, ok := c.clientTracks[id]
+		c.muTracks.Unlock()
 		if !ok {
 			continue
 		}
@@ -1681,8 +1679,6 @@ func (c *Client) OnTracksAvailable(callback func([]ITrack)) {
 }
 
 func (c *Client) onTracksAvailable(tracks []ITrack) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
 	for _, callback := range c.onTracksAvailableCallbacks {
 		callback(tracks)
 	}

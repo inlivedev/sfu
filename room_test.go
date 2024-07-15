@@ -242,6 +242,7 @@ Loop:
 	for {
 		select {
 		case <-timeout.Done():
+			t.Logf("timeout waiting for client left event")
 			break Loop
 		case <-done1:
 			peerCount++

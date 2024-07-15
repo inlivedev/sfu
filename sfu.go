@@ -287,9 +287,6 @@ func (s *SFU) syncTrack(client *Client) {
 }
 
 func (s *SFU) Stop() {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	for _, client := range s.clients.GetClients() {
 		client.PeerConnection().Close()
 	}
@@ -342,9 +339,6 @@ func (s *SFU) onClientRemoved(client *Client) {
 }
 
 func (s *SFU) onTracksAvailable(clientId string, tracks []ITrack) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	for _, client := range s.clients.GetClients() {
 		if client.ID() != clientId {
 			client.onTracksAvailable(tracks)
@@ -378,9 +372,6 @@ func (s *SFU) broadcastTracksToAutoSubscribeClients(ownerID string, tracks []ITr
 }
 
 func (s *SFU) GetClient(id string) (*Client, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	return s.clients.GetClient(id)
 }
 
@@ -396,9 +387,6 @@ func (s *SFU) removeClient(client *Client) error {
 }
 
 func (s *SFU) CreateDataChannel(label string, opts DataChannelOptions) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	dc := s.dataChannels.Get(label)
 	if dc != nil {
 		return ErrDataChannelExists
@@ -456,9 +444,6 @@ func (s *SFU) setupMessageForwarder(clientID string, d *webrtc.DataChannel) {
 }
 
 func (s *SFU) createExistingDataChannels(c *Client) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	for _, dc := range s.dataChannels.dataChannels {
 		initOpts := &webrtc.DataChannelInit{
 			Ordered: &dc.isOrdered,
@@ -476,9 +461,6 @@ func (s *SFU) createExistingDataChannels(c *Client) {
 }
 
 func (s *SFU) TotalActiveSessions() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	count := 0
 	for _, c := range s.clients.GetClients() {
 		if c.PeerConnection().PC().ConnectionState() == webrtc.PeerConnectionStateConnected {

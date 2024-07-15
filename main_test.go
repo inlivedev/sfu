@@ -11,11 +11,12 @@ import (
 var TestLogger logging.LeveledLogger
 
 func TestMain(m *testing.M) {
-	flag.Set("logtostderr", "true")
-	flag.Set("stderrthreshold", "INFO")
-	flag.Set("PIONS_LOG_INFO", "sfu")
-	flag.Set("PIONS_LOG_DEBUG", "sfu")
-	flag.Set("PIONS_LOG_TRACE", "sfu")
+	os.Setenv("stderrthreshold", "INFO")
+	os.Setenv("PIONS_LOG_TRACE", "sfu,vad")
+	// os.Setenv("PIONS_LOG_DEBUG", "sfu,vad")
+	os.Setenv("PIONS_LOG_INFO", "sfu,vad")
+	os.Setenv("PIONS_LOG_WARN", "sfu,vad")
+	os.Setenv("PIONS_LOG_ERROR", "sfu,vad")
 
 	flag.Parse()
 

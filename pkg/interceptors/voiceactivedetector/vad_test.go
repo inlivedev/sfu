@@ -2,7 +2,6 @@ package voiceactivedetector
 
 import (
 	"context"
-	"math/rand"
 	"testing"
 
 	"github.com/pion/interceptor"
@@ -27,37 +26,6 @@ func BenchmarkVAD(b *testing.B) {
 	header := &rtp.Header{}
 	for i := 0; i < b.N; i++ {
 		vad.addPacket(header, 3, true)
-	}
-
-}
-
-func randNumberInRange(min, max int) uint8 {
-	return uint8(min + rand.Intn(max-min))
-}
-
-func BenchmarkPacketManager(b *testing.B) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	leveledLogger := logging.NewDefaultLoggerFactory().NewLogger("sfu")
-	intc := new(ctx, leveledLogger)
-	vad := newVAD(ctx, intc.config, &interceptor.StreamInfo{
-		ID:        "streamID",
-		ClockRate: 48000,
-	})
-
-	vad.OnVoiceDetected(func(activity VoiceActivity) {
-		// Do nothing
-	})
-
-	for i := 0; i < b.N; i++ {
-
-		p, err := vad.packetManager.NewPacket(uint16(i), 12123213, randNumberInRange(0, 40), true)
-		if err != nil {
-			b.Error(err)
-		}
-
-		p.Release()
 	}
 
 }
