@@ -897,13 +897,6 @@ func (t *trackList) Add(track ITrack) error {
 
 	t.tracks[id] = track
 
-	go func() {
-		ctx, cancel := context.WithCancel(track.Context())
-		defer cancel()
-		<-ctx.Done()
-		t.remove([]string{id})
-	}()
-
 	return nil
 }
 

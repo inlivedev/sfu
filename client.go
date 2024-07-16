@@ -497,6 +497,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 				defer cancel()
 				<-ctx.Done()
 				client.stats.removeReceiverStats(remoteTrack.ID() + remoteTrack.RID())
+				client.tracks.remove([]string{remoteTrack.ID()})
 			}()
 
 			if err := client.tracks.Add(track); err != nil {
@@ -539,6 +540,8 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 					if simulcastTrack.remoteTrackLow != nil {
 						client.stats.removeReceiverStats(simulcastTrack.remoteTrackLow.track.ID() + simulcastTrack.remoteTrackLow.track.RID())
 					}
+
+					client.tracks.remove([]string{remoteTrack.ID()})
 				}()
 
 			} else if simulcast, ok = track.(*SimulcastTrack); ok {
@@ -1005,6 +1008,7 @@ func (c *Client) setClientTrack(t ITrack) iClientTrack {
 		defer func() {
 			c.muTracks.Lock()
 			delete(c.clientTracks, outputTrack.ID())
+			c.publishedTracks.remove([]string{outputTrack.ID()})
 			c.muTracks.Unlock()
 
 			c.renegotiate()
