@@ -499,13 +499,40 @@
                 
                 audioTcvr.setCodecPreferences(audioCodecsPref);
             }
+        
+
+			setCodecPreferences(peerConnection,stream, codec, "L3T1")
+
+            const offer=await peerConnection.createOffer()
+
+			// offer.sdp = setOpusSDP(offer.sdp)
+          
+            await peerConnection.setLocalDescription(offer)
+
+            ws.send(JSON.stringify({type:'offer',data:offer.sdp}));
+			console.log("browser send")
+
+            peerConnection.onicecandidate = function(e) {
+                if (e.candidate!=null) {
+                    ws.send(JSON.stringify({type:'candidate',data:e.candidate.candidate}));
+                }
+            };
             
+            peerConnection.onconnectionstatechange = function(e) {
+                console.log("onconnectionstatechange", peerConnection.connectionState);
+                if (peerConnection.connectionState == "connected") {
+                    monitorStats()
+                    monitorBw()
+                }
+            };
+        }
+
+		const setCodecPreferences = (peerConnection,stream, codec,scalabilityMode) => {
 			const isFirefox =navigator.userAgent.includes("Firefox")
 			const isSimulcast = document.querySelector("#simulcast").checked
 			const isSvc = document.querySelector("#svc").checked
 			const maxBitrate = document.querySelector("#maxBitrate").value
-
-			console.log("isFirefox",isFirefox)
+			
             if (codec ==='vp9' && !isFirefox){
 				let videoTcvr = null
 				
@@ -518,7 +545,7 @@
 					sendEncodings: [
 							{
 								maxBitrate: maxBitrate,
-								scalabilityMode: isSvc?'L3T3':'L1T1'
+								scalabilityMode: isSvc?scalabilityMode:'L1T1'
 							},
 						
 						]
@@ -533,21 +560,21 @@
 								rid: 'high',
 								maxBitrate: maxBitrate,
 								maxFramerate: 30,
-								scalabilityMode: isSvc?'L3T3':'L1T1'
+								scalabilityMode: isSvc?scalabilityMode:'L1T1'
 							},
 							{
 								rid: 'mid',
 								scaleResolutionDownBy: 2.0,
 								maxFramerate: 30,
 								maxBitrate:maxBitrate/2,
-								scalabilityMode: isSvc?'L3T3':'L1T1'
+								scalabilityMode: isSvc?scalabilityMode:'L1T1'
 							},
 							{
 								rid: 'low',
 								scaleResolutionDownBy: 4.0,
 								maxBitrate: maxBitrate/4,
 								maxFramerate:30,
-								scalabilityMode: isSvc?'L3T3':'L1T1'
+								scalabilityMode: isSvc?scalabilityMode:'L1T1'
 							}
 						]
 					})
@@ -588,30 +615,30 @@
 					})
 					
 				} else {
-                videoTcvr = peerConnection.addTransceiver(stream.getVideoTracks()[0], {
-                direction: 'sendonly',
-                streams: [stream],
-                sendEncodings: [
-                        {
-                            rid: 'high',
-                            maxBitrate: 1200*1000,
-                            maxFramerate: 30,
-                        },
-                        {
-                            rid: 'mid',
-                            scaleResolutionDownBy: 2.0,
-                            maxFramerate: 30,
-                            maxBitrate: 500*1000,
-                        },
-                        {
-                            rid: 'low',
-                            scaleResolutionDownBy: 4.0,
-                            maxBitrate: 150*1000,
-                            maxFramerate:30,
-                        }
-                    ]
-                })
-			}
+					videoTcvr = peerConnection.addTransceiver(stream.getVideoTracks()[0], {
+					direction: 'sendonly',
+					streams: [stream],
+					sendEncodings: [
+							{
+								rid: 'high',
+								maxBitrate: 1200*1000,
+								maxFramerate: 30,
+							},
+							{
+								rid: 'mid',
+								scaleResolutionDownBy: 2.0,
+								maxFramerate: 30,
+								maxBitrate: 500*1000,
+							},
+							{
+								rid: 'low',
+								scaleResolutionDownBy: 4.0,
+								maxBitrate: 150*1000,
+								maxFramerate:30,
+							}
+						]
+					})
+				}
 
 				const codecs = RTCRtpReceiver.getCapabilities('video').codecs;
 				let h264Codecs = [];
@@ -636,34 +663,11 @@
 					console.log("setCodecPreferences not supported")
 				}
             }
+		}
 
-            const offer=await peerConnection.createOffer()
+       	const sleep = (delay) => new Promise((resolve) => setTimeout(resolve, delay))
 
-			// offer.sdp = setOpusSDP(offer.sdp)
-          
-            await peerConnection.setLocalDescription(offer)
-
-            ws.send(JSON.stringify({type:'offer',data:offer.sdp}));
-			console.log("browser send")
-
-            peerConnection.onicecandidate = function(e) {
-                if (e.candidate!=null) {
-                    ws.send(JSON.stringify({type:'candidate',data:e.candidate.candidate}));
-                }
-            };
-            
-            peerConnection.onconnectionstatechange = function(e) {
-                console.log("onconnectionstatechange", peerConnection.connectionState);
-                if (peerConnection.connectionState == "connected") {
-                    monitorStats()
-                    monitorBw()
-                }
-            };
-        }
-
-       const sleep = (delay) => new Promise((resolve) => setTimeout(resolve, delay))
-
-       let prevBytesReceived = 0
+       	let prevBytesReceived = 0
 
         let prevHighBytesSent = 0
         let prevMidBytesSent = 0
@@ -963,43 +967,7 @@
 				})
 			}
 
-			if (!document.querySelector("#simulcast").checked){
-				tscvVideo=peerConnection.addTransceiver(videoTrack, {
-					direction: 'sendonly',
-					streams: [stream],
-					sendEncodings: [
-						{
-							maxBitrate: 1200*1000,
-							maxFramerate: 30,
-						},
-					]
-				})
-			} else {
-				tscvVideo=peerConnection.addTransceiver(videoTrack, {
-					direction: 'sendonly',
-					streams: [stream],
-					sendEncodings: [
-						{
-							rid: 'high',
-							maxBitrate: 1200*1000,
-							maxFramerate: 30,
-							scalabilityMode: isSvc?'L3T3':'L1T1'
-						},
-						{
-							rid: 'mid',
-							maxFramerate: 20,
-							maxBitrate: 400*1000,
-							scalabilityMode: isSvc?'L3T3':'L1T1'
-						},
-						{
-							rid: 'low',
-							maxBitrate: 150*1000,
-							maxFramerate:15,
-							scalabilityMode: isSvc?'L3T3':'L1T1'
-						}
-					]
-				})
-			}
+			setCodecPreferences(peerConnection,stream, 'vp9', "L1T3")
 
             const container = document.createElement("div");
             container.className = "container";
