@@ -43,6 +43,10 @@ func NewUDPMux(ctx context.Context, port int) *UDPMux {
 	}
 }
 
+func (u *UDPMux) Mux() *ice.MultiUDPMuxDefault {
+	return u.mux
+}
+
 func (u *UDPMux) Close() error {
 	u.cancel()
 	return u.mux.Close()
