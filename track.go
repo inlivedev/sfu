@@ -891,7 +891,7 @@ func (t *trackList) Add(track ITrack) error {
 
 	id := track.ID()
 	if _, ok := t.tracks[id]; ok {
-		t.log.Warnf("client: track already added ", id)
+		t.log.Warnf("tracklist: track already added ", id)
 		return ErrTrackExists
 	}
 

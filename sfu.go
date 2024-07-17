@@ -206,41 +206,6 @@ func (s *SFU) NewClient(id, name string, opts ClientOptions) *Client {
 
 	client := s.createClient(id, name, peerConnectionConfig, opts)
 
-	client.onTrack = func(track ITrack) {
-		if err := client.pendingPublishedTracks.Add(track); err == ErrTrackExists {
-			s.log.Errorf("sfu: client ", id, " track already added ", track.ID())
-			// not an error could be because a simulcast track already added
-			return
-		}
-
-		// don't publish track when not all the tracks are received
-		// TODO:
-		// 1. need to handle simulcast track because  it will be counted as single track
-		initialReceiverCount := client.initialReceiverCount.Load()
-		if client.Type() == ClientTypePeer && int(initialReceiverCount) > client.pendingPublishedTracks.Length() {
-			s.log.Infof("sfu: client ", id, " pending published tracks: ", client.pendingPublishedTracks.Length(), " initial tracks count: ", initialReceiverCount)
-			return
-		}
-
-		s.log.Infof("sfu: client ", id, " publish tracks, initial tracks count: ", initialReceiverCount, " pending published tracks: ", client.pendingPublishedTracks.Length())
-
-		addedTracks := client.pendingPublishedTracks.GetTracks()
-
-		if client.onTracksAdded != nil {
-			client.onTracksAdded(addedTracks)
-		}
-
-		// broadcast to client with auto subscribe tracks
-		s.broadcastTracksToAutoSubscribeClients(client.ID(), addedTracks)
-	}
-
-	client.peerConnection.PC().OnSignalingStateChange(func(state webrtc.SignalingState) {
-		if state == webrtc.SignalingStateStable && client.pendingRemoteRenegotiation.Load() {
-			client.pendingRemoteRenegotiation.Store(false)
-			client.allowRemoteRenegotiation()
-		}
-	})
-
 	s.addClient(client)
 
 	return client
@@ -349,24 +314,6 @@ func (s *SFU) onTracksAvailable(clientId string, tracks []ITrack) {
 	for _, callback := range s.onTrackAvailableCallbacks {
 		if callback != nil {
 			callback(tracks)
-		}
-	}
-}
-
-func (s *SFU) broadcastTracksToAutoSubscribeClients(ownerID string, tracks []ITrack) {
-	trackReq := make([]SubscribeTrackRequest, 0)
-	for _, track := range tracks {
-		trackReq = append(trackReq, SubscribeTrackRequest{
-			ClientID: track.ClientID(),
-			TrackID:  track.ID(),
-		})
-	}
-
-	for _, client := range s.clients.GetClients() {
-		if ownerID != client.ID() {
-			if err := client.SubscribeTracks(trackReq); err != nil {
-				s.log.Errorf("client: failed to subscribe tracks ", err)
-			}
 		}
 	}
 }
@@ -523,7 +470,8 @@ func (s *SFU) AddRelayTrack(ctx context.Context, id, streamid, rid string, clien
 		s.mu.Unlock()
 	}
 
-	s.broadcastTracksToAutoSubscribeClients(client.ID(), []ITrack{track})
+	// TODO: replace to with subscribe to all available tracks
+	// s.broadcastTracksToAutoSubscribeClients(client.ID(), []ITrack{track})
 
 	// notify the local clients that a relay track is available
 	s.onTracksAvailable(client.ID(), []ITrack{track})

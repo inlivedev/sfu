@@ -22,7 +22,7 @@ func TestRoomCreateAndClose(t *testing.T) {
 	roomManager := NewManager(ctx, "test", Options{
 		EnableMux:                true,
 		EnableBandwidthEstimator: true,
-		IceServers:               []webrtc.ICEServer{},
+		IceServers:               DefaultTestIceServers(),
 	})
 
 	defer roomManager.Close()
@@ -93,7 +93,7 @@ func TestRoomJoinLeftEvent(t *testing.T) {
 	roomManager := NewManager(ctx, "test", Options{
 		EnableMux:                true,
 		EnableBandwidthEstimator: true,
-		IceServers:               []webrtc.ICEServer{},
+		IceServers:               DefaultTestIceServers(),
 	})
 
 	defer roomManager.Close()
@@ -174,6 +174,7 @@ func TestRoomJoinLeftEvent(t *testing.T) {
 	}
 
 	require.Equal(t, 0, len(testRoom.sfu.clients.clients))
+	require.Equal(t, 3, peerCount)
 }
 
 func TestRoomStats(t *testing.T) {
@@ -189,7 +190,7 @@ func TestRoomStats(t *testing.T) {
 	roomManager := NewManager(ctx, "test", Options{
 		EnableMux:                true,
 		EnableBandwidthEstimator: true,
-		IceServers:               []webrtc.ICEServer{},
+		IceServers:               DefaultTestIceServers(),
 	})
 
 	defer roomManager.Close()
@@ -328,7 +329,7 @@ func TestRoomAddClientTimeout(t *testing.T) {
 	roomManager := NewManager(ctx, "test", Options{
 		EnableMux:                true,
 		EnableBandwidthEstimator: true,
-		IceServers:               []webrtc.ICEServer{},
+		IceServers:               DefaultTestIceServers(),
 	})
 
 	defer roomManager.Close()

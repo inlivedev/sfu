@@ -72,7 +72,7 @@ func TestManagerExtension(t *testing.T) {
 	roomManager := NewManager(ctx, "test", Options{
 		EnableMux:                true,
 		EnableBandwidthEstimator: true,
-		IceServers:               []webrtc.ICEServer{},
+		IceServers:               DefaultTestIceServers(),
 	})
 
 	defer roomManager.Close()
@@ -113,7 +113,7 @@ func TestExtension(t *testing.T) {
 	roomManager := NewManager(ctx, "test", Options{
 		EnableMux:                true,
 		EnableBandwidthEstimator: true,
-		IceServers:               []webrtc.ICEServer{},
+		IceServers:               DefaultTestIceServers(),
 	})
 
 	defer roomManager.Close()
@@ -132,7 +132,8 @@ func TestExtension(t *testing.T) {
 	joinChan := make(chan bool)
 	peerCount := 0
 
-	tracks, _ := GetStaticTracks(ctx, "test", true)
+	iceConnectedCtx, iceConnectedCtxCancel := context.WithCancel(ctx)
+	tracks, _ := GetStaticTracks(ctx, iceConnectedCtx, "test", true)
 	mediaEngine := GetMediaEngine()
 
 	testRoom.OnClientLeft(func(client *Client) {
@@ -152,6 +153,12 @@ func TestExtension(t *testing.T) {
 
 	peer1, err := webrtcAPI.NewPeerConnection(webrtc.Configuration{
 		ICEServers: DefaultTestIceServers(),
+	})
+
+	peer1.OnICEConnectionStateChange(func(connectionState webrtc.ICEConnectionState) {
+		if connectionState == webrtc.ICEConnectionStateConnected {
+			iceConnectedCtxCancel()
+		}
 	})
 
 	client1.OnIceCandidate(func(ctx context.Context, candidate *webrtc.ICECandidate) {

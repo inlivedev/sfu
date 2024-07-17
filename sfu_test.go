@@ -21,9 +21,9 @@ func TestLeaveRoom(t *testing.T) {
 
 	// create room manager first before create new room
 	roomManager := NewManager(ctx, "test", Options{
-		EnableMux:                true,
+		EnableMux:                false,
 		EnableBandwidthEstimator: true,
-		IceServers:               []webrtc.ICEServer{},
+		IceServers:               DefaultTestIceServers(),
 	})
 
 	defer roomManager.Close()
@@ -91,21 +91,27 @@ Loop:
 
 		case <-checkReceiverChan:
 			go func() {
+				ctxx, cancelx := context.WithCancel(ctx)
+				defer cancelx()
 				for {
-					activeTracks = 0
-					for _, client := range clients {
-						for _, sender := range client.peerConnection.PC().GetSenders() {
-							if sender.Track() != nil {
-								activeTracks++
+					ticker := time.NewTicker(1 * time.Millisecond)
+					select {
+					case <-ctxx.Done():
+						return
+					case <-ticker.C:
+						activeTracks = 0
+						for _, client := range clients {
+							for _, sender := range client.peerConnection.PC().GetSenders() {
+								if sender.Track() != nil {
+									activeTracks++
+								}
 							}
 						}
-					}
 
-					if activeTracks == expectedActiveTracks {
-						cancelTimeout()
+						if activeTracks == expectedActiveTracks {
+							cancelTimeout()
+						}
 					}
-
-					time.Sleep(1 * time.Second)
 				}
 			}()
 		}
@@ -129,7 +135,7 @@ func TestRenegotiation(t *testing.T) {
 	roomManager := NewManager(ctx, "test", Options{
 		EnableMux:                true,
 		EnableBandwidthEstimator: true,
-		IceServers:               []webrtc.ICEServer{},
+		IceServers:               DefaultTestIceServers(),
 	})
 
 	defer roomManager.Close()
@@ -192,7 +198,9 @@ Loop:
 				go func() {
 					// add more tracks to each clients
 					for _, pair := range pairs {
-						newTrack, _ := GetStaticVideoTrack(timeout, GenerateSecureToken(), GenerateSecureToken(), true, "")
+						iceConnectedCtx, iceConnectedCtxCancel := context.WithCancel(ctx)
+						defer iceConnectedCtxCancel()
+						newTrack, _ := GetStaticVideoTrack(timeout, iceConnectedCtx, GenerateSecureToken(), GenerateSecureToken(), true, "")
 						_, err := pair.pc.AddTransceiverFromTrack(newTrack)
 						require.NoError(t, err, "error adding track: %v", err)
 						negotiate(pair.pc, pair.client, TestLogger)

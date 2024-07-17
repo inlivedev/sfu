@@ -95,7 +95,7 @@ func main() {
 	if turnEnabled {
 		sfu.StartTurnServer(ctx, "127.0.0.1")
 		sfuOpts.IceServers = append(sfuOpts.IceServers, webrtc.ICEServer{
-			URLs:           []string{"turn:127.0.0.1:3478"},
+			URLs:           []string{"stun:stun.l.google.com:19302"},
 			Username:       "user",
 			Credential:     "pass",
 			CredentialType: webrtc.ICECredentialTypePassword,
@@ -115,17 +115,17 @@ func main() {
 	// roomsOpts.PLIInterval = 3 * time.Second
 	defaultRoom, _ := roomManager.NewRoom(roomID, roomName, sfu.RoomTypeLocal, roomsOpts)
 
-	fakeClientCount := 0
+	fakeClientCount := 10
 	localIp, _ := sfu.GetLocalIp()
 	// turnServer := sfu.StartTurnServer(ctx, localIp.String())
 	// defer turnServer.Close()
 
 	iceServers := []webrtc.ICEServer{
 		{
-			URLs: []string{"stun:stun.l.google.com:19302"},
+			URLs: []string{"stun:stun:stun.l.google.com:19302"},
 		},
 		{
-			URLs:           []string{"turn:" + localIp.String() + ":3478", "stun:" + localIp.String() + ":3478"},
+			URLs:           []string{"stun:stun.l.google.com:19302", "stun:" + localIp.String() + ":3478"},
 			Username:       "user",
 			Credential:     "pass",
 			CredentialType: webrtc.ICECredentialTypePassword,

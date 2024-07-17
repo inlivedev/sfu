@@ -175,7 +175,6 @@ func (v *Interceptor) getVadBySSRC(ssrc uint32) *VoiceDetector {
 func (v *Interceptor) processPacket(ssrc uint32, header *rtp.Header) rtp.AudioLevelExtension {
 	audioData := v.getAudioLevel(ssrc, header)
 	if audioData.Level == 0 {
-		v.log.Debug("vad: audio level is 0")
 		return rtp.AudioLevelExtension{}
 	}
 
@@ -204,7 +203,6 @@ func (v *Interceptor) getAudioLevel(ssrc uint32, header *rtp.Header) rtp.AudioLe
 	audioLevel := rtp.AudioLevelExtension{}
 	headerID := v.getAudioLevelExtensionID(ssrc)
 	if headerID == 0 {
-		v.log.Debug("vad: audio level extension ssrc not found")
 		return audioLevel
 	}
 

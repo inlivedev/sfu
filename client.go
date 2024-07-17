@@ -355,6 +355,38 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		log:                            opts.Log,
 	}
 
+	client.onTrack = func(track ITrack) {
+		if err := client.pendingPublishedTracks.Add(track); err == ErrTrackExists {
+			s.log.Errorf("client: client %s track already added ", track.ID())
+			// not an error could be because a simulcast track already added
+			return
+		}
+
+		// don't publish track when not all the tracks are received
+		// TODO:
+		// 1. need to handle simulcast track because  it will be counted as single track
+		initialReceiverCount := client.initialReceiverCount.Load()
+		if client.Type() == ClientTypePeer && int(initialReceiverCount) > client.pendingPublishedTracks.Length() {
+			s.log.Infof("sfu: client ", id, " pending published tracks: ", client.pendingPublishedTracks.Length(), " initial tracks count: ", initialReceiverCount)
+			return
+		}
+
+		s.log.Infof("sfu: client ", id, " publish tracks, initial tracks count: ", initialReceiverCount, " pending published tracks: ", client.pendingPublishedTracks.Length())
+
+		addedTracks := client.pendingPublishedTracks.GetTracks()
+
+		if client.onTracksAdded != nil {
+			client.onTracksAdded(addedTracks)
+		}
+	}
+
+	client.peerConnection.PC().OnSignalingStateChange(func(state webrtc.SignalingState) {
+		if state == webrtc.SignalingStateStable && client.pendingRemoteRenegotiation.Load() {
+			client.pendingRemoteRenegotiation.Store(false)
+			client.allowRemoteRenegotiation()
+		}
+	})
+
 	// make sure the exisiting data channels is created on new clients
 	s.createExistingDataChannels(client)
 
@@ -493,9 +525,10 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 			track = newTrack(client.context, client, remoteTrack, minWait, maxWait, s.pliInterval, onPLI, client.statsGetter, onStatsUpdated)
 
 			go func() {
-				ctx, cancel := context.WithCancel(track.Context())
-				defer cancel()
-				<-ctx.Done()
+				parentCtx := track.Context()
+				trackCtx, trackCancel := context.WithCancel(parentCtx)
+				defer trackCancel()
+				<-trackCtx.Done()
 				client.stats.removeReceiverStats(remoteTrack.ID() + remoteTrack.RID())
 				client.tracks.remove([]string{remoteTrack.ID()})
 			}()
@@ -523,9 +556,9 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 				}
 
 				go func() {
-					ctx, cancel := context.WithCancel(track.Context())
-					defer cancel()
-					<-ctx.Done()
+					trackCtx, trackCancel := context.WithCancel(track.Context())
+					defer trackCancel()
+					<-trackCtx.Done()
 					simulcastTrack := track.(*SimulcastTrack)
 					simulcastTrack.mu.Lock()
 					defer simulcastTrack.mu.Unlock()
@@ -1097,7 +1130,7 @@ func (c *Client) processPendingTracks() {
 	if len(c.pendingReceivedTracks) > 0 {
 		err := c.SubscribeTracks(c.pendingReceivedTracks)
 		if err != nil {
-			c.log.Errorf("client: error subscribe tracks ", err)
+			c.log.Errorf("client: error subscribe tracks %s ", err.Error())
 		}
 
 		c.pendingReceivedTracks = make([]SubscribeTrackRequest, 0)

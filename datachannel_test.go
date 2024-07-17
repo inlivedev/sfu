@@ -22,7 +22,7 @@ func TestRoomDataChannel(t *testing.T) {
 	roomManager := NewManager(ctx, "test", Options{
 		EnableMux:                true,
 		EnableBandwidthEstimator: true,
-		IceServers:               []webrtc.ICEServer{},
+		IceServers:               DefaultTestIceServers(),
 	})
 
 	defer roomManager.Close()
@@ -144,7 +144,7 @@ func TestRoomDataChannelWithClientID(t *testing.T) {
 	roomManager := NewManager(ctx, "test", Options{
 		EnableMux:                true,
 		EnableBandwidthEstimator: true,
-		IceServers:               []webrtc.ICEServer{},
+		IceServers:               DefaultTestIceServers(),
 	})
 
 	defer roomManager.Close()

@@ -23,7 +23,7 @@ func TestTracksSubscribe(t *testing.T) {
 	roomManager := NewManager(ctx, "test", Options{
 		EnableMux:                true,
 		EnableBandwidthEstimator: true,
-		IceServers:               []webrtc.ICEServer{},
+		IceServers:               DefaultTestIceServers(),
 	})
 
 	defer roomManager.Close()
@@ -125,7 +125,7 @@ func TestSimulcastTrack(t *testing.T) {
 	roomManager := NewManager(ctx, "test", Options{
 		EnableMux:                true,
 		EnableBandwidthEstimator: true,
-		IceServers:               []webrtc.ICEServer{},
+		IceServers:               DefaultTestIceServers(),
 	})
 
 	defer roomManager.Close()
@@ -221,7 +221,7 @@ func TestClientDataChannel(t *testing.T) {
 	roomManager := NewManager(ctx, "test", Options{
 		EnableMux:                true,
 		EnableBandwidthEstimator: true,
-		IceServers:               []webrtc.ICEServer{},
+		IceServers:               DefaultTestIceServers(),
 	})
 
 	defer roomManager.Close()

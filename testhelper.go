@@ -42,14 +42,14 @@ type PC struct {
 	IsInRenegotiation bool
 }
 
-func GetStaticTracks(ctx context.Context, streamID string, loop bool) ([]*webrtc.TrackLocalStaticSample, chan bool) {
+func GetStaticTracks(ctx, iceConnectedCtx context.Context, streamID string, loop bool) ([]*webrtc.TrackLocalStaticSample, chan bool) {
 	audioTrackID := GenerateSecureToken()
 	videoTrackID := GenerateSecureToken()
 
 	staticTracks := make([]*webrtc.TrackLocalStaticSample, 0)
-	audioTrack, audioDoneChan := GetStaticAudioTrack(ctx, audioTrackID, streamID, loop)
+	audioTrack, audioDoneChan := GetStaticAudioTrack(ctx, iceConnectedCtx, audioTrackID, streamID, loop)
 	staticTracks = append(staticTracks, audioTrack)
-	videoTrack, videoDoneChan := GetStaticVideoTrack(ctx, videoTrackID, streamID, loop, "low")
+	videoTrack, videoDoneChan := GetStaticVideoTrack(ctx, iceConnectedCtx, videoTrackID, streamID, loop, "low")
 	staticTracks = append(staticTracks, videoTrack)
 
 	allDone := make(chan bool)
@@ -70,7 +70,12 @@ func GetStaticTracks(ctx context.Context, streamID string, loop bool) ([]*webrtc
 			}
 
 			if trackDone == 2 && !loop {
-				allDone <- true
+				select {
+				case allDone <- true:
+					return
+				case <-ctxx.Done():
+					return
+				}
 			}
 		}
 	}()
@@ -78,7 +83,7 @@ func GetStaticTracks(ctx context.Context, streamID string, loop bool) ([]*webrtc
 	return staticTracks, allDone
 }
 
-func GetStaticVideoTrack(ctx context.Context, trackID, streamID string, loop bool, quality string) (*webrtc.TrackLocalStaticSample, chan bool) {
+func GetStaticVideoTrack(ctx, iceConnectedCtx context.Context, trackID, streamID string, loop bool, quality string) (*webrtc.TrackLocalStaticSample, chan bool) {
 	_, filename, _, ok := runtime.Caller(0)
 	if !ok {
 		panic("No caller information")
@@ -121,6 +126,7 @@ func GetStaticVideoTrack(ctx context.Context, trackID, streamID string, loop boo
 	done := make(chan bool)
 
 	go func() {
+		<-iceConnectedCtx.Done()
 		// Send our video file frame at a time. Pace our sending so we send it at the same speed it should be played back as.
 		// This isn't required since the video is timestamped, but we will such much higher loss if we send all at once.
 		//
@@ -159,9 +165,11 @@ func GetStaticVideoTrack(ctx context.Context, trackID, streamID string, loop boo
 						panic(h264Err)
 					}
 
-					if h264Err = videoTrack.WriteSample(media.Sample{Data: nal.Data, Duration: h264FrameDuration}); h264Err != nil {
-						continue
+					h264Err = videoTrack.WriteSample(media.Sample{Data: nal.Data, Duration: h264FrameDuration})
+					if h264Err != nil {
+						panic(h264Err)
 					}
+
 				}
 			}
 		}
@@ -170,7 +178,7 @@ func GetStaticVideoTrack(ctx context.Context, trackID, streamID string, loop boo
 	return videoTrack, done
 }
 
-func GetStaticAudioTrack(ctx context.Context, trackID, streamID string, loop bool) (*webrtc.TrackLocalStaticSample, chan bool) {
+func GetStaticAudioTrack(ctx, iceConnectedCtx context.Context, trackID, streamID string, loop bool) (*webrtc.TrackLocalStaticSample, chan bool) {
 	_, filename, _, ok := runtime.Caller(0)
 	if !ok {
 		panic("No caller information")
@@ -193,6 +201,7 @@ func GetStaticAudioTrack(ctx context.Context, trackID, streamID string, loop boo
 	done := make(chan bool)
 
 	go func() {
+		<-iceConnectedCtx.Done()
 		// Open a ogg file and start reading using our oggReader
 		// Keep track of last granule, the difference is the amount of samples in the buffer
 		var lastGranule uint64
@@ -297,20 +306,20 @@ func GenerateSecureToken() string {
 	return uuid.New().String()
 }
 
-func AddSimulcastVideoTracks(ctx context.Context, pc *webrtc.PeerConnection, trackID, streamID string) error {
-	videoHigh, _ := GetStaticVideoTrack(ctx, trackID, streamID, true, "high")
+func AddSimulcastVideoTracks(ctx, iceConnectedCtx context.Context, pc *webrtc.PeerConnection, trackID, streamID string) error {
+	videoHigh, _ := GetStaticVideoTrack(ctx, iceConnectedCtx, trackID, streamID, true, "high")
 	transcv, err := pc.AddTransceiverFromTrack(videoHigh, webrtc.RTPTransceiverInit{
 		Direction: webrtc.RTPTransceiverDirectionSendonly})
 	if err != nil {
 		return err
 	}
 
-	videoMid, _ := GetStaticVideoTrack(ctx, trackID, streamID, true, "mid")
+	videoMid, _ := GetStaticVideoTrack(ctx, iceConnectedCtx, trackID, streamID, true, "mid")
 	if err = transcv.Sender().AddEncoding(videoMid); err != nil {
 		return err
 	}
 
-	videoLow, _ := GetStaticVideoTrack(ctx, trackID, streamID, true, "low")
+	videoLow, _ := GetStaticVideoTrack(ctx, iceConnectedCtx, trackID, streamID, true, "low")
 	if err = transcv.Sender().AddEncoding(videoLow); err != nil {
 		return err
 	}
@@ -425,8 +434,16 @@ func CreatePeerPair(ctx context.Context, log logging.LeveledLogger, room *Room, 
 		IsInRenegotiation: false,
 	}
 
+	iceConnectedCtx, iceConnectedCtxCancel := context.WithCancel(ctx)
+
+	pc.OnICEConnectionStateChange(func(connectionState webrtc.ICEConnectionState) {
+		if connectionState == webrtc.ICEConnectionStateConnected {
+			iceConnectedCtxCancel()
+		}
+	})
+
 	if isSimulcast {
-		_ = AddSimulcastVideoTracks(ctx, pc, GenerateSecureToken(), peerName)
+		_ = AddSimulcastVideoTracks(ctx, iceConnectedCtx, pc, GenerateSecureToken(), peerName)
 
 		for _, sender := range pc.GetSenders() {
 			parameters := sender.GetParameters()
@@ -436,7 +453,7 @@ func CreatePeerPair(ctx context.Context, log logging.LeveledLogger, room *Room, 
 		}
 
 	} else {
-		tracks, done = GetStaticTracks(clientContext, peerName, loop)
+		tracks, done = GetStaticTracks(clientContext, iceConnectedCtx, peerName, loop)
 		SetPeerConnectionTracks(clientContext, pc, tracks)
 	}
 

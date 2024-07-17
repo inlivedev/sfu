@@ -23,7 +23,7 @@ func createPeerAudio(ctx context.Context, room *Room, iceServers []webrtc.ICESer
 	if len(iceServers) == 0 {
 		iceServers = []webrtc.ICEServer{
 			{
-				URLs:           []string{"turn:127.0.0.1:3478", "stun:127.0.0.1:3478"},
+				URLs:           []string{"stun:stun.l.google.com:19302", "stun:127.0.0.1:3478"},
 				Username:       "user",
 				Credential:     "pass",
 				CredentialType: webrtc.ICECredentialTypePassword,

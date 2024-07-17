@@ -423,6 +423,45 @@ func StartTurnServer(ctx context.Context, publicIP string) *turn.Server {
 	return s
 }
 
+func StartStunServer(ctx context.Context, publicIP string) *turn.Server {
+	port := 3478
+	if len(publicIP) == 0 {
+		log.Fatalf("'public-ip' is required")
+	}
+
+	// Create a UDP listener to pass into pion/turn
+	// pion/turn itself doesn't allocate any UDP sockets, but lets the user pass them in
+	// this allows us to add logging, storage or modify inbound/outbound traffic
+	udpListener, err := net.ListenPacket("udp4", "0.0.0.0:"+strconv.Itoa(port))
+	if err != nil {
+		log.Panicf("Failed to create STUN server listener: %s", err)
+	}
+
+	s, err := turn.NewServer(turn.ServerConfig{
+		// PacketConnConfigs is a list of UDP Listeners and the configuration around them
+		PacketConnConfigs: []turn.PacketConnConfig{
+			{
+				PacketConn: udpListener,
+			},
+		},
+	})
+
+	if err != nil {
+		log.Panic(err)
+	}
+
+	go func() {
+		ctxx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		<-ctxx.Done()
+		if err := s.Close(); err != nil {
+			log.Panic(err)
+		}
+	}()
+
+	return s
+}
+
 func GetLocalIp() (net.IP, error) {
 	addresses, err := net.InterfaceAddrs()
 	if err != nil {
