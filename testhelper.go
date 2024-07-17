@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/inlivedev/sfu/pkg/interceptors/simulcast"
+	"github.com/pion/ice/v3"
 	"github.com/pion/interceptor"
 	"github.com/pion/interceptor/pkg/stats"
 	"github.com/pion/logging"
@@ -412,6 +413,11 @@ func CreatePeerPair(ctx context.Context, log logging.LeveledLogger, room *Room, 
 		RegisterSimulcastHeaderExtensions(mediaEngine, webrtc.RTPCodecTypeVideo)
 	}
 
+	settingEngine := &webrtc.SettingEngine{}
+	settingEngine.SetNetworkTypes([]webrtc.NetworkType{webrtc.NetworkTypeUDP4})
+	settingEngine.SetIncludeLoopbackCandidate(true)
+	settingEngine.SetICEMulticastDNSMode(ice.MulticastDNSModeDisabled)
+
 	webrtcAPI := webrtc.NewAPI(webrtc.WithMediaEngine(mediaEngine), webrtc.WithInterceptorRegistry(i))
 
 	pc, err := webrtcAPI.NewPeerConnection(webrtc.Configuration{
@@ -491,16 +497,12 @@ func CreatePeerPair(ctx context.Context, log logging.LeveledLogger, room *Room, 
 
 		for {
 			select {
-			case <-clientContext.Done():
+			case <-ctxx.Done():
 				return
 
 			case <-done:
-				select {
-				case <-ctxx.Done():
-					return
-				case allDone <- true:
-					return
-				}
+				allDone <- true
+				return
 			}
 		}
 	}()
@@ -633,7 +635,12 @@ func CreateDataPair(ctx context.Context, log logging.LeveledLogger, room *Room, 
 		panic(err)
 	}
 
-	webrtcAPI := webrtc.NewAPI(webrtc.WithMediaEngine(mediaEngine), webrtc.WithInterceptorRegistry(i))
+	settingEngine := webrtc.SettingEngine{}
+	settingEngine.SetNetworkTypes([]webrtc.NetworkType{webrtc.NetworkTypeUDP4})
+	settingEngine.SetICEMulticastDNSMode(ice.MulticastDNSModeDisabled)
+	settingEngine.SetIncludeLoopbackCandidate(true)
+
+	webrtcAPI := webrtc.NewAPI(webrtc.WithMediaEngine(mediaEngine), webrtc.WithInterceptorRegistry(i), webrtc.WithSettingEngine(settingEngine))
 
 	pc, err := webrtcAPI.NewPeerConnection(webrtc.Configuration{
 		ICEServers: iceServers,

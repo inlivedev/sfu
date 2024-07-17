@@ -56,6 +56,7 @@ type QualityLevel uint32
 
 var (
 	ErrNegotiationIsNotRequested = errors.New("client: error negotiation is called before requested")
+	ErrRenegotiationCallback     = errors.New("client: error renegotiation callback is not set")
 	ErrClientStoped              = errors.New("client: error client already stopped")
 )
 
@@ -83,6 +84,7 @@ type ClientOptions struct {
 	// On unstable network, the packets can be arrived unordered which may affected the nack and packet loss counts, set this to true to allow the SFU to handle reordered packet
 	ReorderPackets bool `json:"reorder_packets"`
 	Log            logging.LeveledLogger
+	settingEngine  webrtc.SettingEngine
 }
 
 type internalDataMessage struct {
@@ -297,22 +299,8 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		panic(err)
 	}
 
-	settingEngine := webrtc.SettingEngine{}
-
-	if s.mux != nil {
-		settingEngine.SetICEUDPMux(s.mux.mux)
-	} else {
-		if err := settingEngine.SetEphemeralUDPPortRange(s.portStart, s.portEnd); err != nil {
-			opts.Log.Errorf("client: error set ephemeral udp port range ", err)
-		}
-	}
-
-	if s.publicIP != "" {
-		settingEngine.SetNAT1To1IPs([]string{s.publicIP}, s.nat1To1IPsCandidateType)
-	}
-
 	// Create a new RTCPeerConnection
-	peerConnection, err := webrtc.NewAPI(webrtc.WithMediaEngine(m), webrtc.WithSettingEngine(settingEngine), webrtc.WithInterceptorRegistry(i)).NewPeerConnection(peerConnectionConfig)
+	peerConnection, err := webrtc.NewAPI(webrtc.WithMediaEngine(m), webrtc.WithSettingEngine(opts.settingEngine), webrtc.WithInterceptorRegistry(i)).NewPeerConnection(peerConnectionConfig)
 	if err != nil {
 		panic(err)
 	}
@@ -1394,6 +1382,11 @@ func (c *Client) SetTracksSourceType(trackTypes map[string]TrackType) {
 // Calling subscribe tracks will trigger the SFU renegotiation with the client.
 // Make sure you already listen for `client.OnRenegotiation()` before calling this method to track subscription can complete.
 func (c *Client) SubscribeTracks(req []SubscribeTrackRequest) error {
+	if c.onRenegotiation == nil {
+		c.log.Errorf("client: onRenegotiation is not set, can't subscribe tracks")
+		return ErrRenegotiationCallback
+	}
+
 	if c.peerConnection.PC().ConnectionState() != webrtc.PeerConnectionStateConnected {
 		c.mu.Lock()
 		c.pendingReceivedTracks = append(c.pendingReceivedTracks, req...)
@@ -1670,8 +1663,6 @@ func (c *Client) Stats() ClientTrackStats {
 			source = "screen"
 		}
 
-		// TODO:
-		// - add current bitrate
 		sentStats := TrackSentStats{
 			ID:             id,
 			StreamID:       track.StreamID(),

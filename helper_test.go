@@ -25,11 +25,14 @@ type RemoteTrackTest struct {
 
 func DefaultTestIceServers() []webrtc.ICEServer {
 	return []webrtc.ICEServer{
+		// {
+		// 	URLs:           []string{"turn:127.0.0.1:3478", "stun:127.0.0.1:3478"},
+		// 	Username:       "user",
+		// 	Credential:     "pass",
+		// 	CredentialType: webrtc.ICECredentialTypePassword,
+		// },
 		{
-			URLs:           []string{"turn:127.0.0.1:3478", "stun:127.0.0.1:3478"},
-			Username:       "user",
-			Credential:     "pass",
-			CredentialType: webrtc.ICECredentialTypePassword,
+			URLs: []string{"stun:127.0.0.1:3478"},
 		},
 	}
 }
@@ -71,7 +74,9 @@ func filterRoutines(routines []string) []string {
 			filterRoutineWASM(stack) || // WASM specific exception
 			strings.Contains(stack, "sfu.TestMain(") || // Tests
 			strings.Contains(stack, "testing.(*T).Run(") || // Test run
-			strings.Contains(stack, "turn/v2.NewServer") || // turn server
+			strings.Contains(stack, "turn/v3.NewServer") || // turn server
+			strings.Contains(stack, "sfu.StartTurnServer") || // stun server
+			strings.Contains(stack, "sfu.StartStunServer") || // stun server
 			strings.Contains(stack, "sfu.getRoutines(") { // This routine
 
 			continue

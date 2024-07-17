@@ -10,8 +10,6 @@ import (
 )
 
 func TestRoomDataChannel(t *testing.T) {
-	t.Parallel()
-
 	report := CheckRoutines(t)
 	defer report()
 
@@ -19,11 +17,7 @@ func TestRoomDataChannel(t *testing.T) {
 	defer cancel()
 
 	// create room manager first before create new room
-	roomManager := NewManager(ctx, "test", Options{
-		EnableMux:                true,
-		EnableBandwidthEstimator: true,
-		IceServers:               DefaultTestIceServers(),
-	})
+	roomManager := NewManager(ctx, "test", sfuOpts)
 
 	defer roomManager.Close()
 
@@ -132,8 +126,6 @@ Loop:
 }
 
 func TestRoomDataChannelWithClientID(t *testing.T) {
-	t.Parallel()
-
 	report := CheckRoutines(t)
 	defer report()
 
@@ -141,11 +133,7 @@ func TestRoomDataChannelWithClientID(t *testing.T) {
 	defer cancel()
 
 	// create room manager first before create new room
-	roomManager := NewManager(ctx, "test", Options{
-		EnableMux:                true,
-		EnableBandwidthEstimator: true,
-		IceServers:               DefaultTestIceServers(),
-	})
+	roomManager := NewManager(ctx, "test", sfuOpts)
 
 	defer roomManager.Close()
 

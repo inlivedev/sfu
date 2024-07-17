@@ -11,8 +11,6 @@ import (
 )
 
 func TestTracksSubscribe(t *testing.T) {
-	t.Parallel()
-
 	report := CheckRoutines(t)
 	defer report()
 
@@ -20,11 +18,7 @@ func TestTracksSubscribe(t *testing.T) {
 	defer cancel()
 
 	// create room manager first before create new room
-	roomManager := NewManager(ctx, "test", Options{
-		EnableMux:                true,
-		EnableBandwidthEstimator: true,
-		IceServers:               DefaultTestIceServers(),
-	})
+	roomManager := NewManager(ctx, "test", sfuOpts)
 
 	defer roomManager.Close()
 
@@ -113,8 +107,6 @@ Loop:
 // TODO: this is can't be work without a new SimulcastLocalTrack that can add header extension to the packet
 
 func TestSimulcastTrack(t *testing.T) {
-	t.Parallel()
-
 	report := CheckRoutines(t)
 	defer report()
 
@@ -122,11 +114,7 @@ func TestSimulcastTrack(t *testing.T) {
 	defer cancel()
 
 	// create room manager first before create new room
-	roomManager := NewManager(ctx, "test", Options{
-		EnableMux:                true,
-		EnableBandwidthEstimator: true,
-		IceServers:               DefaultTestIceServers(),
-	})
+	roomManager := NewManager(ctx, "test", sfuOpts)
 
 	defer roomManager.Close()
 
@@ -139,8 +127,10 @@ func TestSimulcastTrack(t *testing.T) {
 	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal, roomOpts)
 	require.NoError(t, err, "error creating room: %v", err)
 
-	client1, pc1 := addSimulcastPair(t, ctx, testRoom, "peer1")
-	client2, pc2 := addSimulcastPair(t, ctx, testRoom, "peer2")
+	simulcastChan := make(chan *SimulcastTrack)
+
+	client1, pc1 := addSimulcastPair(t, ctx, testRoom, "peer1", simulcastChan)
+	client2, pc2 := addSimulcastPair(t, ctx, testRoom, "peer2", simulcastChan)
 
 	defer func() {
 		_ = testRoom.StopClient(client1.id)
@@ -162,6 +152,7 @@ func TestSimulcastTrack(t *testing.T) {
 	defer cancelTimeout()
 
 	trackCount := 0
+	simulcastCount := 0
 Loop:
 	for {
 		select {
@@ -171,26 +162,53 @@ Loop:
 		case <-trackChan:
 			trackCount++
 			t.Log("track added ", trackCount)
-			if trackCount == 2 {
+
+		case simulcastTrack := <-simulcastChan:
+			go func() {
+				ctxx, cancell := context.WithCancel(ctx)
+				defer cancell()
+
+				ticker := time.NewTicker(1 * time.Second)
+				defer ticker.Stop()
+
+				for {
+					select {
+					case <-ctxx.Done():
+						return
+					case <-ticker.C:
+
+						if simulcastTrack.remoteTrackHigh != nil &&
+							simulcastTrack.remoteTrackMid != nil &&
+							simulcastTrack.remoteTrackLow != nil {
+							simulcastCount++
+							t.Log("simulcast track complete ", simulcastCount)
+							return
+						}
+
+					}
+				}
+			}()
+
+		default:
+			if trackCount == 2 && simulcastCount == 2 {
 				break Loop
 			}
+
 		}
 	}
+
+	require.Equal(t, 2, trackCount)
+	require.Equal(t, 2, simulcastCount)
 }
 
-func addSimulcastPair(t *testing.T, ctx context.Context, room *Room, peerName string) (*Client, *webrtc.PeerConnection) {
+func addSimulcastPair(t *testing.T, ctx context.Context, room *Room, peerName string, simulcastTrackChan chan *SimulcastTrack) (*Client, *webrtc.PeerConnection) {
 	pc, client, _, _ := CreatePeerPair(ctx, TestLogger, room, DefaultTestIceServers(), peerName, true, true)
 	client.OnTracksAvailable(func(availableTracks []ITrack) {
-
-		tracksReq := make([]SubscribeTrackRequest, 0)
 		for _, track := range availableTracks {
-			tracksReq = append(tracksReq, SubscribeTrackRequest{
-				ClientID: track.ClientID(),
-				TrackID:  track.ID(),
-			})
+			if track.IsSimulcast() {
+				simulcastTrackChan <- track.(*SimulcastTrack)
+			}
 		}
-		err := client.SubscribeTracks(tracksReq)
-		require.NoError(t, err)
 	})
 
 	client.OnTracksAdded(func(addedTracks []ITrack) {
@@ -209,8 +227,6 @@ func addSimulcastPair(t *testing.T, ctx context.Context, room *Room, peerName st
 }
 
 func TestClientDataChannel(t *testing.T) {
-	t.Parallel()
-
 	report := CheckRoutines(t)
 	defer report()
 
@@ -218,11 +234,7 @@ func TestClientDataChannel(t *testing.T) {
 	defer cancel()
 
 	// create room manager first before create new room
-	roomManager := NewManager(ctx, "test", Options{
-		EnableMux:                true,
-		EnableBandwidthEstimator: true,
-		IceServers:               DefaultTestIceServers(),
-	})
+	roomManager := NewManager(ctx, "test", sfuOpts)
 
 	defer roomManager.Close()
 

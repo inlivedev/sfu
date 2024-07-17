@@ -69,11 +69,7 @@ func TestManagerExtension(t *testing.T) {
 	defer cancel()
 
 	// create room manager first before create new room
-	roomManager := NewManager(ctx, "test", Options{
-		EnableMux:                true,
-		EnableBandwidthEstimator: true,
-		IceServers:               DefaultTestIceServers(),
-	})
+	roomManager := NewManager(ctx, "test", sfuOpts)
 
 	defer roomManager.Close()
 
@@ -110,11 +106,7 @@ func TestExtension(t *testing.T) {
 	defer cancel()
 
 	// create room manager first before create new room
-	roomManager := NewManager(ctx, "test", Options{
-		EnableMux:                true,
-		EnableBandwidthEstimator: true,
-		IceServers:               DefaultTestIceServers(),
-	})
+	roomManager := NewManager(ctx, "test", sfuOpts)
 
 	defer roomManager.Close()
 

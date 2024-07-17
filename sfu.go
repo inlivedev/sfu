@@ -112,21 +112,17 @@ type SFU struct {
 	codecs                    []string
 	dataChannels              *SFUDataChannelList
 	iceServers                []webrtc.ICEServer
-	nat1To1IPsCandidateType   webrtc.ICECandidateType
 	mu                        sync.Mutex
-	mux                       *UDPMux
 	onStop                    func()
 	pliInterval               time.Duration
 	qualityRef                QualityPresets
-	portStart                 uint16
-	portEnd                   uint16
-	publicIP                  string
 	onTrackAvailableCallbacks []func(tracks []ITrack)
 	onClientRemovedCallbacks  []func(*Client)
 	onClientAddedCallbacks    []func(*Client)
 	relayTracks               map[string]ITrack
 	clientStats               map[string]*ClientStats
 	log                       logging.LeveledLogger
+	defaultSettingEngine      *webrtc.SettingEngine
 }
 
 type PublishedTrack struct {
@@ -135,17 +131,13 @@ type PublishedTrack struct {
 }
 
 type sfuOptions struct {
-	IceServers              []webrtc.ICEServer
-	Mux                     *UDPMux
-	PortStart               uint16
-	PortEnd                 uint16
-	Bitrates                BitrateConfigs
-	QualityPresets          QualityPresets
-	Codecs                  []string
-	PLIInterval             time.Duration
-	PublicIP                string
-	NAT1To1IPsCandidateType webrtc.ICECandidateType
-	Log                     logging.LeveledLogger
+	IceServers     []webrtc.ICEServer
+	Bitrates       BitrateConfigs
+	QualityPresets QualityPresets
+	Codecs         []string
+	PLIInterval    time.Duration
+	Log            logging.LeveledLogger
+	SettingEngine  *webrtc.SettingEngine
 }
 
 // @Param muxPort: port for udp mux
@@ -160,19 +152,15 @@ func New(ctx context.Context, opts sfuOptions) *SFU {
 		dataChannels:              NewSFUDataChannelList(),
 		mu:                        sync.Mutex{},
 		iceServers:                opts.IceServers,
-		mux:                       opts.Mux,
 		bitrateConfigs:            opts.Bitrates,
 		pliInterval:               opts.PLIInterval,
 		qualityRef:                opts.QualityPresets,
-		publicIP:                  opts.PublicIP,
 		relayTracks:               make(map[string]ITrack),
-		portStart:                 opts.PortStart,
-		portEnd:                   opts.PortEnd,
 		onTrackAvailableCallbacks: make([]func(tracks []ITrack), 0),
 		onClientRemovedCallbacks:  make([]func(*Client), 0),
 		onClientAddedCallbacks:    make([]func(*Client), 0),
-		nat1To1IPsCandidateType:   opts.NAT1To1IPsCandidateType,
 		log:                       opts.Log,
+		defaultSettingEngine:      opts.SettingEngine,
 	}
 
 	return sfu
@@ -188,6 +176,7 @@ func (s *SFU) addClient(client *Client) {
 }
 
 func (s *SFU) createClient(id string, name string, peerConnectionConfig webrtc.Configuration, opts ClientOptions) *Client {
+	opts.settingEngine = *s.defaultSettingEngine
 
 	client := NewClient(s, id, name, peerConnectionConfig, opts)
 

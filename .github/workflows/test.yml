@@ -28,7 +28,7 @@ on:
       - 'Dockerfile'
 
 jobs:
-  test:
+  test-sfu:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v4
@@ -42,7 +42,66 @@ jobs:
     - name: Set up Go
       uses: actions/setup-go@v4
       with:
-        go-version: '1.21'
+        go-version: '1.22'
     
-    - name: Test
-      run: go test -v -timeout 5m ./...
+    - name: Test SFU
+      run: go test -timeout 30s -run ^(TestLeaveRoom|TestRenegotiation)$ github.com/inlivedev/sfu -mod=readonly
+
+  test-room:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Update apt
+      run: sudo apt update
+    
+    - name: Install dependencies
+      run: sudo apt install libx264-dev libopus-dev
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.22'
+    
+    - name: Test Room
+      run: go test -timeout 30s -run ^(TestRoomCreateAndClose|TestRoomJoinLeftEvent|TestRoomStats|TestRoomAddClientTimeout)$ github.com/inlivedev/sfu -mod=readonly
+
+  test-client:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Update apt
+      run: sudo apt update
+    
+    - name: Install dependencies
+      run: sudo apt install libx264-dev libopus-dev
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.22'
+    
+    - name: Test Client
+      run: go test -timeout 30s -run ^(TestTracksSubscribe|TestSimulcastTrack|TestClientDataChannel)$ github.com/inlivedev/sfu -mod=readonly
+
+  test-datachannel:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Update apt
+      run: sudo apt update
+    
+    - name: Install dependencies
+      run: sudo apt install libx264-dev libopus-dev
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.22'
+    
+    - name: Test Datachannel
+      run: go test -timeout 30s -run ^(TestRoomDataChannel|TestRoomDataChannelWithClientID|TestStillUsableAfterReconnect)$ github.com/inlivedev/sfu -mod=readonly
+
+

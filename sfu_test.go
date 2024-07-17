@@ -11,7 +11,7 @@ import (
 )
 
 func TestLeaveRoom(t *testing.T) {
-	t.Parallel()
+	// t.Parallel()
 
 	report := CheckRoutines(t)
 	defer report()
@@ -20,11 +20,7 @@ func TestLeaveRoom(t *testing.T) {
 	defer cancel()
 
 	// create room manager first before create new room
-	roomManager := NewManager(ctx, "test", Options{
-		EnableMux:                false,
-		EnableBandwidthEstimator: true,
-		IceServers:               DefaultTestIceServers(),
-	})
+	roomManager := NewManager(ctx, "test", sfuOpts)
 
 	defer roomManager.Close()
 
@@ -123,7 +119,7 @@ Loop:
 }
 
 func TestRenegotiation(t *testing.T) {
-	t.Parallel()
+	// t.Parallel()
 
 	report := CheckRoutines(t)
 	defer report()
@@ -132,11 +128,7 @@ func TestRenegotiation(t *testing.T) {
 	defer cancel()
 
 	// create room manager first before create new room
-	roomManager := NewManager(ctx, "test", Options{
-		EnableMux:                true,
-		EnableBandwidthEstimator: true,
-		IceServers:               DefaultTestIceServers(),
-	})
+	roomManager := NewManager(ctx, "test", sfuOpts)
 
 	defer roomManager.Close()
 

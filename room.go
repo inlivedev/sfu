@@ -16,10 +16,6 @@ const (
 )
 
 type Options struct {
-	EnableMux                bool
-	PortStart                uint16
-	PortEnd                  uint16
-	WebRTCPort               int
 	EnableBridging           bool
 	EnableBandwidthEstimator bool
 	IceServers               []webrtc.ICEServer
@@ -45,14 +41,17 @@ type Options struct {
 	NAT1To1IPsCandidateType webrtc.ICECandidateType
 	MinPlayoutDelay         uint16
 	MaxPlayoutDelay         uint16
+	// SettingEngine is used to configure the WebRTC engine
+	// Use this to configure use of enable/disable mDNS, network types, use single port mux, etc.
+	SettingEngine *webrtc.SettingEngine
 }
 
 func DefaultOptions() Options {
+	settingEngine := &webrtc.SettingEngine{}
+	_ = settingEngine.SetEphemeralUDPPortRange(49152, 65535)
+	settingEngine.SetNetworkTypes([]webrtc.NetworkType{webrtc.NetworkTypeUDP4})
+
 	return Options{
-		PortStart:                49152,
-		PortEnd:                  65535,
-		EnableMux:                false,
-		WebRTCPort:               50005,
 		EnableBandwidthEstimator: true,
 		IceServers: []webrtc.ICEServer{
 			{
@@ -63,6 +62,7 @@ func DefaultOptions() Options {
 		NAT1To1IPsCandidateType: webrtc.ICECandidateTypeHost,
 		MinPlayoutDelay:         100,
 		MaxPlayoutDelay:         100,
+		SettingEngine:           settingEngine,
 	}
 }
 
@@ -86,7 +86,7 @@ type Room struct {
 	meta                    *Metadata
 	sfu                     *SFU
 	state                   string
-	stats                   map[string]TrackStats
+	stats                   map[string]*TrackStats
 	kind                    string
 	extensions              []IExtension
 	OnEvent                 func(event Event)
@@ -128,7 +128,7 @@ func newRoom(id, name string, sfu *SFU, kind string, opts RoomOptions) *Room {
 		cancel:     cancel,
 		sfu:        sfu,
 		token:      GenerateID(21),
-		stats:      make(map[string]TrackStats),
+		stats:      make(map[string]*TrackStats),
 		state:      StateRoomOpen,
 		name:       name,
 		mu:         &sync.RWMutex{},
@@ -337,20 +337,20 @@ func (r *Room) Stats() RoomStats {
 	defer r.mu.RUnlock()
 
 	for _, cstats := range r.stats {
-		for _, stat := range cstats.bytesReceived {
-			bytesReceived += stat
+		for _, stat := range cstats.receivers {
+			bytesReceived += stat.BytesReceived
+		}
+
+		for _, stat := range cstats.receiverBitrates {
+			bitratesReceived += uint64(stat)
 		}
 
 		for _, stat := range cstats.senderBitrates {
 			bitratesSent += uint64(stat)
 		}
 
-		for _, stat := range cstats.receiversBitrates {
-			bitratesReceived += uint64(stat)
-		}
-
-		for _, stat := range cstats.bytesSent {
-			bytesSent += stat
+		for _, stat := range cstats.senders {
+			bytesSent += stat.OutboundRTPStreamStats.BytesSent
 		}
 
 	}

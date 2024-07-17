@@ -1,6 +1,7 @@
 package sfu
 
 import (
+	"context"
 	"errors"
 	"sync"
 	"time"
@@ -24,12 +25,10 @@ type voiceActivityStats struct {
 }
 
 type TrackStats struct {
-	senders           map[string]stats.Stats
-	senderBitrates    map[string]uint32
-	bytesSent         map[string]uint64
-	receivers         map[string]stats.Stats
-	receiversBitrates map[string]uint32
-	bytesReceived     map[string]uint64
+	senders          map[string]stats.Stats
+	senderBitrates   map[string]uint32
+	receivers        map[string]stats.Stats
+	receiverBitrates map[string]uint32
 }
 
 type ClientStats struct {
@@ -37,28 +36,90 @@ type ClientStats struct {
 	senderMu   sync.RWMutex
 	receiverMu sync.RWMutex
 	Client     *Client
-	TrackStats
+	*TrackStats
 	voiceActivity voiceActivityStats
 }
 
 func newClientStats(c *Client) *ClientStats {
-	return &ClientStats{
+	cstats := &ClientStats{
 		senderMu:   sync.RWMutex{},
 		receiverMu: sync.RWMutex{},
 		Client:     c,
-		TrackStats: TrackStats{
-			senders:           make(map[string]stats.Stats),
-			receivers:         make(map[string]stats.Stats),
-			senderBitrates:    make(map[string]uint32),
-			receiversBitrates: make(map[string]uint32),
-			bytesSent:         make(map[string]uint64),
-			bytesReceived:     make(map[string]uint64),
+		TrackStats: &TrackStats{
+			senders:          make(map[string]stats.Stats),
+			receivers:        make(map[string]stats.Stats),
+			senderBitrates:   make(map[string]uint32),
+			receiverBitrates: make(map[string]uint32),
 		},
 		voiceActivity: voiceActivityStats{
 			mu:     sync.Mutex{},
 			active: false,
 		},
 	}
+
+	go cstats.monitorBitrates(c.Context())
+
+	return cstats
+}
+
+func (c *ClientStats) monitorBitrates(ctx context.Context) {
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	var lastSenderBytesSent = make(map[string]uint64)
+	var lastReceiverBytesReceived = make(map[string]uint64)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			lastSenderBytesSent = c.updateSenderBitrates(lastSenderBytesSent)
+			lastReceiverBytesReceived = c.updateReceiverBitrates(lastReceiverBytesReceived)
+		}
+	}
+}
+
+func (c *ClientStats) updateSenderBitrates(lastSenderBytesSent map[string]uint64) map[string]uint64 {
+	c.senderMu.Lock()
+	defer c.senderMu.Unlock()
+
+	for id, stats := range c.senders {
+		lastBytesSent, ok := lastSenderBytesSent[id]
+		if !ok {
+			lastSenderBytesSent[id] = stats.OutboundRTPStreamStats.BytesSent
+			continue
+		}
+
+		delta := stats.OutboundRTPStreamStats.BytesSent - lastBytesSent
+
+		lastSenderBytesSent[id] = stats.OutboundRTPStreamStats.BytesSent
+
+		c.senderBitrates[id] = uint32(delta) * 8
+	}
+
+	return lastSenderBytesSent
+}
+
+func (c *ClientStats) updateReceiverBitrates(lastReceiverBytesSent map[string]uint64) map[string]uint64 {
+	c.receiverMu.Lock()
+	defer c.receiverMu.Unlock()
+
+	for id, stats := range c.receivers {
+		lastBytesReceived, ok := lastReceiverBytesSent[id]
+		if !ok {
+			lastReceiverBytesSent[id] = stats.InboundRTPStreamStats.BytesReceived
+			continue
+		}
+
+		delta := stats.InboundRTPStreamStats.BytesReceived - lastBytesReceived
+
+		lastReceiverBytesSent[id] = stats.InboundRTPStreamStats.BytesReceived
+
+		c.receiverBitrates[id] = uint32(delta) * 8
+	}
+
+	return lastReceiverBytesSent
 }
 
 func (c *ClientStats) removeSenderStats(trackId string) {
@@ -116,14 +177,6 @@ func (c *ClientStats) SetSender(id string, stats stats.Stats) {
 	defer c.senderMu.Unlock()
 
 	c.senders[id] = stats
-	if _, ok := c.bytesSent[id]; !ok {
-		c.bytesSent[id] = stats.OutboundRTPStreamStats.BytesSent
-		c.senderBitrates[id] = uint32(c.bytesSent[id]) * 8
-	} else {
-		delta := stats.OutboundRTPStreamStats.BytesSent - c.bytesSent[id]
-		c.bytesSent[id] = stats.OutboundRTPStreamStats.BytesSent
-		c.senderBitrates[id] = uint32(delta) * 8
-	}
 }
 
 func (c *ClientStats) Receivers() map[string]stats.Stats {
@@ -142,7 +195,7 @@ func (c *ClientStats) GetReceiverBitrate(id, rid string) (uint32, error) {
 	c.receiverMu.RLock()
 	defer c.receiverMu.RUnlock()
 
-	bitrate, ok := c.receiversBitrates[id+rid]
+	bitrate, ok := c.receiverBitrates[id+rid]
 	if !ok {
 		return 0, ErrCLientStatsNotFound
 	}
@@ -169,14 +222,6 @@ func (c *ClientStats) SetReceiver(id, rid string, stats stats.Stats) {
 	idrid := id + rid
 
 	c.receivers[idrid] = stats
-	if _, ok := c.bytesReceived[idrid]; !ok {
-		c.bytesReceived[idrid] = stats.InboundRTPStreamStats.BytesReceived
-		c.receiversBitrates[idrid] = uint32(c.bytesReceived[idrid]) * 8
-	} else {
-		delta := stats.InboundRTPStreamStats.BytesReceived - c.bytesReceived[id]
-		c.receiversBitrates[idrid] = uint32(delta) * 8
-		c.bytesReceived[idrid] = stats.InboundRTPStreamStats.BytesReceived
-	}
 }
 
 // UpdateVoiceActivity updates voice activity duration

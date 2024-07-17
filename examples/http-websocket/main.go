@@ -71,13 +71,13 @@ var logger logging.LeveledLogger
 
 func main() {
 	flag.Set("logtostderr", "true")
-	flag.Set("stderrthreshold", "DEBUG")
-	flag.Set("PIONS_LOG_INFO", "sfu,vad")
+	// flag.Set("stderrthreshold", "DEBUG")
+	// flag.Set("PIONS_LOG_INFO", "sfu,vad")
 
 	flag.Set("PIONS_LOG_ERROR", "sfu,vad")
 	flag.Set("PIONS_LOG_WARN", "sfu,vad")
-	flag.Set("PIONS_LOG_DEBUG", "sfu,vad")
-	flag.Set("PIONS_LOG_TRACE", "sfu,vad")
+	// flag.Set("PIONS_LOG_DEBUG", "sfu,vad")
+	// flag.Set("PIONS_LOG_TRACE", "sfu,vad")
 
 	flag.Parse()
 
@@ -88,17 +88,16 @@ func main() {
 	defer cancel()
 
 	sfuOpts := sfu.DefaultOptions()
-	sfuOpts.EnableMux = true
+
 	sfuOpts.EnableBandwidthEstimator = true
 
+	fakeClientCount := 0
+
 	_, turnEnabled := os.LookupEnv("TURN_ENABLED")
-	if turnEnabled {
-		sfu.StartTurnServer(ctx, "127.0.0.1")
+	if turnEnabled || fakeClientCount > 0 {
+		sfu.StartStunServer(ctx, "127.0.0.1")
 		sfuOpts.IceServers = append(sfuOpts.IceServers, webrtc.ICEServer{
-			URLs:           []string{"stun:stun.l.google.com:19302"},
-			Username:       "user",
-			Credential:     "pass",
-			CredentialType: webrtc.ICECredentialTypePassword,
+			URLs: []string{"stun:127.0.0.1:3478"},
 		})
 	}
 
@@ -114,21 +113,12 @@ func main() {
 	roomsOpts.Bitrates.InitialBandwidth = 1_000_000
 	// roomsOpts.PLIInterval = 3 * time.Second
 	defaultRoom, _ := roomManager.NewRoom(roomID, roomName, sfu.RoomTypeLocal, roomsOpts)
-
-	fakeClientCount := 10
-	localIp, _ := sfu.GetLocalIp()
 	// turnServer := sfu.StartTurnServer(ctx, localIp.String())
 	// defer turnServer.Close()
 
 	iceServers := []webrtc.ICEServer{
 		{
-			URLs: []string{"stun:stun:stun.l.google.com:19302"},
-		},
-		{
-			URLs:           []string{"stun:stun.l.google.com:19302", "stun:" + localIp.String() + ":3478"},
-			Username:       "user",
-			Credential:     "pass",
-			CredentialType: webrtc.ICECredentialTypePassword,
+			URLs: []string{"stun:127.0.0.1:3478"},
 		},
 	}
 

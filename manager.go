@@ -24,7 +24,6 @@ type Manager struct {
 	context    context.Context
 	cancel     context.CancelFunc
 	iceServers []webrtc.ICEServer
-	udpMux     *UDPMux
 	name       string
 	mutex      sync.RWMutex
 	options    Options
@@ -33,24 +32,20 @@ type Manager struct {
 }
 
 func NewManager(ctx context.Context, name string, options Options) *Manager {
-	var udpMux *UDPMux
 	localCtx, cancel := context.WithCancel(ctx)
 
-	if options.EnableMux {
-		udpMux = NewUDPMux(ctx, options.WebRTCPort)
-	}
+	logger := logging.NewDefaultLoggerFactory().NewLogger("sfu")
 
 	m := &Manager{
 		rooms:      make(map[string]*Room),
 		context:    localCtx,
 		cancel:     cancel,
 		iceServers: options.IceServers,
-		udpMux:     udpMux,
 		name:       name,
 		mutex:      sync.RWMutex{},
 		options:    options,
 		extension:  make([]IManagerExtension, 0),
-		log:        logging.NewDefaultLoggerFactory().NewLogger("sfu"),
+		log:        logger,
 	}
 
 	return m
@@ -86,17 +81,13 @@ func (m *Manager) NewRoom(id, name, roomType string, opts RoomOptions) (*Room, e
 	}
 
 	sfuOpts := sfuOptions{
-		Bitrates:                opts.Bitrates,
-		IceServers:              m.iceServers,
-		Mux:                     m.udpMux,
-		PortStart:               m.options.PortStart,
-		PortEnd:                 m.options.PortEnd,
-		Codecs:                  opts.Codecs,
-		PLIInterval:             opts.PLIInterval,
-		QualityPresets:          opts.QualityPresets,
-		PublicIP:                m.options.PublicIP,
-		NAT1To1IPsCandidateType: m.options.NAT1To1IPsCandidateType,
-		Log:                     m.log,
+		Bitrates:       opts.Bitrates,
+		IceServers:     m.iceServers,
+		Codecs:         opts.Codecs,
+		PLIInterval:    opts.PLIInterval,
+		QualityPresets: opts.QualityPresets,
+		Log:            m.log,
+		SettingEngine:  m.options.SettingEngine,
 	}
 
 	newSFU := New(m.context, sfuOpts)
@@ -121,7 +112,11 @@ func (m *Manager) NewRoom(id, name, roomType string, opts RoomOptions) (*Room, e
 
 	_, emptyRoomCancel = startRoomTimeout(m, room)
 
+	idleMutex := sync.Mutex{}
 	room.OnClientLeft(func(client *Client) {
+		idleMutex.Lock()
+		defer idleMutex.Unlock()
+
 		if room.SFU().clients.Length() == 0 && !idle {
 			idle = true
 			_, emptyRoomCancel = startRoomTimeout(m, room)
@@ -129,6 +124,9 @@ func (m *Manager) NewRoom(id, name, roomType string, opts RoomOptions) (*Room, e
 	})
 
 	room.OnClientJoined(func(client *Client) {
+		idleMutex.Lock()
+		defer idleMutex.Unlock()
+
 		if idle {
 			emptyRoomCancel()
 		}

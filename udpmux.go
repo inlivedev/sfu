@@ -3,7 +3,7 @@ package sfu
 import (
 	"context"
 
-	"github.com/pion/ice/v2"
+	"github.com/pion/ice/v3"
 )
 
 type UDPMux struct {
