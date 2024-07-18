@@ -19,28 +19,8 @@ type Options struct {
 	EnableBridging           bool
 	EnableBandwidthEstimator bool
 	IceServers               []webrtc.ICEServer
-	PublicIP                 string
-	// If PublicIP is set, then you should consider to set this NAT1To1IPsCandidateType as well. By default, it is set to ICECandidateTypeHost.
-	// Two types of candidates are supported:
-	//
-	// ICECandidateTypeHost:
-	//
-	//	The public IP address will be used for the host candidate in the SDP.
-	//
-	// ICECandidateTypeSrflx:
-	//
-	//	A server reflexive candidate with the given public IP address will be added to the SDP.
-	//
-	// Please note that if you choose ICECandidateTypeHost, then the private IP address
-	// won't be advertised with the peer. Also, this option cannot be used along with mDNS.
-	//
-	// If you choose ICECandidateTypeSrflx, it simply adds a server reflexive candidate
-	// with the public IP. The host candidate is still available along with mDNS
-	// capabilities unaffected. Also, you cannot give STUN server URL at the same time.
-	// It will result in an error otherwise.
-	NAT1To1IPsCandidateType webrtc.ICECandidateType
-	MinPlayoutDelay         uint16
-	MaxPlayoutDelay         uint16
+	MinPlayoutDelay          uint16
+	MaxPlayoutDelay          uint16
 	// SettingEngine is used to configure the WebRTC engine
 	// Use this to configure use of enable/disable mDNS, network types, use single port mux, etc.
 	SettingEngine *webrtc.SettingEngine
@@ -58,11 +38,9 @@ func DefaultOptions() Options {
 				URLs: []string{"stun:stun.l.google.com:19302"},
 			},
 		},
-		PublicIP:                "",
-		NAT1To1IPsCandidateType: webrtc.ICECandidateTypeHost,
-		MinPlayoutDelay:         100,
-		MaxPlayoutDelay:         100,
-		SettingEngine:           settingEngine,
+		MinPlayoutDelay: 100,
+		MaxPlayoutDelay: 100,
+		SettingEngine:   settingEngine,
 	}
 }
 

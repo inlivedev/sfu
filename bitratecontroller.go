@@ -337,11 +337,14 @@ func (bc *bitrateController) loopMonitor() {
 	ctx, cancel := context.WithCancel(bc.client.Context())
 	defer cancel()
 
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		default:
+		case <-ticker.C:
 			var needAdjustment bool
 
 			bc.mu.RLock()
@@ -360,7 +363,6 @@ func (bc *bitrateController) loopMonitor() {
 			}
 
 			if !needAdjustment {
-				time.Sleep(3 * time.Second)
 				continue
 			}
 
@@ -372,7 +374,6 @@ func (bc *bitrateController) loopMonitor() {
 			bc.lastBitrateAdjustmentTS = time.Now()
 			bc.mu.Unlock()
 
-			time.Sleep(3 * time.Second)
 		}
 	}
 
