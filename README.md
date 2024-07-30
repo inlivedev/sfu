@@ -1,6 +1,6 @@
 
 > [!IMPORTANT]  
-> This library still in very early development. The API might change in the future. We use it in production for [inLive Hub project](https://inlive.app/realtime-interactive). We're a small team, so we can't guarantee that we can fix all issues. But we will try our best to fix it especially when it's related with our product. If you have any questions or find any issues, please write it to [this repo Github issue](https://github.com/inlivedev/sfu/issues). We will appreciate it.
+> This library still in very early development. The API might change in the future. We use it in production for [inLive Hub project](https://inlive.app/realtime-interactive). We're a small team, so we can't guarantee that we can fix all issues. But we will try our best to fix it especially when it's related with our product. If you have any questions or find any issues, please write it to [this repo Github issue](https://github.com/samespace/sfu/issues). We will appreciate it.
 
 # inLive Hub SFU
 
@@ -9,7 +9,7 @@ This Golang package is an SFU library based on Pion WebRTC. It is designed to be
 ## Installation
 This is a Go module, so you can install it by running this command in your app directory:
 ```
-go get github.com/inlivedev/sfu
+go get github.com/samespace/sfu
 ```
 
 

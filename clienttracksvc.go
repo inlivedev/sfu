@@ -1,9 +1,9 @@
 package sfu
 
 import (
-	"github.com/inlivedev/sfu/pkg/packetmap"
 	"github.com/pion/rtp"
 	"github.com/pion/rtp/codecs"
+	"github.com/samespace/sfu/pkg/packetmap"
 )
 
 type IQualityPreset interface {

@@ -12,10 +12,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/inlivedev/sfu/pkg/interceptors/playoutdelay"
-	"github.com/inlivedev/sfu/pkg/interceptors/voiceactivedetector"
-	"github.com/inlivedev/sfu/pkg/networkmonitor"
-	"github.com/inlivedev/sfu/pkg/pacer"
 	"github.com/pion/interceptor"
 	"github.com/pion/interceptor/pkg/cc"
 	"github.com/pion/interceptor/pkg/gcc"
@@ -24,6 +20,10 @@ import (
 	"github.com/pion/logging"
 	"github.com/pion/rtcp"
 	"github.com/pion/webrtc/v4"
+	"github.com/samespace/sfu/pkg/interceptors/playoutdelay"
+	"github.com/samespace/sfu/pkg/interceptors/voiceactivedetector"
+	"github.com/samespace/sfu/pkg/networkmonitor"
+	"github.com/samespace/sfu/pkg/pacer"
 )
 
 type ClientState int

@@ -13,12 +13,12 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/inlivedev/sfu"
-	"github.com/inlivedev/sfu/pkg/fakeclient"
-	"github.com/inlivedev/sfu/pkg/interceptors/voiceactivedetector"
-	"github.com/inlivedev/sfu/pkg/networkmonitor"
 	"github.com/pion/logging"
 	"github.com/pion/webrtc/v4"
+	"github.com/samespace/sfu"
+	"github.com/samespace/sfu/pkg/fakeclient"
+	"github.com/samespace/sfu/pkg/interceptors/voiceactivedetector"
+	"github.com/samespace/sfu/pkg/networkmonitor"
 	"golang.org/x/net/websocket"
 )
 

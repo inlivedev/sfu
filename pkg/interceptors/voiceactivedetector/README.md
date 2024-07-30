@@ -5,7 +5,7 @@ Voice Active Detector is a Pion Interceptor will allow you to detect any voice a
 
 1. Import the package
 	```go
-	import "github.com/inlivedev/sfu/pkg/interceptors/voiceactivedetector"
+	import "github.com/samespace/sfu/pkg/interceptors/voiceactivedetector"
 	```
 
 2. Register the interceptor extension in the media engine when creating a PeerConnection 

@@ -45,7 +45,7 @@ jobs:
         go-version: '1.22'
     
     - name: Test SFU
-      run: go test -timeout 5m -run '^(TestLeaveRoom|TestRenegotiation)$' github.com/inlivedev/sfu -mod=readonly
+      run: go test -timeout 5m -run '^(TestLeaveRoom|TestRenegotiation)$' github.com/samespace/sfu -mod=readonly
 
   test-room:
     runs-on: ubuntu-latest
@@ -64,7 +64,7 @@ jobs:
         go-version: '1.22'
     
     - name: Test Room
-      run: go test -timeout 5m -run '^(TestRoomCreateAndClose|TestRoomJoinLeftEvent|TestRoomStats|TestRoomAddClientTimeout)$' github.com/inlivedev/sfu -mod=readonly
+      run: go test -timeout 5m -run '^(TestRoomCreateAndClose|TestRoomJoinLeftEvent|TestRoomStats|TestRoomAddClientTimeout)$' github.com/samespace/sfu -mod=readonly
 
   test-client:
     runs-on: ubuntu-latest
@@ -83,7 +83,7 @@ jobs:
         go-version: '1.22'
     
     - name: Test Client
-      run: go test -timeout 5m -run '^(TestTracksSubscribe|TestSimulcastTrack|TestClientDataChannel)$' github.com/inlivedev/sfu -mod=readonly
+      run: go test -timeout 5m -run '^(TestTracksSubscribe|TestSimulcastTrack|TestClientDataChannel)$' github.com/samespace/sfu -mod=readonly
 
   test-datachannel:
     runs-on: ubuntu-latest
@@ -102,6 +102,6 @@ jobs:
         go-version: '1.22'
     
     - name: Test Datachannel
-      run: go test -timeout 5m -run '^(TestRoomDataChannel|TestRoomDataChannelWithClientID|TestStillUsableAfterReconnect)$' github.com/inlivedev/sfu -mod=readonly
+      run: go test -timeout 5m -run '^(TestRoomDataChannel|TestRoomDataChannelWithClientID|TestStillUsableAfterReconnect)$' github.com/samespace/sfu -mod=readonly
 
 
