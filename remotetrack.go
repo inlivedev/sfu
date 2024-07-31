@@ -203,15 +203,15 @@ func (t *remoteTrack) loop() {
 
 				copyPkt := t.rtppool.GetPacket()
 
-				copyPkt.Header = *orderedPkt.Header()
+				copyPkt.Header = *orderedPkt.packet.Header()
 
-				copyPkt.Payload = orderedPkt.Payload()
+				copyPkt.Payload = orderedPkt.packet.Payload()
 
 				t.onRead(copyPkt)
 
 				t.rtppool.PutPacket(copyPkt)
 
-				orderedPkt.Release()
+				orderedPkt.packet.Release()
 			}
 
 			t.mu.RUnlock()
@@ -226,15 +226,15 @@ func (t *remoteTrack) Flush() {
 	for _, pkt := range pkts {
 		copyPkt := t.rtppool.GetPacket()
 
-		copyPkt.Header = *pkt.Header()
+		copyPkt.Header = *pkt.packet.Header()
 
-		copyPkt.Payload = pkt.Payload()
+		copyPkt.Payload = pkt.packet.Payload()
 
 		t.onRead(copyPkt)
 
 		t.rtppool.PutPacket(copyPkt)
 
-		pkt.Release()
+		pkt.packet.Release()
 	}
 }
 

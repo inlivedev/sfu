@@ -15,9 +15,8 @@ var testPacket = &rtp.Packet{
 var header = &rtp.Header{}
 var payload = make([]byte, 1400)
 
-var pool = New()
-
 func BenchmarkSlicePool(b *testing.B) {
+	var pool = New()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		p := pool.GetPacket()
@@ -27,7 +26,7 @@ func BenchmarkSlicePool(b *testing.B) {
 }
 
 func BenchmarkPacketManager(b *testing.B) {
-
+	var pool = New()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		p, _ := pool.PacketManager.NewPacket(header, payload)

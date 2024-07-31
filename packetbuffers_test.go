@@ -195,7 +195,7 @@ func TestFlush(t *testing.T) {
 	require.Equal(t, len(sortedNumbers), len(sorted), "sorted length should be equal to sortedNumbers length")
 
 	for i, pkt := range sorted {
-		require.Equal(t, pkt.Header().SequenceNumber, sortedNumbers[i], fmt.Sprintf("packet sequence number %d should be equal to sortedNumbers sequence number %d", pkt.Header().SequenceNumber, sortedNumbers[i]))
+		require.Equal(t, pkt.packet.Header().SequenceNumber, sortedNumbers[i], fmt.Sprintf("packet sequence number %d should be equal to sortedNumbers sequence number %d", pkt.packet.Header().SequenceNumber, sortedNumbers[i]))
 	}
 }
 
@@ -220,7 +220,7 @@ func TestFlushBetweenAdded(t *testing.T) {
 
 	caches := newPacketBuffers(ctx, minLatency, maxLatency, false, logging.NewDefaultLoggerFactory().NewLogger("sfu"))
 
-	sorted := make([]*rtppool.RetainablePacket, 0)
+	sorted := make([]*packet, 0)
 
 	for i, pkt := range packets {
 		rp := pool.NewPacket(&pkt.Header, pkt.Payload)
@@ -243,7 +243,7 @@ func TestFlushBetweenAdded(t *testing.T) {
 	require.Equal(t, len(sortedNumbers), len(sorted), "sorted length should be equal to sortedNumbers length")
 
 	for i, pkt := range sorted {
-		require.Equal(t, pkt.Header().SequenceNumber, sortedNumbers[i], fmt.Sprintf("packet sequence number %d should be equal to sortedNumbers sequence number %d", pkt.Header().SequenceNumber, sortedNumbers[i]))
+		require.Equal(t, pkt.packet.Header().SequenceNumber, sortedNumbers[i], fmt.Sprintf("packet sequence number %d should be equal to sortedNumbers sequence number %d", pkt.packet.Header().SequenceNumber, sortedNumbers[i]))
 	}
 }
 
@@ -268,7 +268,7 @@ func TestLatency(t *testing.T) {
 
 	caches := newPacketBuffers(ctx, minLatency, maxLatency, false, logging.NewDefaultLoggerFactory().NewLogger("sfu"))
 
-	sorted := make([]*rtppool.RetainablePacket, 0)
+	sorted := make([]*packet, 0)
 	seqs := make([]uint16, 0)
 	resultsSeqs := make([]uint16, 0)
 	dropped := 0
@@ -288,7 +288,7 @@ func TestLatency(t *testing.T) {
 				dropped++
 			}
 			for _, pkt := range sorted {
-				resultsSeqs = append(resultsSeqs, pkt.Header().SequenceNumber)
+				resultsSeqs = append(resultsSeqs, pkt.packet.Header().SequenceNumber)
 			}
 			require.Equal(t, 6, len(sorted), "sorted length should be equal to 6, result ", resultsSeqs, seqs)
 		} else if pkt.Header.SequenceNumber == 0 {
@@ -302,7 +302,7 @@ func TestLatency(t *testing.T) {
 				dropped++
 			}
 			for _, pkt := range sorted {
-				resultsSeqs = append(resultsSeqs, pkt.Header().SequenceNumber)
+				resultsSeqs = append(resultsSeqs, pkt.packet.Header().SequenceNumber)
 			}
 			// from 15 packets added, 3 packets will be dropped because it's too late
 			require.Equal(t, 13, len(sorted), "sorted length should be equal to 13, result ", resultsSeqs, seqs)
@@ -366,11 +366,11 @@ func BenchmarkPopPool(b *testing.B) {
 		p := packetBuffers.Pop()
 		if p != nil {
 			rtp := pool.GetPacket()
-			rtp.Header = *p.Header()
-			rtp.Payload = p.Payload()
+			rtp.Header = *p.packet.Header()
+			rtp.Payload = p.packet.Payload()
 
 			// b.Logf("packet sequence %d", rtpPacket.SequenceNumber)
-			p.Release()
+			p.packet.Release()
 
 			pool.PutPacket(rtp)
 		}

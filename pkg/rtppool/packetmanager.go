@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io"
 	"sync"
-	"time"
 
 	"github.com/pion/rtp"
 )
@@ -62,7 +61,6 @@ func (m *PacketManager) NewPacket(header *rtp.Header, payload []byte) (*Retainab
 
 	p.onRelease = m.releasePacket
 	p.count = 1
-	p.addedTime = time.Now()
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -102,10 +100,9 @@ type RetainablePacket struct {
 	mu        sync.RWMutex
 	count     int
 
-	header    *rtp.Header
-	buffer    *[]byte
-	payload   []byte
-	addedTime time.Time
+	header  *rtp.Header
+	buffer  *[]byte
+	payload []byte
 }
 
 func (p *RetainablePacket) Header() *rtp.Header {
@@ -120,13 +117,6 @@ func (p *RetainablePacket) Payload() []byte {
 	defer p.mu.RUnlock()
 
 	return p.payload
-}
-
-func (p *RetainablePacket) AddedTime() time.Time {
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-
-	return p.addedTime
 }
 
 func (p *RetainablePacket) Retain() error {
