@@ -28,7 +28,7 @@ func TestRoomCreateAndClose(t *testing.T) {
 
 	// create new room
 	roomOpts := DefaultRoomOptions()
-	roomOpts.Codecs = []string{webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
+	roomOpts.Codecs = &[]string{webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
 	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal, roomOpts)
 	require.NoErrorf(t, err, "error creating new room: %v", err)
 
@@ -97,7 +97,7 @@ func TestRoomJoinLeftEvent(t *testing.T) {
 
 	// create new room
 	roomOpts := DefaultRoomOptions()
-	roomOpts.Codecs = []string{webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
+	roomOpts.Codecs = &[]string{webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
 	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal, roomOpts)
 	require.NoError(t, err, "error creating room: %v", err)
 
@@ -195,7 +195,7 @@ func TestRoomStats(t *testing.T) {
 
 	// create new room
 	roomOpts := DefaultRoomOptions()
-	roomOpts.Codecs = []string{webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
+	roomOpts.Codecs = &[]string{webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
 	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal, roomOpts)
 	require.NoError(t, err, "error creating room: %v", err)
 	peerCount := 0
@@ -323,7 +323,7 @@ func TestRoomAddClientTimeout(t *testing.T) {
 
 	// create new room
 	roomOpts := DefaultRoomOptions()
-	roomOpts.Codecs = []string{webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
+	roomOpts.Codecs = &[]string{webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
 	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal, roomOpts)
 	require.NoErrorf(t, err, "error creating new room: %v", err)
 

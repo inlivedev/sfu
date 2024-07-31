@@ -36,9 +36,10 @@ type remoteTrack struct {
 	looping               bool
 	monitor               *networkmonitor.NetworkMonitor
 	log                   logging.LeveledLogger
+	rtppool               *rtppool.RTPPool
 }
 
-func newRemoteTrack(ctx context.Context, log logging.LeveledLogger, useBuffer bool, track IRemoteTrack, minWait, maxWait, pliInterval time.Duration, onPLI func(), statsGetter stats.Getter, onStatsUpdated func(*stats.Stats), onRead func(*rtp.Packet), onNetworkConditionChanged func(networkmonitor.NetworkConditionType)) *remoteTrack {
+func newRemoteTrack(ctx context.Context, log logging.LeveledLogger, useBuffer bool, track IRemoteTrack, minWait, maxWait, pliInterval time.Duration, onPLI func(), statsGetter stats.Getter, onStatsUpdated func(*stats.Stats), onRead func(*rtp.Packet), pool *rtppool.RTPPool, onNetworkConditionChanged func(networkmonitor.NetworkConditionType)) *remoteTrack {
 	localctx, cancel := context.WithCancel(ctx)
 
 	rt := &remoteTrack{
@@ -57,6 +58,7 @@ func newRemoteTrack(ctx context.Context, log logging.LeveledLogger, useBuffer bo
 		onRead:                onRead,
 		monitor:               networkmonitor.Default(),
 		log:                   log,
+		rtppool:               pool,
 	}
 
 	if useBuffer && track.Kind() == webrtc.RTPCodecTypeVideo {
@@ -102,30 +104,32 @@ func (t *remoteTrack) readRTP() {
 				t.log.Errorf("remotetrack: set read deadline error: ", err)
 				return
 			}
-			buffer, ok := rtppool.GetPacketManager().PayloadPool.Get().(*[]byte)
-			if !ok {
-				rtppool.GetPacketManager().PayloadPool.Put(buffer)
-				return
-			}
+			buffer := t.rtppool.GetPayload()
 
 			n, _, readErr := t.track.Read(*buffer)
-			if readErr == io.EOF {
-				t.log.Infof("remotetrack: track ended: ", t.track.ID())
-				rtppool.GetPacketManager().PayloadPool.Put(buffer)
-				return
+			if readErr != nil {
+				if readErr == io.EOF {
+					t.log.Infof("remotetrack: track ended: ", t.track.ID())
+					t.rtppool.PutPayload(buffer)
+					return
+				}
+
+				t.log.Errorf("remotetrack: read error: %s", readErr.Error())
+				continue
 			}
 
 			// could be read deadline reached
 			if n == 0 {
-				rtppool.GetPacketManager().PayloadPool.Put(buffer)
+				t.rtppool.PutPayload(buffer)
 				continue
 			}
 
-			p := rtppool.GetPacketAllocationFromPool()
+			p := t.rtppool.GetPacket()
 
 			if err := t.unmarshal((*buffer)[:n], p); err != nil {
-				rtppool.GetPacketManager().PayloadPool.Put(buffer)
-				rtppool.ResetPacketPoolAllocation(p)
+				t.log.Errorf("remotetrack: unmarshal error: %s", err.Error())
+				t.rtppool.PutPayload(buffer)
+				t.rtppool.PutPacket(p)
 				continue
 			}
 
@@ -134,7 +138,7 @@ func (t *remoteTrack) readRTP() {
 			}
 
 			if t.Buffered() && t.Track().Kind() == webrtc.RTPCodecTypeVideo {
-				retainablePacket := rtppool.NewPacket(&p.Header, p.Payload)
+				retainablePacket := t.rtppool.NewPacket(&p.Header, p.Payload)
 				_ = t.packetBuffers.Add(retainablePacket)
 
 			} else {
@@ -143,8 +147,8 @@ func (t *remoteTrack) readRTP() {
 
 			t.monitor.Add(p.SequenceNumber)
 
-			rtppool.GetPacketManager().PayloadPool.Put(buffer)
-			rtppool.ResetPacketPoolAllocation(p)
+			t.rtppool.PutPayload(buffer)
+			t.rtppool.PutPacket(p)
 		}
 	}
 }
@@ -197,7 +201,7 @@ func (t *remoteTrack) loop() {
 			for orderedPkt := t.packetBuffers.Pop(); orderedPkt != nil; orderedPkt = t.packetBuffers.Pop() {
 				// make sure the we're passing a new packet to the onRead callback
 
-				copyPkt := rtppool.GetPacketAllocationFromPool()
+				copyPkt := t.rtppool.GetPacket()
 
 				copyPkt.Header = *orderedPkt.Header()
 
@@ -205,7 +209,7 @@ func (t *remoteTrack) loop() {
 
 				t.onRead(copyPkt)
 
-				rtppool.ResetPacketPoolAllocation(copyPkt)
+				t.rtppool.PutPacket(copyPkt)
 
 				orderedPkt.Release()
 			}
@@ -220,7 +224,7 @@ func (t *remoteTrack) loop() {
 func (t *remoteTrack) Flush() {
 	pkts := t.packetBuffers.Flush()
 	for _, pkt := range pkts {
-		copyPkt := rtppool.GetPacketAllocationFromPool()
+		copyPkt := t.rtppool.GetPacket()
 
 		copyPkt.Header = *pkt.Header()
 
@@ -228,7 +232,7 @@ func (t *remoteTrack) Flush() {
 
 		t.onRead(copyPkt)
 
-		rtppool.ResetPacketPoolAllocation(copyPkt)
+		t.rtppool.PutPacket(copyPkt)
 
 		pkt.Release()
 	}

@@ -62,6 +62,7 @@ type LeakyBucketPacer struct {
 	ssrcToWriter map[uint32]interceptor.RTPWriter
 	writerLock   sync.RWMutex
 	log          logging.LeveledLogger
+	rtppool      *rtppool.RTPPool
 }
 
 // NewLeakyBucketPacer initializes a new LeakyBucketPacer
@@ -76,6 +77,7 @@ func NewLeakyBucketPacer(log logging.LeveledLogger, initialBitrate int, allowDup
 		ssrcToWriter:   map[uint32]interceptor.RTPWriter{},
 		queues:         map[uint32]*queue{},
 		log:            log,
+		rtppool:        rtppool.New(),
 	}
 
 	go p.Run()
@@ -139,7 +141,7 @@ func (p *LeakyBucketPacer) getQueue(ssrc uint32) *queue {
 // Write sends a packet with header and payload the a previously registered
 // stream.
 func (p *LeakyBucketPacer) Write(header *rtp.Header, payload []byte, attributes interceptor.Attributes) (int, error) {
-	pkt := rtppool.NewPacket(header, payload)
+	pkt := p.rtppool.NewPacket(header, payload)
 
 	queue := p.getQueue(header.SSRC)
 	if queue == nil {

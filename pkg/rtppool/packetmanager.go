@@ -26,7 +26,7 @@ type PacketManager struct {
 	PayloadPool *sync.Pool
 }
 
-func newPacketManager() *PacketManager {
+func NewPacketManager() *PacketManager {
 	return &PacketManager{
 		PacketPool: &sync.Pool{
 			New: func() interface{} {
@@ -90,6 +90,7 @@ func (m *PacketManager) NewPacket(header *rtp.Header, payload []byte) (*Retainab
 func (m *PacketManager) releasePacket(header *rtp.Header, payload *[]byte, p *RetainablePacket) {
 	m.HeaderPool.Put(header)
 	if payload != nil {
+		copy(*payload, blankPayload)
 		m.PayloadPool.Put(payload)
 	}
 

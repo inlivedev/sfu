@@ -30,8 +30,8 @@ type QualityPresets struct {
 	Low  QualityPreset `json:"low"`
 }
 
-func DefaultQualityPresets() QualityPresets {
-	return QualityPresets{
+func DefaultQualityPresets() *QualityPresets {
+	return &QualityPresets{
 		High: QualityPreset{
 			SID: 2,
 			TID: 2,

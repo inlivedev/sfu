@@ -16,6 +16,7 @@ import (
 	"github.com/inlivedev/sfu/pkg/interceptors/voiceactivedetector"
 	"github.com/inlivedev/sfu/pkg/networkmonitor"
 	"github.com/inlivedev/sfu/pkg/pacer"
+	"github.com/inlivedev/sfu/pkg/rtppool"
 	"github.com/pion/interceptor"
 	"github.com/pion/interceptor/pkg/cc"
 	"github.com/pion/interceptor/pkg/gcc"
@@ -1075,14 +1076,36 @@ func (c *Client) enableReportAndStats(rtpSender *webrtc.RTPSender, track iClient
 
 		defer cancel()
 
+		pool := rtppool.NewBufferPool()
+
 		for {
 			select {
 			case <-localCtx.Done():
 				return
 			default:
-				rtcpPackets, _, err := rtpSender.ReadRTCP()
-				if err != nil && err == io.ErrClosedPipe {
-					return
+				// rtcpPackets, _, err := rtpSender.ReadRTCP()
+				// if err != nil && err == io.ErrClosedPipe {
+				// 	return
+				// }
+
+				b := pool.Get()
+				i, _, err := rtpSender.Read(*b)
+				if err != nil {
+					if err == io.ErrClosedPipe {
+						pool.Put(b)
+						return
+					}
+
+					c.log.Errorf("client: error read rtcp packets %s", err.Error())
+					pool.Put(b)
+					continue
+				}
+
+				rtcpPackets, err := rtcp.Unmarshal((*b)[:i])
+				if err != nil {
+					c.log.Errorf("client: error unmarshal rtcp packets %s", err.Error())
+					pool.Put(b)
+					continue
 				}
 
 				for _, p := range rtcpPackets {
@@ -1093,6 +1116,7 @@ func (c *Client) enableReportAndStats(rtpSender *webrtc.RTPSender, track iClient
 						track.RequestPLI()
 					}
 				}
+				pool.Put(b)
 			}
 		}
 	}()

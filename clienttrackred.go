@@ -4,7 +4,6 @@ import (
 	"encoding/binary"
 	"errors"
 
-	"github.com/inlivedev/sfu/pkg/rtppool"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
 )
@@ -47,13 +46,13 @@ func (t *clientTrackRed) push(p *rtp.Packet, _ QualityLevel) {
 	}
 
 	if !t.isReceiveRed {
-		primaryPacket := rtppool.GetPacketAllocationFromPool()
+		primaryPacket := t.remoteTrack.rtppool.GetPacket()
 		primaryPacket.Payload = t.getPrimaryEncoding(p.Payload[:len(p.Payload)])
 		primaryPacket.Header = p.Header
 		if err := t.localTrack.WriteRTP(primaryPacket); err != nil {
 			t.client.log.Errorf("clienttrack: error on write primary rtp", err)
 		}
-		rtppool.ResetPacketPoolAllocation(primaryPacket)
+		t.remoteTrack.rtppool.PutPacket(primaryPacket)
 		return
 	}
 
