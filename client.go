@@ -1037,7 +1037,7 @@ func (c *Client) setClientTrack(t ITrack) iClientTrack {
 
 		sender := senderTcv.Sender()
 
-		if c.peerConnection == nil || c.peerConnection.PC() == nil || sender == nil || c.peerConnection.PC().ConnectionState() == webrtc.PeerConnectionStateClosed {
+		if sender == nil {
 			return
 		}
 

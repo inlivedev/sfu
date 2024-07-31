@@ -74,17 +74,17 @@ type Room struct {
 type RoomOptions struct {
 	// Configures the bitrates configuration that will be used by the room
 	// Make sure to use the same bitrate config when publishing video because this is used to manage the usage bandwidth in this room
-	Bitrates BitrateConfigs `json:"bitrates"`
+	Bitrates BitrateConfigs `json:"bitrates,omitempty"`
 	// Configures the codecs that will be used by the room
-	Codecs []string `json:"codecs" enums:"video/VP9,video/H264,video/VP8,audio/red,audio/opus" example:"video/VP9,video/H264,video/VP8,audio/red,audio/opus"`
+	Codecs []string `json:"codecs,omitempty" enums:"video/VP9,video/H264,video/VP8,audio/red,audio/opus" example:"video/VP9,video/H264,video/VP8,audio/red,audio/opus"`
 	// Configures the interval in nanoseconds of sending PLIs to clients that will generate keyframe, default is 0 means it will use auto PLI request only when needed.
 	// More often means more bandwidth usage but more stability on video quality when packet loss, but client libs supposed to request PLI automatically when needed.
-	PLIInterval time.Duration `json:"pli_interval_ns" example:"0"`
+	PLIInterval time.Duration `json:"pli_interval_ns,omitempty" example:"0"`
 	// Configure the mapping of spatsial and temporal layers to quality level
 	// Use this to use scalable video coding (SVC) to control the bitrate level of the video
-	QualityPresets QualityPresets `json:"quality_presets"`
+	QualityPresets QualityPresets `json:"quality_presets,omitempty"`
 	// Configure the timeout in nanonseconds when the room is empty it will close after the timeout exceeded. Default is 5 minutes
-	EmptyRoomTimeout time.Duration `json:"empty_room_timeout_ns" example:"300000000000" default:"300000000000"`
+	EmptyRoomTimeout time.Duration `json:"empty_room_timeout_ns,ompitempty" example:"300000000000" default:"300000000000"`
 }
 
 func DefaultRoomOptions() RoomOptions {
