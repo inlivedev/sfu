@@ -13,6 +13,7 @@ import (
 
 var (
 	errPacketReleased          = errors.New("packet has been released")
+	errFailedToCastPacketPool  = errors.New("failed to cast packet pool")
 	errFailedToCastHeaderPool  = errors.New("failed to cast header pool")
 	errFailedToCastPayloadPool = errors.New("failed to cast payload pool")
 )
@@ -20,12 +21,19 @@ var (
 const maxPayloadLen = 1460
 
 type PacketManager struct {
+	PacketPool  *sync.Pool
 	HeaderPool  *sync.Pool
 	PayloadPool *sync.Pool
 }
 
 func newPacketManager() *PacketManager {
 	return &PacketManager{
+		PacketPool: &sync.Pool{
+			New: func() interface{} {
+				return &RetainablePacket{}
+			},
+		},
+
 		HeaderPool: &sync.Pool{
 			New: func() interface{} {
 				return &rtp.Header{}
@@ -45,17 +53,20 @@ func (m *PacketManager) NewPacket(header *rtp.Header, payload []byte) (*Retainab
 		return nil, io.ErrShortBuffer
 	}
 
-	p := &RetainablePacket{
-		onRelease: m.releasePacket,
-		// new packets have retain count of 1
-		count:     1,
-		addedTime: time.Now(),
+	var ok bool
+
+	p, ok := m.PacketPool.Get().(*RetainablePacket)
+	if !ok {
+		return nil, errFailedToCastPacketPool
 	}
+
+	p.onRelease = m.releasePacket
+	p.count = 1
+	p.addedTime = time.Now()
 
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	var ok bool
 	p.header, ok = m.HeaderPool.Get().(*rtp.Header)
 	if !ok {
 		return nil, errFailedToCastHeaderPool
@@ -76,15 +87,17 @@ func (m *PacketManager) NewPacket(header *rtp.Header, payload []byte) (*Retainab
 	return p, nil
 }
 
-func (m *PacketManager) releasePacket(header *rtp.Header, payload *[]byte) {
+func (m *PacketManager) releasePacket(header *rtp.Header, payload *[]byte, p *RetainablePacket) {
 	m.HeaderPool.Put(header)
 	if payload != nil {
 		m.PayloadPool.Put(payload)
 	}
+
+	m.PacketPool.Put(p)
 }
 
 type RetainablePacket struct {
-	onRelease func(*rtp.Header, *[]byte)
+	onRelease func(*rtp.Header, *[]byte, *RetainablePacket)
 	mu        sync.RWMutex
 	count     int
 
@@ -133,9 +146,6 @@ func (p *RetainablePacket) Release() {
 
 	if p.count == 0 {
 		// release back to pool
-		p.onRelease(p.header, p.buffer)
-		p.header = nil
-		p.buffer = nil
-		p.payload = nil
+		p.onRelease(p.header, p.buffer, p)
 	}
 }
