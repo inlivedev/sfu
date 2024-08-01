@@ -132,6 +132,7 @@ type Client struct {
 	muTracks              sync.Mutex
 	internalDataChannel   *webrtc.DataChannel
 	dataChannels          *DataChannelList
+	dataChannelsInitiated bool
 	estimator             cc.BandwidthEstimator
 	initialReceiverCount  atomic.Uint32
 	initialSenderCount    atomic.Uint32
@@ -149,7 +150,6 @@ type Client struct {
 	// published tracks are the remote tracks from other clients that are published to this client
 	publishedTracks                   *trackList
 	pendingRemoteRenegotiation        *atomic.Bool
-	queue                             *queue
 	receiveRED                        bool
 	state                             *atomic.Value
 	sfu                               *SFU
@@ -331,7 +331,6 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		pendingPublishedTracks:         newTrackList(opts.Log),
 		pendingRemoteRenegotiation:     &atomic.Bool{},
 		publishedTracks:                newTrackList(opts.Log),
-		queue:                          NewQueue(localCtx, opts.Log),
 		sfu:                            s,
 		statsGetter:                    statsGetter,
 		quality:                        &quality,
@@ -356,11 +355,11 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		// 1. need to handle simulcast track because  it will be counted as single track
 		initialReceiverCount := client.initialReceiverCount.Load()
 		if client.Type() == ClientTypePeer && int(initialReceiverCount) > client.pendingPublishedTracks.Length() {
-			s.log.Infof("sfu: client ", id, " pending published tracks: ", client.pendingPublishedTracks.Length(), " initial tracks count: ", initialReceiverCount)
+			s.log.Infof("sfu: client %s pending published tracks: %d, initial tracks count: %d", id, client.pendingPublishedTracks.Length(), initialReceiverCount)
 			return
 		}
 
-		s.log.Infof("sfu: client ", id, " publish tracks, initial tracks count: ", initialReceiverCount, " pending published tracks: ", client.pendingPublishedTracks.Length())
+		s.log.Infof("sfu: client %s publish tracks, initial tracks count: %d, pending published tracks: %d", id, initialReceiverCount, client.pendingPublishedTracks.Length())
 
 		addedTracks := client.pendingPublishedTracks.GetTracks()
 
@@ -376,20 +375,9 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		}
 	})
 
-	// make sure the exisiting data channels is created on new clients
-	s.createExistingDataChannels(client)
-
-	var internalDataChannel *webrtc.DataChannel
-
-	if internalDataChannel, err = client.createInternalDataChannel("internal", client.onInternalMessage); err != nil {
-		client.log.Errorf("client: error create internal data channel ", err)
-	}
-
-	client.internalDataChannel = internalDataChannel
-
 	peerConnection.OnConnectionStateChange(func(connectionState webrtc.PeerConnectionState) {
 
-		client.log.Infof("client: connection state changed ", connectionState.String())
+		client.log.Infof("client: connection state changed %s", connectionState.String())
 
 		client.onConnectionStateChanged(connectionState)
 
@@ -429,7 +417,6 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 
 			if len(client.pendingReceivedTracks) > 0 {
 				client.processPendingTracks()
-				client.renegotiate()
 			}
 
 		case webrtc.PeerConnectionStateClosed:
@@ -481,7 +468,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 
 		remoteTrackID := strings.ReplaceAll(strings.ReplaceAll(remoteTrack.ID(), "{", ""), "}", "")
 
-		defer client.log.Infof("client: ", client.ID(), " new track ", remoteTrackID, " Kind:", remoteTrack.Kind(), " Codec: ", remoteTrack.Codec().MimeType, " RID: ", remoteTrack.RID(), " Direction: ", receiver.RTPTransceiver().Direction())
+		defer client.log.Infof("client: new track id %s rid %s ssrc %d kind %s", remoteTrack.ID(), remoteTrack.RID(), remoteTrack.SSRC(), remoteTrack.Kind())
 
 		// make sure the remote track ID is not empty
 		if remoteTrackID == "" {
@@ -592,7 +579,25 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		}
 	})
 
+	peerConnection.OnNegotiationNeeded(func() {
+		client.renegotiate()
+	})
+
 	return client
+}
+
+func (c *Client) initDataChannel() {
+	// make sure the exisiting data channels is created on new clients
+	c.SFU().createExistingDataChannels(c)
+
+	var internalDataChannel *webrtc.DataChannel
+	var err error
+
+	if internalDataChannel, err = c.createInternalDataChannel("internal", c.onInternalMessage); err != nil {
+		c.log.Errorf("client: error create internal data channel %s", err.Error())
+	}
+
+	c.internalDataChannel = internalDataChannel
 }
 
 func (c *Client) ID() string {
@@ -659,38 +664,14 @@ func (c *Client) IsAllowNegotiation() bool {
 	return true
 }
 
-// SDP negotiation from remote client
 func (c *Client) Negotiate(offer webrtc.SessionDescription) (*webrtc.SessionDescription, error) {
-	c.log.Infof("client: negotiation started ", c.ID)
-	defer c.log.Infof("client: negotiation done ", c.ID)
-
-	answerChan := make(chan webrtc.SessionDescription)
-	errorChan := make(chan error)
-	c.queue.Push(negotiationQueue{
-		Client:     c,
-		SDP:        offer,
-		AnswerChan: answerChan,
-		ErrorChan:  errorChan,
-	})
-
-	localCtx, cancel := context.WithCancel(c.context)
-	defer cancel()
-
-	select {
-	case <-localCtx.Done():
-		return nil, ErrClientStoped
-	case err := <-errorChan:
-		return nil, err
-	case answer := <-answerChan:
-		return &answer, nil
-	}
-}
-
-func (c *Client) negotiateQueuOp(offer webrtc.SessionDescription) (*webrtc.SessionDescription, error) {
 	c.isInRemoteNegotiation.Store(true)
 
 	defer func() {
 		c.isInRemoteNegotiation.Store(false)
+		if c.negotiationNeeded.Load() {
+			c.renegotiate()
+		}
 	}()
 
 	currentReceiversCount := 0
@@ -831,13 +812,12 @@ func (c *Client) setOpusSDP(sdp webrtc.SessionDescription) webrtc.SessionDescrip
 		}
 	}
 
-	return sdp
-}
+	if !c.dataChannelsInitiated {
+		c.initDataChannel()
+		c.dataChannelsInitiated = true
+	}
 
-func (c *Client) renegotiate() {
-	c.queue.Push(renegotiateQueue{
-		Client: c,
-	})
+	return sdp
 }
 
 // OnBeforeRenegotiation event is called before the SFU is trying to renegotiate with the client.
@@ -860,7 +840,9 @@ func (c *Client) OnRenegotiation(callback func(context.Context, webrtc.SessionDe
 	c.onRenegotiation = callback
 }
 
-func (c *Client) renegotiateQueuOp() {
+func (c *Client) renegotiate() {
+	c.log.Debug("client: renegotiate")
+	c.negotiationNeeded.Store(true)
 	c.mu.Lock()
 	if c.onRenegotiation == nil {
 		c.log.Errorf("client: onRenegotiation is not set, can't do renegotiation")
@@ -877,8 +859,6 @@ func (c *Client) renegotiateQueuOp() {
 		return
 	}
 
-	c.negotiationNeeded.Store(true)
-
 	// no need to run another negotiation if it's already in progress, it will rerun because we mark the negotiationneeded to true
 	if c.isInRenegotiation.Load() {
 		c.log.Infof("sfu: renegotiation is delayed because the client is doing negotiation ", c.ID)
@@ -889,81 +869,74 @@ func (c *Client) renegotiateQueuOp() {
 	c.isInRenegotiation.Store(true)
 
 	go func() {
-		defer c.isInRenegotiation.Store(false)
-		timout, cancel := context.WithTimeout(c.context, 100*time.Millisecond)
-		defer cancel()
-
-		<-timout.Done()
+		defer func() {
+			c.isInRenegotiation.Store(false)
+			if c.pendingRemoteRenegotiation.Load() {
+				c.allowRemoteRenegotiation()
+			}
+		}()
 
 		for c.negotiationNeeded.Load() {
-			ctxx, cancell := context.WithCancel(c.context)
-			defer cancell()
-			select {
-			case <-ctxx.Done():
-				return
-			default:
-				// mark negotiation is not needed after this done, so it will out of the loop
-				c.negotiationNeeded.Store(false)
+			timout, cancel := context.WithTimeout(c.context, 100*time.Millisecond)
+			defer cancel()
 
-				// only renegotiate when client is connected
-				if c.state.Load() != ClientStateEnded &&
-					c.peerConnection.PC().SignalingState() == webrtc.SignalingStateStable &&
-					c.peerConnection.PC().ConnectionState() == webrtc.PeerConnectionStateConnected {
+			<-timout.Done()
 
-					if c.onRenegotiation == nil {
-						return
-					}
+			// mark negotiation is not needed after this done, so it will out of the loop
+			c.negotiationNeeded.Store(false)
 
-					offer, err := c.peerConnection.PC().CreateOffer(nil)
-					if err != nil {
-						c.log.Errorf("sfu: error create offer on renegotiation ", err)
-						return
-					}
+			// only renegotiate when client is connected
+			if c.state.Load() != ClientStateEnded &&
+				c.peerConnection.PC().SignalingState() == webrtc.SignalingStateStable &&
+				c.peerConnection.PC().ConnectionState() == webrtc.PeerConnectionStateConnected {
 
-					// Sets the LocalDescription, and starts our UDP listeners
-					err = c.peerConnection.PC().SetLocalDescription(offer)
-					if err != nil {
-						c.log.Errorf("sfu: error set local description on renegotiation ", err)
-						_ = c.stop()
+				if c.onRenegotiation == nil {
+					return
+				}
 
-						return
-					}
+				offer, err := c.peerConnection.PC().CreateOffer(nil)
+				if err != nil {
+					c.log.Errorf("sfu: error create offer on renegotiation ", err)
+					return
+				}
 
-					// this will be blocking until the renegotiation is done
-					sdp := c.setOpusSDP(*c.peerConnection.PC().LocalDescription())
-					answer, err := c.onRenegotiation(c.context, sdp)
-					if err != nil {
-						//TODO: when this happen, we need to close the client and ask the remote client to reconnect
-						c.log.Errorf("sfu: error on renegotiation ", err)
-						_ = c.stop()
+				// Sets the LocalDescription, and starts our UDP listeners
+				err = c.peerConnection.PC().SetLocalDescription(offer)
+				if err != nil {
+					c.log.Errorf("sfu: error set local description on renegotiation ", err)
+					_ = c.stop()
 
-						return
-					}
+					return
+				}
 
-					if answer.Type != webrtc.SDPTypeAnswer {
-						c.log.Errorf("sfu: error on renegotiation, the answer is not an answer type")
-						_ = c.stop()
+				// this will be blocking until the renegotiation is done
+				sdp := c.setOpusSDP(*c.peerConnection.PC().LocalDescription())
+				answer, err := c.onRenegotiation(c.context, sdp)
+				if err != nil {
+					//TODO: when this happen, we need to close the client and ask the remote client to reconnect
+					c.log.Errorf("sfu: error on renegotiation ", err)
+					_ = c.stop()
 
-						return
-					}
+					return
+				}
 
-					err = c.peerConnection.PC().SetRemoteDescription(answer)
-					if err != nil {
-						_ = c.stop()
+				if answer.Type != webrtc.SDPTypeAnswer {
+					c.log.Errorf("sfu: error on renegotiation, the answer is not an answer type")
+					_ = c.stop()
 
-						return
-					}
+					return
+				}
+
+				err = c.peerConnection.PC().SetRemoteDescription(answer)
+				if err != nil {
+					_ = c.stop()
+
+					return
 				}
 			}
 		}
 	}()
 
-}
-
-func (c *Client) allowRemoteRenegotiation() {
-	c.queue.Push(allowRemoteRenegotiationQueue{
-		Client: c,
-	})
 }
 
 // OnAllowedRemoteRenegotiation event is called when the SFU is done with the renegotiation
@@ -977,7 +950,7 @@ func (c *Client) OnAllowedRemoteRenegotiation(callback func()) {
 }
 
 // inform to remote client that it's allowed to do renegotiation through event
-func (c *Client) allowRemoteRenegotiationQueuOp() {
+func (c *Client) allowRemoteRenegotiation() {
 	if c.onAllowedRemoteRenegotiation != nil {
 		c.isInRemoteNegotiation.Store(true)
 		go c.onAllowedRemoteRenegotiation()
@@ -1032,8 +1005,6 @@ func (c *Client) setClientTrack(t ITrack) iClientTrack {
 			delete(c.clientTracks, outputTrack.ID())
 			c.publishedTracks.remove([]string{outputTrack.ID()})
 			c.muTracks.Unlock()
-
-			c.renegotiate()
 		}()
 
 		sender := senderTcv.Sender()
@@ -1396,7 +1367,7 @@ func (c *Client) SetTracksSourceType(trackTypes map[string]TrackType) {
 
 	if len(availableTracks) > 0 {
 		// broadcast to other clients available tracks from this client
-		c.log.Infof("client: ", c.ID(), " set source tracks ", len(availableTracks))
+		c.log.Debugf("client: %s set source tracks %d", c.ID(), len(availableTracks))
 		c.sfu.onTracksAvailable(c.ID(), availableTracks)
 	}
 }
@@ -1404,13 +1375,7 @@ func (c *Client) SetTracksSourceType(trackTypes map[string]TrackType) {
 // SubscribeTracks subscribe tracks from other clients that are published to this client
 // The client must listen for `client.OnTracksAvailable` to know if a new track is available to subscribe.
 // Calling subscribe tracks will trigger the SFU renegotiation with the client.
-// Make sure you already listen for `client.OnRenegotiation()` before calling this method to track subscription can complete.
 func (c *Client) SubscribeTracks(req []SubscribeTrackRequest) error {
-	if c.onRenegotiation == nil {
-		c.log.Errorf("client: onRenegotiation is not set, can't subscribe tracks")
-		return ErrRenegotiationCallback
-	}
-
 	if c.peerConnection.PC().ConnectionState() != webrtc.PeerConnectionStateConnected {
 		c.mu.Lock()
 		c.pendingReceivedTracks = append(c.pendingReceivedTracks, req...)
@@ -1440,7 +1405,7 @@ func (c *Client) SubscribeTracks(req []SubscribeTrackRequest) error {
 					clientTracks = append(clientTracks, clientTrack)
 				}
 
-				c.log.Infof("client: subscribe track ", r.TrackID, " from ", r.ClientID, " to ", c.ID())
+				c.log.Debugf("client: subscribe track %s from %s to %s", r.TrackID, r.ClientID, c.ID())
 
 				trackFound = true
 
@@ -1459,17 +1424,15 @@ func (c *Client) SubscribeTracks(req []SubscribeTrackRequest) error {
 		}
 
 		if !trackFound {
-			return fmt.Errorf("track %s not found", r.TrackID)
+			return fmt.Errorf("client: track %s not found", r.TrackID)
 		}
 	}
 
 	if len(clientTracks) > 0 {
 		// claim bitrates
 		if err := c.bitrateController.addClaims(clientTracks); err != nil {
-			c.log.Errorf("sfu: failed to add claims ", err)
+			c.log.Errorf("client: failed to add claims ", err)
 		}
-
-		c.renegotiate()
 
 		// request keyframe
 		for _, track := range clientTracks {

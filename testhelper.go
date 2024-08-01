@@ -426,7 +426,7 @@ func CreatePeerPair(ctx context.Context, log logging.LeveledLogger, room *Room, 
 
 	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
 		if state == webrtc.PeerConnectionStateClosed || state == webrtc.PeerConnectionStateFailed {
-			log.Infof("test: peer connection ", peerName, " stated changed ", state)
+			log.Infof("test: peer connection %s stated changed %s", peerName, state)
 			if client != nil {
 				_ = room.StopClient(client.ID())
 			}

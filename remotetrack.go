@@ -101,7 +101,7 @@ func (t *remoteTrack) readRTP() {
 			return
 		default:
 			if err := t.track.SetReadDeadline(time.Now().Add(1 * time.Second)); err != nil {
-				t.log.Errorf("remotetrack: set read deadline error: ", err)
+				t.log.Errorf("remotetrack: set read deadline error - %s", err.Error())
 				return
 			}
 			buffer := t.rtppool.GetPayload()
@@ -109,7 +109,7 @@ func (t *remoteTrack) readRTP() {
 			n, _, readErr := t.track.Read(*buffer)
 			if readErr != nil {
 				if readErr == io.EOF {
-					t.log.Infof("remotetrack: track ended: ", t.track.ID())
+					t.log.Infof("remotetrack: track ended %s ", t.track.ID())
 					t.rtppool.PutPayload(buffer)
 					return
 				}

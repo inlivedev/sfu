@@ -296,7 +296,7 @@ func (s *SFU) onTracksAvailable(clientId string, tracks []ITrack) {
 	for _, client := range s.clients.GetClients() {
 		if client.ID() != clientId {
 			client.onTracksAvailable(tracks)
-			s.log.Infof("sfu: client ", client.ID(), " tracks available ", len(tracks))
+			s.log.Infof("sfu: client %s have %d tracks available ", client.ID(), len(tracks))
 		}
 	}
 
