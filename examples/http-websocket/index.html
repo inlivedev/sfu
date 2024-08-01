@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+
 <head>
     <title>HTTP WebSocket Example</title>
     <meta charset="utf-8">
@@ -16,19 +17,20 @@
             width: 100vw;
             justify-content: space-between;
         }
+
         h1 {
             margin: 0;
             padding: 0.5em 0;
         }
 
-        header{
-           text-align: center;
-           height: 20%;
-           grid-column: 1/span 2;
+        header {
+            text-align: center;
+            height: 20%;
+            grid-column: 1/span 2;
         }
 
-        aside{
-            grid-row:2/2;
+        aside {
+            grid-row: 2/2;
             grid-column: 2/2;
         }
 
@@ -52,12 +54,12 @@
             grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
             grid-template-rows: repeat(auto-fit, minmax(240px, 1fr));
             grid-gap: 0.5rem;
-            height:100%;
+            height: 100%;
             width: 100%;
             min-height: 0;
         }
 
-        main .container{
+        main .container {
             position: relative;
             width: 100%;
         }
@@ -69,7 +71,7 @@
             width: 100%;
             height: 100%;
             color: white;
-            background-color: rgba(0,0,0,0.2);
+            background-color: rgba(0, 0, 0, 0.2);
             display: flex;
             flex-direction: column;
             justify-content: center;
@@ -84,7 +86,7 @@
             justify-content: center;
             align-items: center;
             padding: 1em;
-            background-color:#f0f0f0;
+            background-color: #f0f0f0;
             font-size: 0.8rem;
         }
 
@@ -97,7 +99,7 @@
             display: flex;
             flex-direction: column;
             justify-content: center;
-            align-items: center;    
+            align-items: center;
             overflow: hidden;
         }
 
@@ -112,15 +114,15 @@
         }
     </style>
     <script type="module">
-        import {InliveVideoObserver} from './inlive-video-observer.js'
-		  let clientid = null
-          const peerConnection = new RTCPeerConnection({
-                    iceServers: [
-                        {
-                            urls: "stun:stun.l.google.com:19302"
-                        },
-                    ]
-                });
+        import { InliveVideoObserver } from './inlive-video-observer.js'
+        let clientid = null
+        const peerConnection = new RTCPeerConnection({
+            iceServers: [
+                {
+                    urls: "stun:stun.l.google.com:19302"
+                },
+            ]
+        });
 
         let ws = null;
 
@@ -130,19 +132,19 @@
 
         let red = true
 
-		let negotiationNeeded = false
+        let negotiationNeeded = false
 
-		const trackStreamIDs = {}
+        const trackStreamIDs = {}
 
-        peerConnection.ondatachannel = function(e) {
-            console.log("ondatachannel: ",e.channel.label);
+        peerConnection.ondatachannel = function (e) {
+            console.log("ondatachannel: ", e.channel.label);
             if (e.channel.label == "internal") {
                 internalChannel = e.channel;
                 videoObserver = new InliveVideoObserver(e.channel)
 
-                internalChannel.addEventListener('message',(e)=>{
+                internalChannel.addEventListener('message', (e) => {
                     const msg = JSON.parse(e.data)
-                    if (msg.type == 'vad_started' || msg.type == 'vad_ended'){
+                    if (msg.type == 'vad_started' || msg.type == 'vad_ended') {
                         updateVoiceDetected(msg)
                     }
                 })
@@ -151,78 +153,78 @@
 
         let videoTranscv = null
 
-        const maxBw = 2500*1000
+        const maxBw = 2500 * 1000
 
-		let mutedMic = false
+        let mutedMic = false
 
-		let mutedCam = false
+        let mutedCam = false
 
-		const toggleMic = async (e) => {
-			peerConnection.getSenders().forEach(sender => {
-				if (sender.track.kind === 'audio') {
-					sender.track.enabled = !mutedMic
-					mutedMic = !mutedMic
-					e.target.innerText = !sender.track.enabled?'Unmute Mic':'Mute Mic'
-				}
-			})
-		}
+        const toggleMic = async (e) => {
+            peerConnection.getSenders().forEach(sender => {
+                if (sender.track.kind === 'audio') {
+                    sender.track.enabled = !mutedMic
+                    mutedMic = !mutedMic
+                    e.target.innerText = !sender.track.enabled ? 'Unmute Mic' : 'Mute Mic'
+                }
+            })
+        }
 
-		const toggleCam = async (e) => {
-			peerConnection.getSenders().forEach(sender => {
-				if (sender.track.kind === 'video') {
-					sender.track.enabled = !mutedCam
-					mutedCam = !mutedCam
-					e.target.innerText = !sender.track.enabled?'Unmute Cam':'Mute Cam'
-				}
-			})
-		}
+        const toggleCam = async (e) => {
+            peerConnection.getSenders().forEach(sender => {
+                if (sender.track.kind === 'video') {
+                    sender.track.enabled = !mutedCam
+                    mutedCam = !mutedCam
+                    e.target.innerText = !sender.track.enabled ? 'Unmute Cam' : 'Mute Cam'
+                }
+            })
+        }
 
-        const startWs =async ()=>{
+        const startWs = async () => {
             let debug = false
             const urlParams = new URLSearchParams(window.location.search);
-            if (urlParams.has('debug')){
+            if (urlParams.has('debug')) {
                 debug = true
             }
 
-            if (urlParams.has('disablered')){
+            if (urlParams.has('disablered')) {
                 red = false
             }
 
-            ws = new WebSocket(`ws://${window.location.host}/ws?${debug?'debug=1':''}`);
+            ws = new WebSocket(`ws://${window.location.host}/ws?${debug ? 'debug=1' : ''}`);
             const promise = new Promise((resolve, reject) => {
-                ws.onopen = function() {
+                ws.onopen = function () {
                     resolve()
                 };
 
-                ws.onerror = function(err) {
+                ws.onerror = function (err) {
                     reject(err)
                 };
             });
-           
-            ws.onmessage = async function(e) {
+
+            ws.onmessage = async function (e) {
                 const msg = JSON.parse(e.data);
                 try {
-					if (msg.type == 'clientid'){
-						clientid = msg.data
-						document.getElementById("clientid").innerText = "ClientID: "+clientid
-					} else if(msg.type==='network_condition') {
-						document.getElementById("network").innerText = msg.data==0?'Unstable':'Stable'
-					} else if (msg.type == 'offer') {
-						console.log("client received offer: ",msg.data)
+                    if (msg.type == 'clientid') {
+                        clientid = msg.data
+                        document.getElementById("clientid").innerText = "ClientID: " + clientid
+                    } else if (msg.type === 'network_condition') {
+                        document.getElementById("network").innerText = msg.data == 0 ? 'Unstable' : 'Stable'
+                    } else if (msg.type == 'offer') {
+                        console.log("client received offer: ", msg.data)
                         await peerConnection.setRemoteDescription(msg.data);
                         var answer = await peerConnection.createAnswer();
                         await peerConnection.setLocalDescription(answer);
-                        ws.send(JSON.stringify({type:'answer',data:answer.sdp}));
-						negotiationNeeded = false
-						console.log("client send answer", answer)
-					} else if (msg.type == 'answer') {
+                        ws.send(JSON.stringify({ type: 'answer', data: answer.sdp }));
+                        negotiationNeeded = false
+                        console.log("client send answer", answer)
+                    } else if (msg.type == 'answer') {
                         await peerConnection.setRemoteDescription(msg.data);
-						console.log("client received answer",peerConnection.currentRemoteDescription)
-						negotiationNeeded = false
+                        console.log("client received answer", peerConnection.currentRemoteDescription)
+                        negotiationNeeded = false
                     } else if (msg.type == 'candidate') {
                         await peerConnection.addIceCandidate(msg.data);
-					} else if (msg.type == 'tracks_added') {
-						console.log("on tracks added",msg.data)
+                    } else if (msg.type == 'tracks_added') {
+                        console.log("on tracks added", msg.data)
                         const trackType = {}
                         const tracksAdded = msg.data
                         Object.keys(tracksAdded).forEach(uid => {
@@ -230,9 +232,9 @@
                             trackType[uid] = "media"
                         });
 
-                        ws.send(JSON.stringify({type:'tracks_added',data:trackType}));
+                        ws.send(JSON.stringify({ type: 'tracks_added', data: trackType }));
                     } else if (msg.type == 'tracks_available') {
-						console.log("on tracks available",msg.data)
+                        console.log("on tracks available", msg.data)
                         const subTracks = []
                         const availableTracks = msg.data
                         Object.keys(availableTracks).forEach(uid => {
@@ -248,39 +250,39 @@
                             })
                         });
 
-						console.log("subTracks: ",subTracks)
+                        console.log("subTracks: ", subTracks)
 
-                        ws.send(JSON.stringify({type:'subscribe_tracks',data:subTracks}));
-                    } else if(msg.type =='allow_renegotiation'){
+                        ws.send(JSON.stringify({ type: 'subscribe_tracks', data: subTracks }));
+                    } else if (msg.type == 'allow_renegotiation') {
                         const isAllowRenegotiation = msg.data
-                        if (isAllowRenegotiation && negotiationNeeded){
+                        if (isAllowRenegotiation && negotiationNeeded) {
                             negotiate()
                         }
-                    } else if(msg.type =='track_stats'){
+                    } else if (msg.type == 'track_stats') {
                         updateTrackStats(msg.data)
-                    } 
+                    }
                 } catch (error) {
                     console.log(error);
                 }
             };
-            ws.onclose = function() {
+            ws.onclose = function () {
                 console.log("websocket close");
             };
 
             return promise
         };
 
-        function updateVoiceDetected(vad){
-			const streamid = vad.data.streamID
+        function updateVoiceDetected(vad) {
+            const streamid = vad.data.streamID
 
-            const videoEl = document.getElementById("video-"+streamid)
-            if (!videoEl){
-				console.log("video element not found ",streamid)
+            const videoEl = document.getElementById("video-" + streamid)
+            if (!videoEl) {
+                console.log("video element not found ", streamid)
                 return
             }
 
 
-            if (vad.type === 'vad_ended'){
+            if (vad.type === 'vad_ended') {
                 // voice ended
                 videoEl.style.border = "none"
             } else {
@@ -288,23 +290,23 @@
                 videoEl.style.border = "5px solid green"
             }
 
-			let vadEl = document.getElementById("vad-"+streamid)
-			if (!vadEl){
-				vadEl = document.createElement("div");
-				vadEl.id = "vad-"+streamid
-				const container = document.getElementById("container-"+streamid)
-				container.appendChild(vadEl)
-			}
-			
-			if (vad.data.audioLevels!==null){
-				vadEl.innerText = Math.floor(vad.data.audioLevels.reduce(function (sum, value) {
-									return sum + value.audioLevel;
-								}, 0) / vad.data.audioLevels.length);
+            let vadEl = document.getElementById("vad-" + streamid)
+            if (!vadEl) {
+                vadEl = document.createElement("div");
+                vadEl.id = "vad-" + streamid
+                const container = document.getElementById("container-" + streamid)
+                container.appendChild(vadEl)
+            }
 
-			} else {
-				vadEl.innerText = "0"
-			}
-		}
+            if (vad.data.audioLevels !== null) {
+                vadEl.innerText = Math.floor(vad.data.audioLevels.reduce(function (sum, value) {
+                    return sum + value.audioLevel;
+                }, 0) / vad.data.audioLevels.length);
+
+            } else {
+                vadEl.innerText = "0"
+            }
+        }
 
 
         function startH264() {
@@ -315,210 +317,210 @@
             start('vp9')
         }
 
-		function setOpusSDP(sdp){
-			let fmtlineOpus = ''
+        function setOpusSDP(sdp) {
+            let fmtlineOpus = ''
 
-			let fmtNo = null
-			// find fmtline for opus from SDP
-			const opusFmtLines = sdp.match(/a=rtpmap:(\d+) opus\/(\d+)\/(\d+)/)
-			if (opusFmtLines) {
-				// extract only the first digit
-				const matchesNo = opusFmtLines[0].match(/(\d+)/)
-				if (matchesNo) {
-				fmtNo = matchesNo[0]
-				}
-			}
+            let fmtNo = null
+            // find fmtline for opus from SDP
+            const opusFmtLines = sdp.match(/a=rtpmap:(\d+) opus\/(\d+)\/(\d+)/)
+            if (opusFmtLines) {
+                // extract only the first digit
+                const matchesNo = opusFmtLines[0].match(/(\d+)/)
+                if (matchesNo) {
+                    fmtNo = matchesNo[0]
+                }
+            }
 
-			console.log('fmtNo', fmtNo)
+            console.log('fmtNo', fmtNo)
 
-			// find fmtp line for opus from SDP
-			const opusFmtpLines = sdp.match(new RegExp(`a=fmtp:${fmtNo} .+`))
-			if (opusFmtpLines) {
-				fmtlineOpus = opusFmtpLines[0]
-			}
+            // find fmtp line for opus from SDP
+            const opusFmtpLines = sdp.match(new RegExp(`a=fmtp:${fmtNo} .+`))
+            if (opusFmtpLines) {
+                fmtlineOpus = opusFmtpLines[0]
+            }
 
-			// check if DTX is enabled and if not, add it to the SDP
-			if (!fmtlineOpus.includes('usedtx=1')) {
-				fmtlineOpus += ';usedtx=1'
-			}
+            // check if DTX is enabled and if not, add it to the SDP
+            if (!fmtlineOpus.includes('usedtx=1')) {
+                fmtlineOpus += ';usedtx=1'
+            }
 
-			// check if inbandfec is enabled and if not, add it to the SDP
-			if (!fmtlineOpus.includes('useinbandfec=1')) {
-				fmtlineOpus += ';useinbandfec=1'
-			}
+            // check if inbandfec is enabled and if not, add it to the SDP
+            if (!fmtlineOpus.includes('useinbandfec=1')) {
+                fmtlineOpus += ';useinbandfec=1'
+            }
 
-			console.log('fmtlineOpus', fmtlineOpus)
+            console.log('fmtlineOpus', fmtlineOpus)
 
-			// replace the old fmtp line with the new one
-			sdp = sdp.replace(
-				new RegExp(`a=fmtp:${fmtNo} .+`),
-				`a=fmtp:${fmtNo} ${fmtlineOpus}`
-			)
+            // replace the old fmtp line with the new one
+            sdp = sdp.replace(
+                new RegExp(`a=fmtp:${fmtNo} .+`),
+                `a=fmtp:${fmtNo} ${fmtlineOpus}`
+            )
 
-			return sdp
-			}
+            return sdp
+        }
 
         async function start(codec) {
             await startWs()
             document.getElementById("btnStart").disabled = true;
             document.getElementById("btnStartVP9").disabled = true;
-           
-            const video =  {
-                width: {ideal: 1280}, 
-                height: {ideal: 720}, 
-                advanced: [{
-                    frameRate: {min: 30}}, 
-                    {height: {min: 360}}, 
-                    {width: {min: 720}}, 
-                    {frameRate: {max: 30}}, 
-                    {width: {max: 1280}}, 
-                    {height: {max: 720}}, 
-                    {aspectRatio: {exact: 1.77778}}
-                ]};
 
-           
+            const video = {
+                width: { ideal: 1280 },
+                height: { ideal: 720 },
+                advanced: [{
+                    frameRate: { min: 30 }
+                },
+                { height: { min: 360 } },
+                { width: { min: 720 } },
+                { frameRate: { max: 30 } },
+                { width: { max: 1280 } },
+                { height: { max: 720 } },
+                { aspectRatio: { exact: 1.77778 } }
+                ]
+            };
+
+
             const constraints = {
                 audio: true,
                 video: video
                 // video: true
             };
-            
+
             const stream = await navigator.mediaDevices.getUserMedia(constraints)
-			const streamid = stream.id.replace('{','').replace('}','');
-            let container = document.getElementById("container-"+streamid);
+            const streamid = stream.id.replace('{', '').replace('}', '');
+            let container = document.getElementById("container-" + streamid);
             if (!container) {
                 container = document.createElement("div");
                 container.className = "container";
-                container.id = "container-"+streamid;
+                container.id = "container-" + streamid;
                 document.querySelector('main').appendChild(container);
             }
 
-            let localVideo = document.getElementById("video-"+streamid);
+            let localVideo = document.getElementById("video-" + streamid);
             if (!localVideo) {
                 localVideo = document.createElement("video");
-                localVideo.id = "video-"+streamid;
+                localVideo.id = "video-" + streamid;
                 localVideo.autoplay = true;
                 localVideo.muted = true;
                 container.appendChild(localVideo);
             }
 
-            localVideo.srcObject =stream;
+            localVideo.srcObject = stream;
 
 
-            peerConnection.ontrack = function(e) {
+            peerConnection.ontrack = function (e) {
                 e.receiver.playoutDelayHint = 0.1;
-					
+
                 e.streams.forEach((stream) => {
                     console.log("ontrack", stream, e.track);
-                    
-                    let container = document.getElementById("container-"+stream.id);
+
+                    let container = document.getElementById("container-" + stream.id);
                     if (!container) {
                         container = document.createElement("div");
                         container.className = "container";
-                        container.id = "container-"+stream.id;
+                        container.id = "container-" + stream.id;
                         document.querySelector('main').appendChild(container);
                     }
 
-                    let remoteVideo = document.getElementById("video-"+stream.id);
+                    let remoteVideo = document.getElementById("video-" + stream.id);
                     if (!remoteVideo) {
                         remoteVideo = document.createElement("video");
-                        remoteVideo.id = "video-"+stream.id;
+                        remoteVideo.id = "video-" + stream.id;
                         remoteVideo.autoplay = true;
                         container.appendChild(remoteVideo);
-                        if (videoObserver!=null){
+                        if (videoObserver != null) {
                             videoObserver.observe(remoteVideo)
                         }
-                        
+
                     }
 
-                    if (e.track.kind == 'video'){
-						const trackid = e.track.id.replace('{','').replace('}','');
-                        let stats = document.getElementById("stats-"+trackid)
-                        if (!stats){
+                    if (e.track.kind == 'video') {
+                        const trackid = e.track.id.replace('{', '').replace('}', '');
+                        let stats = document.getElementById("stats-" + trackid)
+                        if (!stats) {
                             const videoStats = document.createElement("div");
                             videoStats.className = "video-stats";
-                            
+
                             stats = document.createElement("div");
                             stats.appendChild(videoStats);
                             stats.className = "stats";
-                            stats.id = "stats-"+trackid;
+                            stats.id = "stats-" + trackid;
                             container.append(stats);
-                            
+
                         }
                     }
-                    
 
-                    
 
-                    remoteVideo.srcObject =stream;
 
-                   stream.onremovetrack = function(e) {
-                        console.log("onremovetrack",stream,e.track);
+
+                    remoteVideo.srcObject = stream;
+
+                    stream.onremovetrack = function (e) {
+                        console.log("onremovetrack", stream, e.track);
                         remoteVideo.srcObject = null;
                         remoteVideo.remove();
                         container.remove();
-						if (videoObserver!=null){
-							videoObserver.unobserve(remoteVideo)
-						}
+                        if (videoObserver != null) {
+                            videoObserver.unobserve(remoteVideo)
+                        }
                     };
 
                 });
-                
+
             };
 
             // peerConnection.addTrack(stream.getAudioTracks()[0], stream);
             // peerConnection.addTrack(stream.getVideoTracks()[0], stream);
 
- 
-            const audioTcvr= peerConnection.addTransceiver(stream.getAudioTracks()[0], {
+
+            const audioTcvr = peerConnection.addTransceiver(stream.getAudioTracks()[0], {
                 direction: 'sendonly',
                 streams: [stream],
-                sendEncodings: [{priority: 'high'}],
+                sendEncodings: [{ priority: 'high' }],
             })
 
-            
 
-            if(audioTcvr.setCodecPreferences != undefined && RTCRtpReceiver.getCapabilities != undefined){
+
+            if (audioTcvr.setCodecPreferences != undefined && RTCRtpReceiver.getCapabilities != undefined) {
                 const audioCodecs = RTCRtpReceiver.getCapabilities('audio').codecs;
-                
+
+                console.log("audioCodecs", audioCodecs);
+
                 let audioCodecsPref = [];
-                if (red){
-                    for(let i = 0; i < audioCodecs.length; i++){
-                        // audio/red 48000 111/111
-                        if(audioCodecs[i].mimeType == "audio/red"){
-                            audioCodecsPref.push(audioCodecs[i]);
-                        }
-                    }
-                }
-                
-                for(let i = 0; i < audioCodecs.length; i++){
-                    if(audioCodecs[i].mimeType == "audio/opus"){
+
+                for (let i = 0; i < audioCodecs.length; i++) {
+                    if (audioCodecs[i].mimeType == "audio/PCMU") {
                         audioCodecsPref.push(audioCodecs[i]);
                     }
                 }
-                
+
+                for (let i = 0; i < audioCodecs.length; i++) {
+                    if (audioCodecs[i].mimeType == "audio/PCMA") {
+                        audioCodecsPref.push(audioCodecs[i]);
+                    }
+                }
                 audioTcvr.setCodecPreferences(audioCodecsPref);
             }
-        
 
-			setCodecPreferences(peerConnection,stream, codec, "L3T1")
+            setCodecPreferences(peerConnection, stream, codec, "L3T1")
 
-            const offer=await peerConnection.createOffer()
+            const offer = await peerConnection.createOffer()
 
-			// offer.sdp = setOpusSDP(offer.sdp)
-          
+            // offer.sdp = setOpusSDP(offer.sdp)
+
             await peerConnection.setLocalDescription(offer)
 
-            ws.send(JSON.stringify({type:'offer',data:offer.sdp}));
-			console.log("browser send")
+            ws.send(JSON.stringify({ type: 'offer', data: offer.sdp }));
+            console.log("browser send")
 
-            peerConnection.onicecandidate = function(e) {
-                if (e.candidate!=null) {
-                    ws.send(JSON.stringify({type:'candidate',data:e.candidate.candidate}));
+            peerConnection.onicecandidate = function (e) {
+                if (e.candidate != null) {
+                    ws.send(JSON.stringify({ type: 'candidate', data: e.candidate.candidate }));
                 }
             };
-            
-            peerConnection.onconnectionstatechange = function(e) {
+
+            peerConnection.onconnectionstatechange = function (e) {
                 console.log("onconnectionstatechange", peerConnection.connectionState);
                 if (peerConnection.connectionState == "connected") {
                     monitorStats()
@@ -527,185 +529,185 @@
             };
         }
 
-		const setCodecPreferences = (peerConnection,stream, codec,scalabilityMode) => {
-			const isFirefox =navigator.userAgent.includes("Firefox")
-			const isSimulcast = document.querySelector("#simulcast").checked
-			const isSvc = document.querySelector("#svc").checked
-			const maxBitrate = document.querySelector("#maxBitrate").value
-			
-            if (codec ==='vp9' && !isFirefox){
-				let videoTcvr = null
-				
-				console.log("simulcast: ",isSimulcast)
+        const setCodecPreferences = (peerConnection, stream, codec, scalabilityMode) => {
+            const isFirefox = navigator.userAgent.includes("Firefox")
+            const isSimulcast = document.querySelector("#simulcast").checked
+            const isSvc = document.querySelector("#svc").checked
+            const maxBitrate = document.querySelector("#maxBitrate").value
 
-				if (!isSimulcast){
-					videoTcvr = peerConnection.addTransceiver(stream.getVideoTracks()[0], {
-					direction: 'sendonly',
-					streams: [stream],
-					sendEncodings: [
-							{
-								maxBitrate: maxBitrate,
-								scalabilityMode: isSvc?scalabilityMode:'L1T1'
-							},
-						
-						]
-					})
-					
-				} else {
-					videoTcvr = peerConnection.addTransceiver(stream.getVideoTracks()[0], {
-					direction: 'sendonly',
-					streams: [stream],
-					sendEncodings: [
-							{
-								rid: 'high',
-								maxBitrate: maxBitrate,
-								maxFramerate: 30,
-								scalabilityMode: isSvc?scalabilityMode:'L1T1'
-							},
-							{
-								rid: 'mid',
-								scaleResolutionDownBy: 2.0,
-								maxFramerate: 30,
-								maxBitrate:maxBitrate/2,
-								scalabilityMode: isSvc?scalabilityMode:'L1T1'
-							},
-							{
-								rid: 'low',
-								scaleResolutionDownBy: 4.0,
-								maxBitrate: maxBitrate/4,
-								maxFramerate:30,
-								scalabilityMode: isSvc?scalabilityMode:'L1T1'
-							}
-						]
-					})
-				}
+            if (codec === 'vp9' && !isFirefox) {
+                let videoTcvr = null
+
+                console.log("simulcast: ", isSimulcast)
+
+                if (!isSimulcast) {
+                    videoTcvr = peerConnection.addTransceiver(stream.getVideoTracks()[0], {
+                        direction: 'sendonly',
+                        streams: [stream],
+                        sendEncodings: [
+                            {
+                                maxBitrate: maxBitrate,
+                                scalabilityMode: isSvc ? scalabilityMode : 'L1T1'
+                            },
+
+                        ]
+                    })
+
+                } else {
+                    videoTcvr = peerConnection.addTransceiver(stream.getVideoTracks()[0], {
+                        direction: 'sendonly',
+                        streams: [stream],
+                        sendEncodings: [
+                            {
+                                rid: 'high',
+                                maxBitrate: maxBitrate,
+                                maxFramerate: 30,
+                                scalabilityMode: isSvc ? scalabilityMode : 'L1T1'
+                            },
+                            {
+                                rid: 'mid',
+                                scaleResolutionDownBy: 2.0,
+                                maxFramerate: 30,
+                                maxBitrate: maxBitrate / 2,
+                                scalabilityMode: isSvc ? scalabilityMode : 'L1T1'
+                            },
+                            {
+                                rid: 'low',
+                                scaleResolutionDownBy: 4.0,
+                                maxBitrate: maxBitrate / 4,
+                                maxFramerate: 30,
+                                scalabilityMode: isSvc ? scalabilityMode : 'L1T1'
+                            }
+                        ]
+                    })
+                }
 
                 const codecs = RTCRtpReceiver.getCapabilities('video').codecs;
                 let vp9_codecs = [];
                 // iterate over supported codecs and pull out the codecs we want
-                for(let i = 0; i < codecs.length; i++){
-                    if(codecs[i].mimeType == "video/VP9"){
+                for (let i = 0; i < codecs.length; i++) {
+                    if (codecs[i].mimeType == "video/VP9") {
                         vp9_codecs.push(codecs[i]);
                     }
                 }
 
                 // push the rest of the codecs
-                for(let i = 0; i < codecs.length; i++){
-                    if(codecs[i].mimeType != "video/VP9"){
+                for (let i = 0; i < codecs.length; i++) {
+                    if (codecs[i].mimeType != "video/VP9") {
                         vp9_codecs.push(codecs[i]);
                     }
                 }
 
                 // currently not all browsers support setCodecPreferences
-                if(videoTcvr.setCodecPreferences != undefined){
+                if (videoTcvr.setCodecPreferences != undefined) {
                     videoTcvr.setCodecPreferences(vp9_codecs);
                 }
             } else {
-				let videoTcvr = null
-				if (!isSimulcast){
-					videoTcvr = peerConnection.addTransceiver(stream.getVideoTracks()[0], {
-					direction: 'sendonly',
-					streams: [stream],
-					sendEncodings: [
-							{
-								maxBitrate: 1200*1000,
-							},
-						
-						]
-					})
-					
-				} else {
-					videoTcvr = peerConnection.addTransceiver(stream.getVideoTracks()[0], {
-					direction: 'sendonly',
-					streams: [stream],
-					sendEncodings: [
-							{
-								rid: 'high',
-								maxBitrate: 1200*1000,
-								maxFramerate: 30,
-							},
-							{
-								rid: 'mid',
-								scaleResolutionDownBy: 2.0,
-								maxFramerate: 30,
-								maxBitrate: 500*1000,
-							},
-							{
-								rid: 'low',
-								scaleResolutionDownBy: 4.0,
-								maxBitrate: 150*1000,
-								maxFramerate:30,
-							}
-						]
-					})
-				}
+                let videoTcvr = null
+                if (!isSimulcast) {
+                    videoTcvr = peerConnection.addTransceiver(stream.getVideoTracks()[0], {
+                        direction: 'sendonly',
+                        streams: [stream],
+                        sendEncodings: [
+                            {
+                                maxBitrate: 1200 * 1000,
+                            },
 
-				const codecs = RTCRtpReceiver.getCapabilities('video').codecs;
-				let h264Codecs = [];
+                        ]
+                    })
+
+                } else {
+                    videoTcvr = peerConnection.addTransceiver(stream.getVideoTracks()[0], {
+                        direction: 'sendonly',
+                        streams: [stream],
+                        sendEncodings: [
+                            {
+                                rid: 'high',
+                                maxBitrate: 1200 * 1000,
+                                maxFramerate: 30,
+                            },
+                            {
+                                rid: 'mid',
+                                scaleResolutionDownBy: 2.0,
+                                maxFramerate: 30,
+                                maxBitrate: 500 * 1000,
+                            },
+                            {
+                                rid: 'low',
+                                scaleResolutionDownBy: 4.0,
+                                maxBitrate: 150 * 1000,
+                                maxFramerate: 30,
+                            }
+                        ]
+                    })
+                }
+
+                const codecs = RTCRtpReceiver.getCapabilities('video').codecs;
+                let h264Codecs = [];
                 // iterate over supported codecs and pull out the codecs we want
-                for(let i = 0; i < codecs.length; i++){
-                    if(codecs[i].mimeType == "video/H264"){
+                for (let i = 0; i < codecs.length; i++) {
+                    if (codecs[i].mimeType == "video/H264") {
                         h264Codecs.push(codecs[i]);
                     }
                 }
 
                 // push the rest of the codecs
-                for(let i = 0; i < codecs.length; i++){
-                    if(codecs[i].mimeType != "video/H264"){
+                for (let i = 0; i < codecs.length; i++) {
+                    if (codecs[i].mimeType != "video/H264") {
                         h264Codecs.push(codecs[i]);
                     }
                 }
 
                 // currently not all browsers support setCodecPreferences
-                if(videoTcvr.setCodecPreferences != undefined){
+                if (videoTcvr.setCodecPreferences != undefined) {
                     videoTcvr.setCodecPreferences(h264Codecs);
                 } else {
-					console.log("setCodecPreferences not supported")
-				}
+                    console.log("setCodecPreferences not supported")
+                }
             }
-		}
+        }
 
-       	const sleep = (delay) => new Promise((resolve) => setTimeout(resolve, delay))
+        const sleep = (delay) => new Promise((resolve) => setTimeout(resolve, delay))
 
-       	let prevBytesReceived = 0
+        let prevBytesReceived = 0
 
         let prevHighBytesSent = 0
         let prevMidBytesSent = 0
         let prevLowBytesSent = 0
 
         const bwController = {
-            low:0,
-            mid:0,
-            high:0,
-            available:0,
+            low: 0,
+            mid: 0,
+            high: 0,
+            available: 0,
         }
 
-        const monitorBw = async()=>{
-            while (peerConnection.connectionState =="connected") {
+        const monitorBw = async () => {
+            while (peerConnection.connectionState == "connected") {
                 const totalBw = bwController.low + bwController.mid + bwController.high
 
-                if (bwController.available == 0 || bwController.low==0 || bwController.mid==0 || bwController.high==0){
+                if (bwController.available == 0 || bwController.low == 0 || bwController.mid == 0 || bwController.high == 0) {
                     await sleep(5000)
                     continue
                 }
-                
-                const ratio = bwController.available/totalBw
+
+                const ratio = bwController.available / totalBw
 
                 await sleep(5000)
             }
         }
 
 
-       const updateTrackStats = (trackStats) =>{
+        const updateTrackStats = (trackStats) => {
             const sentStats = trackStats.sent_track_stats
             sentStats.forEach(stat => {
-                const statsEl = document.getElementById("stats-"+stat.id)
-                if (!statsEl){
+                const statsEl = document.getElementById("stats-" + stat.id)
+                if (!statsEl) {
                     return
                 }
 
                 let trackStatsEl = statsEl.querySelector(".track-stats")
-                if (!trackStatsEl){
+                if (!trackStatsEl) {
                     trackStatsEl = document.createElement("div");
                     trackStatsEl.className = "track-stats";
                     statsEl.appendChild(trackStatsEl);
@@ -716,35 +718,35 @@
 
                 `
                 trackStatsEl.innerHTML = statsText
-                
+
             })
             const receivedStats = trackStats.received_track_stats
-       }
+        }
 
-       const monitorStats =  async() => {
-            while (peerConnection.connectionState =="connected") {
+        const monitorStats = async () => {
+            while (peerConnection.connectionState == "connected") {
                 const stats = await peerConnection.getStats()
-                
+
                 const qualityLimitiationReason = {
-                    cpu:false,
-                    bandwidth:false,
+                    cpu: false,
+                    bandwidth: false,
                 }
 
                 stats.forEach(report => {
                     if (report.type === 'inbound-rtp' && report.kind === 'video') {
-						const trackid = report.trackIdentifier.replace('{','').replace('}','');
+                        const trackid = report.trackIdentifier.replace('{', '').replace('}', '');
                         const statsEl = document.querySelector(`#stats-${trackid} .video-stats`)
-                        if (!statsEl){
+                        if (!statsEl) {
                             return
                         }
 
-                        if (typeof bwController[report.trackIdentifier] =="undefined"){
+                        if (typeof bwController[report.trackIdentifier] == "undefined") {
                             bwController[report.trackIdentifier] = {
-                                prevBytesReceived:0,
+                                prevBytesReceived: 0,
                             }
                         }
 
-                        if (bwController[report.trackIdentifier].prevBytesReceived == 0 ||report.bytesReceived == 0) {
+                        if (bwController[report.trackIdentifier].prevBytesReceived == 0 || report.bytesReceived == 0) {
                             bwController[report.trackIdentifier].prevBytesReceived = report.bytesReceived
                             return
                         }
@@ -754,7 +756,7 @@
 
                         const statsText = `
                             <p>FrameRate: ${report.framesPerSecond}</p>
-                            <p>Bitrate: ${deltaBytes*8/1000} kbps</p>
+                            <p>Bitrate: ${deltaBytes * 8 / 1000} kbps</p>
                             <p>Resolution: ${report.frameWidth}x${report.frameHeight}</p>
                             <p>Packet Lost: ${report.packetsLost}</p>
                             <p>Nack Count: ${report.nackCount}</p>
@@ -764,71 +766,71 @@
 
                     const statsEl = document.getElementById("stats-local")
 
-                    if (report.type === 'candidate-pair' && typeof report.availableOutgoingBitrate!=="undefined"){
+                    if (report.type === 'candidate-pair' && typeof report.availableOutgoingBitrate !== "undefined") {
                         let bwStatsEl = document.getElementById("stats-local-bandwidth")
-                            if (!bwStatsEl){
-                                bwStatsEl = document.createElement("div");
-                                bwStatsEl.id = "stats-local-bandwidth"
-                                statsEl.append(bwStatsEl)
-                            }
+                        if (!bwStatsEl) {
+                            bwStatsEl = document.createElement("div");
+                            bwStatsEl.id = "stats-local-bandwidth"
+                            statsEl.append(bwStatsEl)
+                        }
 
-                            bwStatsEl.innerHTML = `
-                            <p>available bandwidth: ${(report.availableOutgoingBitrate/1000)} kbps</p>
-                            <p>current bitrate: ${(bwController.low+bwController.mid+bwController.high)/1000} kbps</p>
+                        bwStatsEl.innerHTML = `
+                            <p>available bandwidth: ${(report.availableOutgoingBitrate / 1000)} kbps</p>
+                            <p>current bitrate: ${(bwController.low + bwController.mid + bwController.high) / 1000} kbps</p>
                             `;
 
-                            bwController.available = report.availableOutgoingBitrate
+                        bwController.available = report.availableOutgoingBitrate
                     }
 
-                    if (report.type === 'outbound-rtp' && report.kind === 'video'){
-                        
+                    if (report.type === 'outbound-rtp' && report.kind === 'video') {
 
-                        if (report.rid === 'high' || typeof report.rid === 'undefined'){
-                            if (prevHighBytesSent===0 || report.bytesSent == 0){
+
+                        if (report.rid === 'high' || typeof report.rid === 'undefined') {
+                            if (prevHighBytesSent === 0 || report.bytesSent == 0) {
                                 prevHighBytesSent = report.bytesSent
                                 return
                             }
 
                             let highStatsEl = document.getElementById("stats-local-high")
-                            if (!highStatsEl){
+                            if (!highStatsEl) {
                                 highStatsEl = document.createElement("div");
                                 highStatsEl.id = "stats-local-high"
                                 statsEl.append(highStatsEl)
                             }
-							
+
                             const deltaBytes = report.bytesSent - prevHighBytesSent
                             prevHighBytesSent = report.bytesSent
-                            const bitrate = deltaBytes*8
+                            const bitrate = deltaBytes * 8
                             bwController.high = bitrate
-							const qualityLimitation = `<p>Quality Limitation Reason: ${report.qualityLimitationReason}</p>`
+                            const qualityLimitation = `<p>Quality Limitation Reason: ${report.qualityLimitationReason}</p>`
                             highStatsEl.innerHTML = `
                                 <h3>High</h3>
                                 <p>FrameRate: ${report.framesPerSecond}</p>
-                                <p>Bitrate: ${bitrate/1000} kbps</p>
+                                <p>Bitrate: ${bitrate / 1000} kbps</p>
                                 <p>Resolution: ${report.frameWidth}x${report.frameHeight}</p>
-                                ${report.qualityLimitationReason?qualityLimitation:''}
+                                ${report.qualityLimitationReason ? qualityLimitation : ''}
                             `
 
-                            if (report.qualityLimitationReason == "cpu"){
+                            if (report.qualityLimitationReason == "cpu") {
                                 qualityLimitiationReason.cpu = true
                             }
 
-                            if (report.qualityLimitationReason == "bandwidth"){
+                            if (report.qualityLimitationReason == "bandwidth") {
                                 qualityLimitiationReason.bandwidth = true
                             }
 
                         }
 
-                        
 
-                        if (report.rid === 'mid'){
-                            if (prevMidBytesSent===0 || report.bytesSent == 0){
+
+                        if (report.rid === 'mid') {
+                            if (prevMidBytesSent === 0 || report.bytesSent == 0) {
                                 prevMidBytesSent = report.bytesSent
                                 return
                             }
-                            
+
                             let midStatsEl = document.getElementById("stats-local-mid")
-                            if (!midStatsEl){
+                            if (!midStatsEl) {
                                 midStatsEl = document.createElement("div");
                                 midStatsEl.id = "stats-local-mid"
                                 statsEl.append(midStatsEl)
@@ -836,94 +838,94 @@
 
                             const deltaBytes = report.bytesSent - prevMidBytesSent
                             prevMidBytesSent = report.bytesSent
-                            const bitrate = deltaBytes*8
+                            const bitrate = deltaBytes * 8
                             bwController.mid = bitrate
 
                             midStatsEl.innerHTML = `
                                 <h3>Mid</h3>
                                 <p>FrameRate: ${report.framesPerSecond}</p>
-                                <p>Bitrate: ${bitrate/1000} kbps</p>
+                                <p>Bitrate: ${bitrate / 1000} kbps</p>
                                 <p>Resolution: ${report.frameWidth}x${report.frameHeight}</p>
                                 <p>Quality Limitation Reason: ${report.qualityLimitationReason}</p>
                             `
 
-                            if (report.qualityLimitationReason == "cpu"){
+                            if (report.qualityLimitationReason == "cpu") {
                                 qualityLimitiationReason.cpu = true
                             }
 
-                            if (report.qualityLimitationReason == "bandwidth"){
+                            if (report.qualityLimitationReason == "bandwidth") {
                                 qualityLimitiationReason.bandwidth = true
                             }
                         }
 
-                        if (report.rid === 'low'){
-                            if (prevLowBytesSent===0 || report.bytesSent == 0){
+                        if (report.rid === 'low') {
+                            if (prevLowBytesSent === 0 || report.bytesSent == 0) {
                                 prevLowBytesSent = report.bytesSent
                                 return
                             }
 
                             let lowStatsEl = document.getElementById("stats-local-low")
-                            if (!lowStatsEl){
+                            if (!lowStatsEl) {
                                 lowStatsEl = document.createElement("div");
                                 lowStatsEl.id = "stats-local-low"
                                 statsEl.append(lowStatsEl)
                             }
-                        
+
 
                             const deltaBytes = report.bytesSent - prevLowBytesSent
                             prevLowBytesSent = report.bytesSent
-                            const bitrate = deltaBytes*8
+                            const bitrate = deltaBytes * 8
                             bwController.low = bitrate
 
                             lowStatsEl.innerHTML = `
                                 <h3>Low</h3>
                                 <p>FrameRate: ${report.framesPerSecond}</p>
-                                <p>Bitrate: ${bitrate/1000} kbps</p>
+                                <p>Bitrate: ${bitrate / 1000} kbps</p>
                                 <p>Resolution: ${report.frameWidth}x${report.frameHeight}</p>
                                 <p>Quality Limitation Reason: ${report.qualityLimitationReason}</p>
                             `
 
-                            if (report.qualityLimitationReason == "cpu"){
+                            if (report.qualityLimitationReason == "cpu") {
                                 qualityLimitiationReason.cpu = true
                             }
 
-                            if (report.qualityLimitationReason == "bandwidth"){
+                            if (report.qualityLimitationReason == "bandwidth") {
                                 qualityLimitiationReason.bandwidth = true
                             }
 
                         }
-                        
-                       
+
+
                     }
                 })
 
-                let  qualityLimitiation= "none"
+                let qualityLimitiation = "none"
 
-                if (qualityLimitiationReason.cpu && qualityLimitiationReason.bandwidth){
+                if (qualityLimitiationReason.cpu && qualityLimitiationReason.bandwidth) {
                     qualityLimitiation = "both"
-                } else if (qualityLimitiationReason.cpu){
+                } else if (qualityLimitiationReason.cpu) {
                     qualityLimitiation = "cpu"
-                } else if (qualityLimitiationReason.bandwidth){
+                } else if (qualityLimitiationReason.bandwidth) {
                     qualityLimitiation = "bandwidth"
                 }
 
-                if (internalChannel!=null && internalChannel.readyState == "open"){
-                    const stats={
-                            available_outgoing_bitrate: bwController.available,
-                            quality_limitation_reason: qualityLimitiation
-                        }
+                if (internalChannel != null && internalChannel.readyState == "open") {
+                    const stats = {
+                        available_outgoing_bitrate: bwController.available,
+                        quality_limitation_reason: qualityLimitiation
+                    }
 
-                        internalChannel.send(JSON.stringify(
-                            {
-                                type:'stats',
-                                data:stats
-                            }
+                    internalChannel.send(JSON.stringify(
+                        {
+                            type: 'stats',
+                            data: stats
+                        }
                     ))
                 }
 
                 await sleep(1000)
             }
-           
+
         };
 
         const toggleStats = () => {
@@ -937,17 +939,17 @@
             })
         }
 
-        const switchQuality= () =>{
+        const switchQuality = () => {
             const quality = document.getElementById("selectQuality").value
-            ws.send(JSON.stringify({type:'switch_quality',data:quality}));
+            ws.send(JSON.stringify({ type: 'switch_quality', data: quality }));
         }
 
-        const setBandwidthLimit = () =>{
+        const setBandwidthLimit = () => {
             const limit = document.getElementById("selectBandwidth").value;
-            ws.send(JSON.stringify({type:'set_bandwidth_limit',data:limit}));
+            ws.send(JSON.stringify({ type: 'set_bandwidth_limit', data: limit }));
         }
 
-        const shareScreen = async () =>{
+        const shareScreen = async () => {
             const stream = await navigator.mediaDevices.getDisplayMedia({
                 video: true,
                 audio: true
@@ -956,25 +958,25 @@
             const videoTrack = stream.getVideoTracks()[0];
             const audioTrack = stream.getAudioTracks()[0];
 
-			let tscvAudio = null;
-			let tscvVideo = null;
+            let tscvAudio = null;
+            let tscvVideo = null;
 
-			if (typeof audioTrack != "undefined"){
-				tscvAudio=peerConnection.addTransceiver(audioTrack, {
-					direction: 'sendonly',
-					streams: [stream],
-					sendEncodings: [{priority: 'high'}],
-				})
-			}
+            if (typeof audioTrack != "undefined") {
+                tscvAudio = peerConnection.addTransceiver(audioTrack, {
+                    direction: 'sendonly',
+                    streams: [stream],
+                    sendEncodings: [{ priority: 'high' }],
+                })
+            }
 
-			setCodecPreferences(peerConnection,stream, 'vp9', "L1T3")
+            setCodecPreferences(peerConnection, stream, 'vp9', "L1T3")
 
             const container = document.createElement("div");
             container.className = "container";
-            container.id = "container-"+videoTrack.id;
-            
+            container.id = "container-" + videoTrack.id;
+
             const video = document.createElement("video");
-            video.id = "video-"+videoTrack.id;
+            video.id = "video-" + videoTrack.id;
             video.autoplay = true;
             video.srcObject = stream;
             container.appendChild(video);
@@ -983,43 +985,44 @@
 
             videoTrack.addEventListener('ended', (e) => {
                 console.log('Video track ended, stopping screen sharing');
-				
+
                 document.querySelector('main').removeChild(container);
 
-				peerConnection.removeTrack(tscvVideo.sender);
+                peerConnection.removeTrack(tscvVideo.sender);
 
-				peerConnection.removeTrack(tscvAudio.sender);
+                peerConnection.removeTrack(tscvAudio.sender);
 
-				isAllowRenegotiation();
+                isAllowRenegotiation();
             });
 
             isAllowRenegotiation()
         }
 
-        const isAllowRenegotiation = ()=>{
-            ws.send(JSON.stringify({type:'is_allow_renegotiation'}));
-			negotiationNeeded = true
+        const isAllowRenegotiation = () => {
+            ws.send(JSON.stringify({ type: 'is_allow_renegotiation' }));
+            negotiationNeeded = true
         }
 
         const negotiate = async () => {
-			console.log("negotiate")
-            const offer=await peerConnection.createOffer()
-          
+            console.log("negotiate")
+            const offer = await peerConnection.createOffer()
+
             await peerConnection.setLocalDescription(offer)
-            ws.send(JSON.stringify({type:'offer',data:offer.sdp}));
+            ws.send(JSON.stringify({ type: 'offer', data: offer.sdp }));
         }
 
-        document.addEventListener("DOMContentLoaded", function(event) {
+        document.addEventListener("DOMContentLoaded", function (event) {
             document.getElementById("btnStart").onclick = startH264;
             document.getElementById("btnStartVP9").onclick = startVP9;
-			document.getElementById("btnToggleMic").onclick = toggleMic;
-			document.getElementById("btnToggleCam").onclick = toggleCam;
+            document.getElementById("btnToggleMic").onclick = toggleMic;
+            document.getElementById("btnToggleCam").onclick = toggleCam;
             document.getElementById("btnShareScreen").onclick = shareScreen;
             document.getElementById("btnStats").onclick = toggleStats;
             document.getElementById("selectQuality").onchange = switchQuality;
         });
-        </script>
+    </script>
 </head>
+
 <body>
     <header>
         <h1>HTTP WebSocket Example</h1>
@@ -1029,33 +1032,34 @@
     </main>
     <aside>
         <h3>Outbound Video</h3>
-		<p id="clientid"></p>
-		<p>Network: <span id="network">Stable</span></p>
+        <p id="clientid"></p>
+        <p>Network: <span id="network">Stable</span></p>
         <div id="stats-local"></div>
     </aside>
     <footer>
         <button id="btnStart">Start H264</button>
         <button id="btnStartVP9">Start with VP9</button>
-		<button id="btnToggleMic">Mute Mic</button>
-		<button id="btnToggleCam">Mute Cam</button>
-		<span><input id="simulcast" type="checkbox" value="simulcast">Simulcast</span>
-		<span><input id="svc" type="checkbox" value="svc" checked>SVC</span>
+        <button id="btnToggleMic">Mute Mic</button>
+        <button id="btnToggleCam">Mute Cam</button>
+        <span><input id="simulcast" type="checkbox" value="simulcast">Simulcast</span>
+        <span><input id="svc" type="checkbox" value="svc" checked>SVC</span>
         <button id="btnShareScreen">Share Screen</button>
         <button id="btnStats">Toggle Stats</button>
         <span><label>Quality</label> <select id="selectQuality">
-            <option selected value="high">high</option>
-            <option value="mid">mid</option>
-            <option value="low">low</option>
-            <option value="none">none</option>
-        </select></span>
+                <option selected value="high">high</option>
+                <option value="mid">mid</option>
+                <option value="low">low</option>
+                <option value="none">none</option>
+            </select></span>
 
         <span><label>MaxBitrate</label> <select id="maxBitrate">
-            <option value="120000">120Kbps</option>
-            <option value="300000">300Kbps</option>
-            <option value="500000">500Kbps</option>
-            <option value="1000000" selected>1Mbps</option>
-            <option value="2000000">2Mbps</option>
-        </select></span>
+                <option value="120000">120Kbps</option>
+                <option value="300000">300Kbps</option>
+                <option value="500000">500Kbps</option>
+                <option value="1000000" selected>1Mbps</option>
+                <option value="2000000">2Mbps</option>
+            </select></span>
     </footer>
 </body>
+
 </html>
