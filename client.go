@@ -1054,29 +1054,9 @@ func (c *Client) enableReportAndStats(rtpSender *webrtc.RTPSender, track iClient
 			case <-localCtx.Done():
 				return
 			default:
-				// rtcpPackets, _, err := rtpSender.ReadRTCP()
-				// if err != nil && err == io.ErrClosedPipe {
-				// 	return
-				// }
-
-				b := pool.Get()
-				i, _, err := rtpSender.Read(*b)
-				if err != nil {
-					if err == io.ErrClosedPipe {
-						pool.Put(b)
-						return
-					}
-
-					c.log.Errorf("client: error read rtcp packets %s", err.Error())
-					pool.Put(b)
-					continue
-				}
-
-				rtcpPackets, err := rtcp.Unmarshal((*b)[:i])
-				if err != nil {
-					c.log.Errorf("client: error unmarshal rtcp packets %s", err.Error())
-					pool.Put(b)
-					continue
+				rtcpPackets, _, err := rtpSender.ReadRTCP()
+				if err != nil && err == io.ErrClosedPipe {
+					return
 				}
 
 				for _, p := range rtcpPackets {
@@ -1087,7 +1067,6 @@ func (c *Client) enableReportAndStats(rtpSender *webrtc.RTPSender, track iClient
 						track.RequestPLI()
 					}
 				}
-				pool.Put(b)
 			}
 		}
 	}()
