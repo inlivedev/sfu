@@ -1041,6 +1041,7 @@ func (c *Client) ClientTracks() map[string]iClientTrack {
 }
 
 func (c *Client) enableReportAndStats(rtpSender *webrtc.RTPSender, track iClientTrack) {
+	ssrc := rtpSender.GetParameters().Encodings[0].SSRC
 	go func() {
 		localCtx, cancel := context.WithCancel(track.Context())
 
@@ -1079,7 +1080,7 @@ func (c *Client) enableReportAndStats(rtpSender *webrtc.RTPSender, track iClient
 			case <-localCtx.Done():
 				return
 			case <-tick.C:
-				c.updateSenderStats(rtpSender)
+				c.updateSenderStats(rtpSender, ssrc)
 			}
 		}
 	}()
@@ -1119,6 +1120,9 @@ func (c *Client) afterClosed() {
 }
 
 func (c *Client) stop() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	if c.peerConnection.pc.ConnectionState() == webrtc.PeerConnectionStateClosed {
 		return nil
 	}
@@ -1302,20 +1306,17 @@ func (c *Client) PeerConnection() *PeerConnection {
 	return c.peerConnection
 }
 
-func (c *Client) updateSenderStats(sender *webrtc.RTPSender) {
-	if c.statsGetter == nil {
+func (c *Client) updateSenderStats(sender *webrtc.RTPSender, ssrc webrtc.SSRC) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if sender == nil ||
+		c.statsGetter == nil ||
+		c.stats == nil ||
+		sender.Track() == nil {
+
 		return
 	}
-
-	if sender == nil {
-		return
-	}
-
-	if sender.Track() == nil {
-		return
-	}
-
-	ssrc := sender.GetParameters().Encodings[0].SSRC
 
 	stats := c.statsGetter.Get(uint32(ssrc))
 	if stats != nil {
