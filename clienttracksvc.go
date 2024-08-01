@@ -30,8 +30,8 @@ type QualityPresets struct {
 	Low  QualityPreset `json:"low"`
 }
 
-func DefaultQualityPresets() QualityPresets {
-	return QualityPresets{
+func DefaultQualityPresets() *QualityPresets {
+	return &QualityPresets{
 		High: QualityPreset{
 			SID: 2,
 			TID: 2,
@@ -99,9 +99,6 @@ func (t *scaleableClientTrack) isKeyframe(vp9 *codecs.VP9Packet) bool {
 }
 
 func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
 	var qualityPreset IQualityPreset
 
 	var isLatePacket bool
@@ -206,7 +203,9 @@ func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 }
 
 func (t *scaleableClientTrack) send(p *rtp.Packet) {
+	t.mu.Lock()
 	t.lastTimestamp = p.Timestamp
+	t.mu.Unlock()
 
 	if err := t.localTrack.WriteRTP(p); err != nil {
 		t.client.log.Errorf("scaleabletrack: error on write rtp", err)
@@ -219,6 +218,9 @@ func (t *scaleableClientTrack) SetSourceType(sourceType TrackType) {
 }
 
 func (t *scaleableClientTrack) setLastQuality(quality QualityLevel) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
 	t.lastQuality = quality
 }
 
@@ -263,5 +265,5 @@ func (t *scaleableClientTrack) getQuality() QualityLevel {
 		return QualityNone
 	}
 
-	return min(t.maxQuality, claim.Quality(), Uint32ToQualityLevel(t.client.quality.Load()))
+	return min(t.MaxQuality(), claim.Quality(), Uint32ToQualityLevel(t.client.quality.Load()))
 }

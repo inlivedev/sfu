@@ -83,9 +83,9 @@ func (m *Manager) NewRoom(id, name, roomType string, opts RoomOptions) (*Room, e
 	sfuOpts := sfuOptions{
 		Bitrates:       opts.Bitrates,
 		IceServers:     m.iceServers,
-		Codecs:         opts.Codecs,
-		PLIInterval:    opts.PLIInterval,
-		QualityPresets: opts.QualityPresets,
+		Codecs:         *opts.Codecs,
+		PLIInterval:    *opts.PLIInterval,
+		QualityPresets: *opts.QualityPresets,
 		Log:            m.log,
 		SettingEngine:  m.options.SettingEngine,
 	}
@@ -224,7 +224,7 @@ func startRoomTimeout(m *Manager, room *Room) (context.Context, context.CancelFu
 
 	var ctx context.Context
 
-	ctx, cancel = context.WithTimeout(m.context, room.options.EmptyRoomTimeout)
+	ctx, cancel = context.WithTimeout(m.context, *room.options.EmptyRoomTimeout)
 
 	go func() {
 		<-ctx.Done()

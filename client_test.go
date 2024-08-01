@@ -29,7 +29,7 @@ func TestTracksSubscribe(t *testing.T) {
 
 	// create new room
 	roomOpts := DefaultRoomOptions()
-	roomOpts.Codecs = []string{webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
+	roomOpts.Codecs = &[]string{webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
 	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal, roomOpts)
 
 	defer testRoom.Close()
@@ -123,7 +123,7 @@ func TestSimulcastTrack(t *testing.T) {
 
 	// create new room
 	roomOpts := DefaultRoomOptions()
-	roomOpts.Codecs = []string{webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
+	roomOpts.Codecs = &[]string{webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
 	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal, roomOpts)
 	require.NoError(t, err, "error creating room: %v", err)
 
@@ -243,7 +243,7 @@ func TestClientDataChannel(t *testing.T) {
 
 	// create new room
 	roomOpts := DefaultRoomOptions()
-	roomOpts.Codecs = []string{webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
+	roomOpts.Codecs = &[]string{webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
 	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal, roomOpts)
 	require.NoError(t, err, "error creating room: %v", err)
 

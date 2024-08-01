@@ -1,7 +1,6 @@
 package sfu
 
 import (
-	"context"
 	"sync"
 )
 
@@ -14,12 +13,10 @@ func (l *clientTrackList) Add(track iClientTrack) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	go func() {
-		ctx, cancel := context.WithCancel(track.Context())
-		defer cancel()
-		<-ctx.Done()
+	// TODO: change to non go routine
+	track.OnEnded(func() {
 		l.remove(track.ID())
-	}()
+	})
 
 	l.tracks = append(l.tracks, track)
 }
