@@ -541,8 +541,8 @@ func CreatePeerPair(ctx context.Context, log logging.LeveledLogger, room *Room, 
 
 		currentTranscv := len(pc.GetTransceivers())
 
-		log.Infof("test: got renegotiation ", peerName)
-		defer log.Infof("test: renegotiation done ", peerName)
+		log.Infof("test: got renegotiation %s", peerName)
+		defer log.Infof("test: renegotiation done %s", peerName)
 		if err = pc.SetRemoteDescription(offer); err != nil {
 			return webrtc.SessionDescription{}, err
 		}
@@ -554,7 +554,7 @@ func CreatePeerPair(ctx context.Context, log logging.LeveledLogger, room *Room, 
 		}
 
 		newTcv := len(pc.GetTransceivers()) - currentTranscv
-		log.Infof("test: new transceiver ", newTcv, " total tscv ", len(pc.GetTransceivers()))
+		log.Infof("test: new transceiver %d total tscv %d", newTcv, len(pc.GetTransceivers()))
 
 		peer.Mu.Lock()
 		peer.IsInRenegotiation = false

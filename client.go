@@ -1107,7 +1107,9 @@ func (c *Client) afterClosed() {
 
 	c.state.Store(ClientStateEnded)
 
-	c.internalDataChannel.Close()
+	if c.internalDataChannel != nil {
+		c.internalDataChannel.Close()
+	}
 
 	c.onLeft()
 
