@@ -95,6 +95,8 @@ func (t *remoteTrack) readRTP() {
 
 	defer t.cancel()
 
+	defer t.onEnded()
+
 	for {
 		select {
 		case <-readCtx.Done():
@@ -312,4 +314,20 @@ func (t *remoteTrack) Buffer() *packetBuffers {
 	defer t.mu.RUnlock()
 
 	return t.packetBuffers
+}
+
+func (t *remoteTrack) OnEnded(f func()) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	t.onEndedCallbacks = append(t.onEndedCallbacks, f)
+}
+
+func (t *remoteTrack) onEnded() {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
+	for _, f := range t.onEndedCallbacks {
+		f()
+	}
 }

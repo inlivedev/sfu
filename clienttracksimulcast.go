@@ -81,22 +81,10 @@ func newSimulcastClientTrack(c *Client, t *SimulcastTrack) *simulcastClientTrack
 
 	ct.remoteTrack.sendPLI()
 
-	go func() {
-		clientCtx, clientCancel := context.WithCancel(c.Context())
-		defer func() {
-			clientCancel()
-			cancel()
-		}()
-
-		select {
-		case <-clientCtx.Done():
-			ct.onTrackEnded()
-			return
-		case <-ctx.Done():
-			ct.onTrackEnded()
-			return
-		}
-	}()
+	t.OnEnded(func() {
+		ct.onEnded()
+		cancel()
+	})
 
 	return ct
 }
@@ -276,14 +264,14 @@ func (t *simulcastClientTrack) LastQuality() QualityLevel {
 	return Uint32ToQualityLevel(t.lastQuality.Load())
 }
 
-func (t *simulcastClientTrack) OnTrackEnded(callback func()) {
+func (t *simulcastClientTrack) OnEnded(callback func()) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	t.onTrackEndedCallbacks = append(t.onTrackEndedCallbacks, callback)
 }
 
-func (t *simulcastClientTrack) onTrackEnded() {
+func (t *simulcastClientTrack) onEnded() {
 	if t.isEnded.Load() {
 		return
 	}

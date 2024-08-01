@@ -498,15 +498,10 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 			maxWait := opts.JitterBufferMaxWait
 
 			track = newTrack(client.context, client, remoteTrack, minWait, maxWait, s.pliInterval, onPLI, client.statsGetter, onStatsUpdated)
-
-			go func() {
-				parentCtx := track.Context()
-				trackCtx, trackCancel := context.WithCancel(parentCtx)
-				defer trackCancel()
-				<-trackCtx.Done()
+			track.OnEnded(func() {
 				client.stats.removeReceiverStats(remoteTrack.ID() + remoteTrack.RID())
 				client.tracks.remove([]string{remoteTrack.ID()})
-			}()
+			})
 
 			if err := client.tracks.Add(track); err != nil {
 				client.log.Errorf("client: error add track ", err)
@@ -530,10 +525,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 					client.log.Errorf("client: error add track ", err)
 				}
 
-				go func() {
-					trackCtx, trackCancel := context.WithCancel(track.Context())
-					defer trackCancel()
-					<-trackCtx.Done()
+				track.OnEnded(func() {
 					simulcastTrack := track.(*SimulcastTrack)
 					simulcastTrack.mu.Lock()
 					defer simulcastTrack.mu.Unlock()
@@ -550,7 +542,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 					}
 
 					client.tracks.remove([]string{remoteTrack.ID()})
-				}()
+				})
 
 			} else if simulcast, ok = track.(*SimulcastTrack); ok {
 				simulcast.AddRemoteTrack(remoteTrack, opts.JitterBufferMinWait, opts.JitterBufferMaxWait, client.statsGetter, onStatsUpdated, onPLI)
@@ -853,14 +845,14 @@ func (c *Client) renegotiate() {
 	c.mu.Unlock()
 
 	if c.isInRemoteNegotiation.Load() {
-		c.log.Infof("sfu: renegotiation is delayed because the remote client is doing negotiation ", c.ID)
+		c.log.Infof("sfu: renegotiation is delayed because the remote client %s is doing negotiation ", c.ID)
 
 		return
 	}
 
 	// no need to run another negotiation if it's already in progress, it will rerun because we mark the negotiationneeded to true
 	if c.isInRenegotiation.Load() {
-		c.log.Infof("sfu: renegotiation is delayed because the client is doing negotiation ", c.ID)
+		c.log.Infof("sfu: renegotiation is delayed because the client %s is doing negotiation ", c.ID)
 		return
 	}
 
@@ -989,12 +981,9 @@ func (c *Client) setClientTrack(t ITrack) iClientTrack {
 		}
 	}
 
-	go func() {
-		ctx, cancel := context.WithCancel(outputTrack.Context())
-		defer cancel()
+	// TODO: change to non goroutine
 
-		<-ctx.Done()
-
+	outputTrack.OnEnded(func() {
 		if c == nil {
 			return
 		}
@@ -1012,11 +1001,8 @@ func (c *Client) setClientTrack(t ITrack) iClientTrack {
 			return
 		}
 
-		err = senderTcv.Stop()
-		if err != nil {
-			c.log.Errorf("client: error stop sender ", err)
-		}
-	}()
+		c.peerConnection.PC().RemoveTrack(sender)
+	})
 
 	// enable RTCP report and stats
 	c.enableReportAndStats(senderTcv.Sender(), outputTrack)
@@ -1040,6 +1026,7 @@ func (c *Client) ClientTracks() map[string]iClientTrack {
 	return clientTracks
 }
 
+// TODO: need to improve and reduce goroutine usage
 func (c *Client) enableReportAndStats(rtpSender *webrtc.RTPSender, track iClientTrack) {
 	ssrc := rtpSender.GetParameters().Encodings[0].SSRC
 	go func() {
@@ -1111,6 +1098,8 @@ func (c *Client) afterClosed() {
 	if c.internalDataChannel != nil {
 		c.internalDataChannel.Close()
 	}
+
+	c.dataChannels.Clear()
 
 	c.onLeft()
 

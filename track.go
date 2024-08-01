@@ -63,6 +63,7 @@ type ITrack interface {
 	Context() context.Context
 	Relay(func(webrtc.SSRC, *rtp.Packet))
 	PayloadType() webrtc.PayloadType
+	OnEnded(func())
 }
 
 type Track struct {
@@ -138,20 +139,10 @@ func newTrack(ctx context.Context, client *Client, trackRemote IRemoteTrack, min
 
 	t.context, cancel = context.WithCancel(client.Context())
 
-	rtContext, rtCancel := context.WithCancel(t.remoteTrack.Context())
-
-	go func() {
-		defer cancel()
-
-		defer rtCancel()
-
-		select {
-		case <-t.context.Done():
-			return
-		case <-rtContext.Done():
-			return
-		}
-	}()
+	t.remoteTrack.OnEnded(func() {
+		cancel()
+		t.onEnded()
+	})
 
 	return t
 }
@@ -323,6 +314,22 @@ func (t *Track) IsRelay() bool {
 	return t.remoteTrack.IsRelay()
 }
 
+func (t *Track) OnEnded(f func()) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	t.onEndedCallbacks = append(t.onEndedCallbacks, f)
+}
+
+func (t *Track) onEnded() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	for _, f := range t.onEndedCallbacks {
+		f()
+	}
+}
+
 type SimulcastTrack struct {
 	context                     context.Context
 	cancel                      context.CancelFunc
@@ -353,6 +360,7 @@ type SimulcastTrack struct {
 	pliInterval                 time.Duration
 	onNetworkConditionChanged   func(networkmonitor.NetworkConditionType)
 	reordered                   bool
+	onEndedCallbacks            []func()
 }
 
 func newSimulcastTrack(client *Client, track IRemoteTrack, minWait, maxWait, pliInterval time.Duration, onPLI func(), stats stats.Getter, onStatsUpdated func(*stats.Stats)) ITrack {
@@ -383,26 +391,17 @@ func newSimulcastTrack(client *Client, track IRemoteTrack, minWait, maxWait, pli
 		onNetworkConditionChanged: func(condition networkmonitor.NetworkConditionType) {
 			client.onNetworkConditionChanged(condition)
 		},
+		onEndedCallbacks: make([]func(), 0),
 	}
 
 	t.context, t.cancel = context.WithCancel(client.Context())
 
 	rt := t.AddRemoteTrack(track, minWait, maxWait, stats, onStatsUpdated, onPLI)
 
-	rtContext, rtCancel := context.WithCancel(rt.Context())
-
-	go func() {
-		defer t.cancel()
-
-		defer rtCancel()
-
-		select {
-		case <-t.context.Done():
-			return
-		case <-rtContext.Done():
-			return
-		}
-	}()
+	rt.OnEnded(func() {
+		t.cancel()
+		t.onEnded()
+	})
 
 	return t
 }
@@ -551,45 +550,39 @@ func (t *SimulcastTrack) AddRemoteTrack(track IRemoteTrack, minWait, maxWait tim
 		t.remoteTrackHigh = remoteTrack
 		t.mu.Unlock()
 
-		go func() {
-			ctx, cancel := context.WithCancel(remoteTrack.Context())
-			defer cancel()
-			<-ctx.Done()
+		remoteTrack.OnEnded(func() {
 			t.mu.Lock()
 			t.remoteTrackHigh = nil
 			t.mu.Unlock()
 			t.cancel()
-		}()
+			t.onEnded()
+		})
 
 	case QualityMid:
 		t.mu.Lock()
 		t.remoteTrackMid = remoteTrack
 		t.mu.Unlock()
 
-		go func() {
-			ctx, cancel := context.WithCancel(remoteTrack.Context())
-			defer cancel()
-			<-ctx.Done()
+		remoteTrack.OnEnded(func() {
 			t.mu.Lock()
 			t.remoteTrackMid = nil
 			t.mu.Unlock()
 			t.cancel()
-		}()
+			t.onEnded()
+		})
 
 	case QualityLow:
 		t.mu.Lock()
 		t.remoteTrackLow = remoteTrack
 		t.mu.Unlock()
 
-		go func() {
-			ctx, cancel := context.WithCancel(remoteTrack.Context())
-			defer cancel()
-			<-ctx.Done()
+		remoteTrack.OnEnded(func() {
 			t.mu.Lock()
 			t.remoteTrackLow = nil
 			t.mu.Unlock()
 			t.cancel()
-		}()
+			t.onEnded()
+		})
 	default:
 		t.base.client.log.Warnf("client: unknown track quality ", track.RID())
 		return nil
@@ -868,6 +861,22 @@ func (t *SimulcastTrack) IsRelay() bool {
 	}
 
 	return false
+}
+
+func (t *SimulcastTrack) OnEnded(f func()) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	t.onEndedCallbacks = append(t.onEndedCallbacks, f)
+}
+
+func (t *SimulcastTrack) onEnded() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	for _, f := range t.onEndedCallbacks {
+		f()
+	}
 }
 
 type SubscribeTrackRequest struct {

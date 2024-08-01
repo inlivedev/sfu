@@ -244,12 +244,8 @@ func (bc *bitrateController) addClaim(clientTrack iClientTrack, quality QualityL
 		simulcast: clientTrack.IsSimulcast(),
 	}
 
-	go func() {
-		ctx, cancel := context.WithCancel(clientTrack.Context())
-		defer cancel()
-
-		<-ctx.Done()
-
+	// TODO: change to non goroutine
+	clientTrack.OnEnded(func() {
 		bc.removeClaim(clientTrack.ID())
 
 		if bc.client.IsDebugEnabled() {
@@ -257,7 +253,7 @@ func (bc *bitrateController) addClaim(clientTrack iClientTrack, quality QualityL
 		}
 
 		clientTrack.Client().stats.removeSenderStats(clientTrack.ID())
-	}()
+	})
 
 	return bc.claims[clientTrack.ID()], nil
 }

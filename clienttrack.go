@@ -27,21 +27,23 @@ type iClientTrack interface {
 	ReceiveBitrate() uint32
 	SendBitrate() uint32
 	Quality() QualityLevel
+	OnEnded(func())
 }
 
 type clientTrack struct {
-	id          string
-	streamid    string
-	context     context.Context
-	mu          sync.RWMutex
-	client      *Client
-	kind        webrtc.RTPCodecType
-	mimeType    string
-	localTrack  *webrtc.TrackLocalStaticRTP
-	remoteTrack *remoteTrack
-	baseTrack   *baseTrack
-	isScreen    bool
-	ssrc        webrtc.SSRC
+	id                    string
+	streamid              string
+	context               context.Context
+	mu                    sync.RWMutex
+	client                *Client
+	kind                  webrtc.RTPCodecType
+	mimeType              string
+	localTrack            *webrtc.TrackLocalStaticRTP
+	remoteTrack           *remoteTrack
+	baseTrack             *baseTrack
+	isScreen              bool
+	ssrc                  webrtc.SSRC
+	onTrackEndedCallbacks []func()
 }
 
 func newClientTrack(c *Client, t *Track, isScreen bool, localTrack *webrtc.TrackLocalStaticRTP) *clientTrack {
@@ -52,24 +54,25 @@ func newClientTrack(c *Client, t *Track, isScreen bool, localTrack *webrtc.Track
 	}
 
 	ct := &clientTrack{
-		id:          localTrack.ID(),
-		streamid:    localTrack.StreamID(),
-		context:     ctx,
-		mu:          sync.RWMutex{},
-		client:      c,
-		kind:        localTrack.Kind(),
-		mimeType:    localTrack.Codec().MimeType,
-		localTrack:  localTrack,
-		remoteTrack: t.remoteTrack,
-		baseTrack:   t.base,
-		isScreen:    isScreen,
-		ssrc:        t.remoteTrack.track.SSRC(),
+		id:                    localTrack.ID(),
+		streamid:              localTrack.StreamID(),
+		context:               ctx,
+		mu:                    sync.RWMutex{},
+		client:                c,
+		kind:                  localTrack.Kind(),
+		mimeType:              localTrack.Codec().MimeType,
+		localTrack:            localTrack,
+		remoteTrack:           t.remoteTrack,
+		baseTrack:             t.base,
+		isScreen:              isScreen,
+		ssrc:                  t.remoteTrack.track.SSRC(),
+		onTrackEndedCallbacks: make([]func(), 0),
 	}
 
-	go func() {
-		defer cancel()
-		<-ctx.Done()
-	}()
+	t.OnEnded(func() {
+		ct.onEnded()
+		cancel()
+	})
 
 	return ct
 }
@@ -179,4 +182,20 @@ func (t *clientTrack) Quality() QualityLevel {
 	}
 
 	return QualityAudio
+}
+
+func (t *clientTrack) OnEnded(f func()) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	t.onTrackEndedCallbacks = append(t.onTrackEndedCallbacks, f)
+}
+
+func (t *clientTrack) onEnded() {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
+	for _, f := range t.onTrackEndedCallbacks {
+		f()
+	}
 }
