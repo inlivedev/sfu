@@ -16,7 +16,6 @@ import (
 	"github.com/inlivedev/sfu/pkg/interceptors/voiceactivedetector"
 	"github.com/inlivedev/sfu/pkg/networkmonitor"
 	"github.com/inlivedev/sfu/pkg/pacer"
-	"github.com/inlivedev/sfu/pkg/rtppool"
 	"github.com/pion/interceptor"
 	"github.com/pion/interceptor/pkg/cc"
 	"github.com/pion/interceptor/pkg/gcc"
@@ -1046,8 +1045,6 @@ func (c *Client) enableReportAndStats(rtpSender *webrtc.RTPSender, track iClient
 		localCtx, cancel := context.WithCancel(track.Context())
 
 		defer cancel()
-
-		pool := rtppool.NewBufferPool()
 
 		for {
 			select {
