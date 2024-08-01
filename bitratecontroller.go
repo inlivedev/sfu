@@ -215,7 +215,7 @@ func (bc *bitrateController) addClaims(clientTracks []iClientTrack) error {
 			if clientTrack.IsSimulcast() {
 				clientTrack.(*simulcastClientTrack).lastQuality.Store(uint32(trackQuality))
 			} else if clientTrack.IsScaleable() {
-				clientTrack.(*scaleableClientTrack).lastQuality = trackQuality
+				clientTrack.(*scaleableClientTrack).setLastQuality(trackQuality)
 			}
 
 			_, err := bc.addClaim(clientTrack, trackQuality)
@@ -244,13 +244,8 @@ func (bc *bitrateController) addClaim(clientTrack iClientTrack, quality QualityL
 		simulcast: clientTrack.IsSimulcast(),
 	}
 
-	// TODO: change to non goroutine
 	clientTrack.OnEnded(func() {
 		bc.removeClaim(clientTrack.ID())
-
-		if bc.client.IsDebugEnabled() {
-			bc.client.log.Infof("clienttrack: track ", clientTrack.ID(), " claim removed")
-		}
 
 		clientTrack.Client().stats.removeSenderStats(clientTrack.ID())
 	})
@@ -263,7 +258,7 @@ func (bc *bitrateController) removeClaim(id string) {
 	defer bc.mu.Unlock()
 
 	if _, ok := bc.claims[id]; !ok {
-		bc.client.log.Errorf("bitrate: track ", id, " is not exists")
+		bc.client.log.Errorf("bitrate: track %s is not exists", id)
 		return
 	}
 

@@ -1437,6 +1437,9 @@ func (c *Client) SetQuality(quality QualityLevel) {
 // it will return the initial bandwidth. If the receiving bandwidth is not 0, it will return the smallest value between
 // the estimated bandwidth and the receiving bandwidth.
 func (c *Client) GetEstimatedBandwidth() uint32 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
 	return uint32(c.estimator.GetTargetBitrate())
 }
 
