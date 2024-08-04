@@ -41,6 +41,7 @@ type baseTrack struct {
 	codec        webrtc.RTPCodecParameters
 	isScreen     *atomic.Bool // source of the track, can be media or screen
 	clientTracks *clientTrackList
+	pool         *rtppool.RTPPool
 }
 
 type ITrack interface {
@@ -62,6 +63,7 @@ type ITrack interface {
 	Context() context.Context
 	Relay(func(webrtc.SSRC, *rtp.Packet))
 	PayloadType() webrtc.PayloadType
+	OnEnded(func())
 }
 
 type Track struct {
@@ -75,7 +77,7 @@ type Track struct {
 
 func newTrack(ctx context.Context, client *Client, trackRemote IRemoteTrack, minWait, maxWait, pliInterval time.Duration, onPLI func(), stats stats.Getter, onStatsUpdated func(*stats.Stats)) ITrack {
 	ctList := newClientTrackList()
-
+	pool := rtppool.New()
 	baseTrack := &baseTrack{
 		id:           trackRemote.ID(),
 		isScreen:     &atomic.Bool{},
@@ -85,6 +87,7 @@ func newTrack(ctx context.Context, client *Client, trackRemote IRemoteTrack, min
 		kind:         trackRemote.Kind(),
 		codec:        trackRemote.Codec(),
 		clientTracks: ctList,
+		pool:         pool,
 	}
 
 	t := &Track{
@@ -99,29 +102,29 @@ func newTrack(ctx context.Context, client *Client, trackRemote IRemoteTrack, min
 
 		for _, track := range tracks {
 			//nolint:ineffassign,staticcheck // packet is from the pool
-			packet := rtppool.NewPacket(&p.Header, p.Payload)
+			packet := pool.NewPacket(&p.Header, p.Payload)
 
-			copyPacket := rtppool.GetPacketAllocationFromPool()
+			copyPacket := pool.GetPacket()
 			copyPacket.Header = *packet.Header()
 			copyPacket.Payload = packet.Payload()
 
 			track.push(copyPacket, QualityHigh)
 
-			rtppool.ResetPacketPoolAllocation(copyPacket)
+			pool.PutPacket(copyPacket)
 
 			packet.Release()
 		}
 
 		//nolint:ineffassign // this is required
-		packet := rtppool.NewPacket(&p.Header, p.Payload)
+		packet := pool.NewPacket(&p.Header, p.Payload)
 
-		copyPacket := rtppool.GetPacketAllocationFromPool()
+		copyPacket := pool.GetPacket()
 		copyPacket.Header = *packet.Header()
 		copyPacket.Payload = packet.Payload()
 
 		t.onRead(copyPacket, QualityHigh)
 
-		rtppool.ResetPacketPoolAllocation(copyPacket)
+		pool.PutPacket(copyPacket)
 
 		packet.Release()
 	}
@@ -130,26 +133,16 @@ func newTrack(ctx context.Context, client *Client, trackRemote IRemoteTrack, min
 		client.onNetworkConditionChanged(condition)
 	}
 
-	t.remoteTrack = newRemoteTrack(ctx, client.log, client.options.ReorderPackets, trackRemote, minWait, maxWait, pliInterval, onPLI, stats, onStatsUpdated, onRead, onNetworkConditionChanged)
+	t.remoteTrack = newRemoteTrack(ctx, client.log, client.options.ReorderPackets, trackRemote, minWait, maxWait, pliInterval, onPLI, stats, onStatsUpdated, onRead, pool, onNetworkConditionChanged)
 
 	var cancel context.CancelFunc
 
 	t.context, cancel = context.WithCancel(client.Context())
 
-	rtContext, rtCancel := context.WithCancel(t.remoteTrack.Context())
-
-	go func() {
-		defer cancel()
-
-		defer rtCancel()
-
-		select {
-		case <-t.context.Done():
-			return
-		case <-rtContext.Done():
-			return
-		}
-	}()
+	t.remoteTrack.OnEnded(func() {
+		cancel()
+		t.onEnded()
+	})
 
 	return t
 }
@@ -299,11 +292,11 @@ func (t *Track) onRead(p *rtp.Packet, quality QualityLevel) {
 	defer t.mu.Unlock()
 
 	for _, callback := range t.onReadCallbacks {
-		copyPacket := rtppool.GetPacketAllocationFromPool()
+		copyPacket := t.base.pool.GetPacket()
 		copyPacket.Header = p.Header
 		copyPacket.Payload = p.Payload
 		callback(p, quality)
-		rtppool.ResetPacketPoolAllocation(copyPacket)
+		t.base.pool.PutPacket(copyPacket)
 	}
 }
 
@@ -319,6 +312,22 @@ func (t *Track) PayloadType() webrtc.PayloadType {
 
 func (t *Track) IsRelay() bool {
 	return t.remoteTrack.IsRelay()
+}
+
+func (t *Track) OnEnded(f func()) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	t.onEndedCallbacks = append(t.onEndedCallbacks, f)
+}
+
+func (t *Track) onEnded() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	for _, f := range t.onEndedCallbacks {
+		f()
+	}
 }
 
 type SimulcastTrack struct {
@@ -351,6 +360,7 @@ type SimulcastTrack struct {
 	pliInterval                 time.Duration
 	onNetworkConditionChanged   func(networkmonitor.NetworkConditionType)
 	reordered                   bool
+	onEndedCallbacks            []func()
 }
 
 func newSimulcastTrack(client *Client, track IRemoteTrack, minWait, maxWait, pliInterval time.Duration, onPLI func(), stats stats.Getter, onStatsUpdated func(*stats.Stats)) ITrack {
@@ -366,6 +376,7 @@ func newSimulcastTrack(client *Client, track IRemoteTrack, minWait, maxWait, pli
 			kind:         track.Kind(),
 			codec:        track.Codec(),
 			clientTracks: newClientTrackList(),
+			pool:         rtppool.New(),
 		},
 		lastReadHighTS:              &atomic.Int64{},
 		lastReadMidTS:               &atomic.Int64{},
@@ -380,26 +391,17 @@ func newSimulcastTrack(client *Client, track IRemoteTrack, minWait, maxWait, pli
 		onNetworkConditionChanged: func(condition networkmonitor.NetworkConditionType) {
 			client.onNetworkConditionChanged(condition)
 		},
+		onEndedCallbacks: make([]func(), 0),
 	}
 
 	t.context, t.cancel = context.WithCancel(client.Context())
 
 	rt := t.AddRemoteTrack(track, minWait, maxWait, stats, onStatsUpdated, onPLI)
 
-	rtContext, rtCancel := context.WithCancel(rt.Context())
-
-	go func() {
-		defer t.cancel()
-
-		defer rtCancel()
-
-		select {
-		case <-t.context.Done():
-			return
-		case <-rtContext.Done():
-			return
-		}
-	}()
+	rt.OnEnded(func() {
+		t.cancel()
+		t.onEnded()
+	})
 
 	return t
 }
@@ -512,35 +514,35 @@ func (t *SimulcastTrack) AddRemoteTrack(track IRemoteTrack, minWait, maxWait tim
 		tracks := t.base.clientTracks.GetTracks()
 		for _, track := range tracks {
 			//nolint:ineffassign,staticcheck // packet is from the pool
-			packet := rtppool.NewPacket(&p.Header, p.Payload)
+			packet := t.base.pool.NewPacket(&p.Header, p.Payload)
 
-			copyPacket := rtppool.GetPacketAllocationFromPool()
+			copyPacket := t.base.pool.GetPacket()
 			copyPacket.Header = *packet.Header()
 			copyPacket.Payload = packet.Payload()
 
 			track.push(copyPacket, quality)
 
-			rtppool.ResetPacketPoolAllocation(copyPacket)
+			t.base.pool.PutPacket(copyPacket)
 
 			packet.Release()
 		}
 
 		//nolint:ineffassign // this is required
-		packet := rtppool.NewPacket(&p.Header, p.Payload)
+		packet := t.base.pool.NewPacket(&p.Header, p.Payload)
 
-		copyPacket := rtppool.GetPacketAllocationFromPool()
+		copyPacket := t.base.pool.GetPacket()
 		copyPacket.Header = *packet.Header()
 		copyPacket.Payload = packet.Payload()
 
 		t.onRead(copyPacket, quality)
 
-		rtppool.ResetPacketPoolAllocation(copyPacket)
+		t.base.pool.PutPacket(copyPacket)
 
 		packet.Release()
 
 	}
 
-	remoteTrack = newRemoteTrack(t.Context(), t.base.client.log, t.reordered, track, minWait, maxWait, t.pliInterval, onPLI, stats, onStatsUpdated, onRead, t.onNetworkConditionChanged)
+	remoteTrack = newRemoteTrack(t.Context(), t.base.client.log, t.reordered, track, minWait, maxWait, t.pliInterval, onPLI, stats, onStatsUpdated, onRead, t.base.pool, t.onNetworkConditionChanged)
 
 	switch quality {
 	case QualityHigh:
@@ -548,45 +550,39 @@ func (t *SimulcastTrack) AddRemoteTrack(track IRemoteTrack, minWait, maxWait tim
 		t.remoteTrackHigh = remoteTrack
 		t.mu.Unlock()
 
-		go func() {
-			ctx, cancel := context.WithCancel(remoteTrack.Context())
-			defer cancel()
-			<-ctx.Done()
+		remoteTrack.OnEnded(func() {
 			t.mu.Lock()
 			t.remoteTrackHigh = nil
 			t.mu.Unlock()
 			t.cancel()
-		}()
+			t.onEnded()
+		})
 
 	case QualityMid:
 		t.mu.Lock()
 		t.remoteTrackMid = remoteTrack
 		t.mu.Unlock()
 
-		go func() {
-			ctx, cancel := context.WithCancel(remoteTrack.Context())
-			defer cancel()
-			<-ctx.Done()
+		remoteTrack.OnEnded(func() {
 			t.mu.Lock()
 			t.remoteTrackMid = nil
 			t.mu.Unlock()
 			t.cancel()
-		}()
+			t.onEnded()
+		})
 
 	case QualityLow:
 		t.mu.Lock()
 		t.remoteTrackLow = remoteTrack
 		t.mu.Unlock()
 
-		go func() {
-			ctx, cancel := context.WithCancel(remoteTrack.Context())
-			defer cancel()
-			<-ctx.Done()
+		remoteTrack.OnEnded(func() {
 			t.mu.Lock()
 			t.remoteTrackLow = nil
 			t.mu.Unlock()
 			t.cancel()
-		}()
+			t.onEnded()
+		})
 	default:
 		t.base.client.log.Warnf("client: unknown track quality ", track.RID())
 		return nil
@@ -867,6 +863,22 @@ func (t *SimulcastTrack) IsRelay() bool {
 	return false
 }
 
+func (t *SimulcastTrack) OnEnded(f func()) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	t.onEndedCallbacks = append(t.onEndedCallbacks, f)
+}
+
+func (t *SimulcastTrack) onEnded() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	for _, f := range t.onEndedCallbacks {
+		f()
+	}
+}
+
 type SubscribeTrackRequest struct {
 	ClientID string `json:"client_id"`
 	TrackID  string `json:"track_id"`
@@ -891,7 +903,7 @@ func (t *trackList) Add(track ITrack) error {
 
 	id := track.ID()
 	if _, ok := t.tracks[id]; ok {
-		t.log.Warnf("tracklist: track already added ", id)
+		t.log.Warnf("tracklist: track  %s already added", id)
 		return ErrTrackExists
 	}
 

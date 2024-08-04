@@ -105,14 +105,6 @@ func NewDataChannelList(ctx context.Context) *DataChannelList {
 		mu:           sync.Mutex{},
 	}
 
-	go func() {
-		localCtx, cancel := context.WithCancel(ctx)
-		defer cancel()
-
-		<-localCtx.Done()
-		list.Clear()
-	}()
-
 	return list
 }
 

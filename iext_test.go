@@ -78,7 +78,7 @@ func TestManagerExtension(t *testing.T) {
 	roomID := roomManager.CreateRoomID()
 
 	roomOpts := DefaultRoomOptions()
-	roomOpts.Codecs = []string{webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
+	roomOpts.Codecs = &[]string{webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
 	room, err := roomManager.NewRoom(roomID, "test", "p2p", roomOpts)
 	require.NotNil(t, room, "room is nil")
 	require.NoError(t, err, "error creating room")
@@ -112,7 +112,7 @@ func TestExtension(t *testing.T) {
 
 	// create new room
 	roomOpts := DefaultRoomOptions()
-	roomOpts.Codecs = []string{webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
+	roomOpts.Codecs = &[]string{webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
 	testRoom, err := roomManager.NewRoom("test", "test", RoomTypeLocal, roomOpts)
 
 	ext := NewTestExtension()

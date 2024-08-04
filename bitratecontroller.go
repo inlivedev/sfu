@@ -215,7 +215,7 @@ func (bc *bitrateController) addClaims(clientTracks []iClientTrack) error {
 			if clientTrack.IsSimulcast() {
 				clientTrack.(*simulcastClientTrack).lastQuality.Store(uint32(trackQuality))
 			} else if clientTrack.IsScaleable() {
-				clientTrack.(*scaleableClientTrack).lastQuality = trackQuality
+				clientTrack.(*scaleableClientTrack).setLastQuality(trackQuality)
 			}
 
 			_, err := bc.addClaim(clientTrack, trackQuality)
@@ -244,20 +244,11 @@ func (bc *bitrateController) addClaim(clientTrack iClientTrack, quality QualityL
 		simulcast: clientTrack.IsSimulcast(),
 	}
 
-	go func() {
-		ctx, cancel := context.WithCancel(clientTrack.Context())
-		defer cancel()
-
-		<-ctx.Done()
-
+	clientTrack.OnEnded(func() {
 		bc.removeClaim(clientTrack.ID())
 
-		if bc.client.IsDebugEnabled() {
-			bc.client.log.Infof("clienttrack: track ", clientTrack.ID(), " claim removed")
-		}
-
 		clientTrack.Client().stats.removeSenderStats(clientTrack.ID())
-	}()
+	})
 
 	return bc.claims[clientTrack.ID()], nil
 }
@@ -267,7 +258,7 @@ func (bc *bitrateController) removeClaim(id string) {
 	defer bc.mu.Unlock()
 
 	if _, ok := bc.claims[id]; !ok {
-		bc.client.log.Errorf("bitrate: track ", id, " is not exists")
+		bc.client.log.Errorf("bitrate: track %s is not exists", id)
 		return
 	}
 
@@ -452,16 +443,16 @@ func (bc *bitrateController) onRemoteViewedSizeChanged(videoSize videoSize) {
 
 	claim, ok := bc.claims[videoSize.TrackID]
 	if !ok {
-		bc.client.log.Errorf("bitrate: track ", videoSize.TrackID, " is not exists")
+		bc.client.log.Errorf("bitrate: track %s is not exists", videoSize.TrackID)
 		return
 	}
 
 	if claim.track.Kind() != webrtc.RTPCodecTypeVideo {
-		bc.client.log.Errorf("bitrate: track ", videoSize.TrackID, " is not video track")
+		bc.client.log.Errorf("bitrate: track %s is not video track", videoSize.TrackID)
 		return
 	}
 
-	bc.client.log.Infof("bitrate: track ", videoSize.TrackID, " video size changed ", videoSize.Width, "x", videoSize.Height, "=", videoSize.Width*videoSize.Height, " pixels")
+	bc.client.log.Infof("bitrate: track %s video size changed  %dx%d=%d pixels", videoSize.TrackID, videoSize.Width, videoSize.Height, videoSize.Width*videoSize.Height)
 
 	// TODO: check if it is necessary to set max quality to none
 	if videoSize.Width == 0 || videoSize.Height == 0 {

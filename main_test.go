@@ -18,9 +18,9 @@ func TestMain(m *testing.M) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	os.Setenv("stderrthreshold", "WARNING")
+	os.Setenv("stderrthreshold", "DEBUG")
 	// os.Setenv("PIONS_LOG_TRACE", "sfu,vad,ice")
-	// os.Setenv("PIONS_LOG_DEBUG", "sfu,vad,ice")
+	os.Setenv("PIONS_LOG_DEBUG", "sfu,vad")
 	// os.Setenv("PIONS_LOG_INFO", "sfu,vad")
 	os.Setenv("PIONS_LOG_WARN", "sfu,vad")
 	os.Setenv("PIONS_LOG_ERROR", "sfu,vad")
