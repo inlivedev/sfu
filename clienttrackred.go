@@ -6,7 +6,6 @@ import (
 
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
-	"github.com/samespace/sfu/pkg/rtppool"
 )
 
 var (
