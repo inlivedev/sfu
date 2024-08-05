@@ -25,22 +25,62 @@ func (q QualityPreset) GetTID() uint8 {
 }
 
 type QualityPresets struct {
-	High QualityPreset `json:"high"`
-	Mid  QualityPreset `json:"mid"`
-	Low  QualityPreset `json:"low"`
+	High    QualityPreset `json:"high"`
+	HighMid QualityPreset `json:"highmid"`
+	HighLow QualityPreset `json:"highlow"`
+	Mid     QualityPreset `json:"mid"`
+	MidMid  QualityPreset `json:"midmid"`
+	MidLow  QualityPreset `json:"midlow"`
+	Low     QualityPreset `json:"low"`
+	LowMid  QualityPreset `json:"lowmid"`
+	LowLow  QualityPreset `json:"lowlow"`
 }
 
-func DefaultQualityPresets() *QualityPresets {
-	return &QualityPresets{
-		High: QualityPreset{
+func DefaultQualityLevels() []QualityLevel {
+	return []QualityLevel{
+		QualityHigh,
+		QualityMid,
+		QualityLow,
+		QualityLowMid,
+		QualityLowLow,
+	}
+}
+
+func DefaultQualityPresets() map[QualityLevel]QualityPreset {
+	return map[QualityLevel]QualityPreset{
+		QualityHigh: QualityPreset{
 			SID: 2,
 			TID: 2,
 		},
-		Mid: QualityPreset{
+		QualityHighMid: QualityPreset{
+			SID: 2,
+			TID: 1,
+		},
+		QualityHighLow: QualityPreset{
+			SID: 2,
+			TID: 0,
+		},
+		QualityMid: QualityPreset{
+			SID: 1,
+			TID: 2,
+		},
+		QualityMidMid: QualityPreset{
 			SID: 1,
 			TID: 1,
 		},
-		Low: QualityPreset{
+		QualityMidLow: QualityPreset{
+			SID: 1,
+			TID: 0,
+		},
+		QualityLow: QualityPreset{
+			SID: 0,
+			TID: 2,
+		},
+		QualityLowMid: QualityPreset{
+			SID: 0,
+			TID: 1,
+		},
+		QualityLowLow: QualityPreset{
 			SID: 0,
 			TID: 0,
 		},
@@ -49,31 +89,26 @@ func DefaultQualityPresets() *QualityPresets {
 
 type scaleableClientTrack struct {
 	*clientTrack
-	lastQuality    QualityLevel
-	maxQuality     QualityLevel
-	tid            uint8
-	sid            uint8
-	lastTimestamp  uint32
-	lastSequence   uint16
-	qualityPresets QualityPresets
-	init           bool
-	packetmap      *packetmap.Map
+	lastQuality   QualityLevel
+	maxQuality    QualityLevel
+	tid           uint8
+	sid           uint8
+	lastTimestamp uint32
+	lastSequence  uint16
+	init          bool
+	packetmap     *packetmap.Map
 }
 
 func newScaleableClientTrack(
 	c *Client,
 	t *Track,
-	qualityPresets QualityPresets,
 ) *scaleableClientTrack {
 
 	sct := &scaleableClientTrack{
-		clientTrack:    newClientTrack(c, t, false, nil),
-		qualityPresets: qualityPresets,
-		maxQuality:     QualityHigh,
-		lastQuality:    QualityHigh,
-		tid:            qualityPresets.High.TID,
-		sid:            qualityPresets.High.SID,
-		packetmap:      &packetmap.Map{},
+		clientTrack: newClientTrack(c, t, false, nil),
+		maxQuality:  QualityHigh,
+		lastQuality: QualityHigh,
+		packetmap:   &packetmap.Map{},
 	}
 
 	return sct
@@ -99,8 +134,6 @@ func (t *scaleableClientTrack) isKeyframe(vp9 *codecs.VP9Packet) bool {
 }
 
 func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
-	var qualityPreset IQualityPreset
-
 	var isLatePacket bool
 
 	vp9Packet := &codecs.VP9Packet{}
@@ -119,14 +152,7 @@ func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 		// return
 	}
 
-	switch quality {
-	case QualityHigh:
-		qualityPreset = t.qualityPresets.High
-	case QualityMid:
-		qualityPreset = t.qualityPresets.Mid
-	default:
-		qualityPreset = t.qualityPresets.Low
-	}
+	qualityPreset := qualityLevelToPreset(quality)
 
 	targetSID := qualityPreset.GetSID()
 	targetTID := qualityPreset.GetTID()
@@ -266,4 +292,10 @@ func (t *scaleableClientTrack) getQuality() QualityLevel {
 	}
 
 	return min(t.MaxQuality(), claim.Quality(), Uint32ToQualityLevel(t.client.quality.Load()))
+}
+
+func qualityLevelToPreset(lvl QualityLevel) (qualityPreset QualityPreset) {
+	qualityPresets := DefaultQualityPresets()
+
+	return qualityPresets[lvl]
 }

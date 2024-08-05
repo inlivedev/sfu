@@ -34,7 +34,6 @@ type remoteTrack struct {
 	onStatsUpdated        func(*stats.Stats)
 	packetBuffers         *packetBuffers
 	looping               bool
-	monitor               *networkmonitor.NetworkMonitor
 	log                   logging.LeveledLogger
 	rtppool               *rtppool.RTPPool
 }
@@ -56,7 +55,6 @@ func newRemoteTrack(ctx context.Context, log logging.LeveledLogger, useBuffer bo
 		onStatsUpdated:        onStatsUpdated,
 		onPLI:                 onPLI,
 		onRead:                onRead,
-		monitor:               networkmonitor.Default(),
 		log:                   log,
 		rtppool:               pool,
 	}
@@ -64,8 +62,6 @@ func newRemoteTrack(ctx context.Context, log logging.LeveledLogger, useBuffer bo
 	if useBuffer && track.Kind() == webrtc.RTPCodecTypeVideo {
 		rt.packetBuffers = newPacketBuffers(localctx, minWait, maxWait, true, log)
 	}
-
-	rt.monitor.OnNetworkConditionChanged(onNetworkConditionChanged)
 
 	if pliInterval > 0 {
 		rt.enableIntervalPLI(pliInterval)
@@ -146,8 +142,6 @@ func (t *remoteTrack) readRTP() {
 			} else {
 				t.onRead(p)
 			}
-
-			t.monitor.Add(p.SequenceNumber)
 
 			t.rtppool.PutPayload(buffer)
 			t.rtppool.PutPacket(p)

@@ -40,7 +40,7 @@ func TestLeaveRoom(t *testing.T) {
 	clients := make([]*Client, 0)
 
 	for i := 0; i < peerCount; i++ {
-		go func() {
+		go func(i int) {
 			pc, client, _, _ := CreatePeerPair(ctx, TestLogger, testRoom, DefaultTestIceServers(), fmt.Sprintf("peer-%d", i), true, false)
 
 			clients = append(clients, client)
@@ -48,7 +48,7 @@ func TestLeaveRoom(t *testing.T) {
 			pc.PeerConnection.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
 				trackChan <- true
 			})
-		}()
+		}(i)
 	}
 
 	timeout, cancelTimeout := context.WithTimeout(ctx, 60*time.Second)

@@ -386,9 +386,21 @@ func (t *simulcastClientTrack) ReceiveBitrateAtQuality(quality QualityLevel) uin
 	switch quality {
 	case QualityHigh:
 		remoteTrack = t.remoteTrack.remoteTrackHigh
+	case QualityHighMid:
+		remoteTrack = t.remoteTrack.remoteTrackHigh
+	case QualityHighLow:
+		remoteTrack = t.remoteTrack.remoteTrackHigh
 	case QualityMid:
 		remoteTrack = t.remoteTrack.remoteTrackMid
+	case QualityMidMid:
+		remoteTrack = t.remoteTrack.remoteTrackMid
+	case QualityMidLow:
+		remoteTrack = t.remoteTrack.remoteTrackMid
 	case QualityLow:
+		remoteTrack = t.remoteTrack.remoteTrackLow
+	case QualityLowMid:
+		remoteTrack = t.remoteTrack.remoteTrackLow
+	case QualityLowLow:
 		remoteTrack = t.remoteTrack.remoteTrackLow
 	}
 
@@ -402,7 +414,14 @@ func (t *simulcastClientTrack) ReceiveBitrateAtQuality(quality QualityLevel) uin
 		return 0
 	}
 
-	return bitrate
+	switch quality {
+	case QualityHighMid, QualityMidMid, QualityLowMid:
+		return bitrate / 2
+	case QualityHighLow, QualityMidLow, QualityLowLow:
+		return bitrate / 4
+	default:
+		return bitrate
+	}
 }
 
 func (t *simulcastClientTrack) Quality() QualityLevel {

@@ -3,6 +3,7 @@ package sfu
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync"
 	"time"
 
@@ -47,16 +48,40 @@ func (c *bitrateClaim) QualityLevelToBitrate(quality QualityLevel) uint32 {
 		switch quality {
 		case QualityLow:
 			return t.ReceiveBitrateAtQuality(QualityLow)
+		case QualityLowMid:
+			return t.ReceiveBitrateAtQuality(QualityLowMid)
+		case QualityLowLow:
+			return t.ReceiveBitrateAtQuality(QualityLowLow)
 		case QualityMid:
 			return t.ReceiveBitrateAtQuality(QualityMid)
+		case QualityMidMid:
+			return t.ReceiveBitrateAtQuality(QualityMidMid)
+		case QualityMidLow:
+			return t.ReceiveBitrateAtQuality(QualityMidLow)
 		case QualityHigh:
 			return t.ReceiveBitrateAtQuality(QualityHigh)
+		case QualityHighMid:
+			return t.ReceiveBitrateAtQuality(QualityHighMid)
+		case QualityHighLow:
+			return t.ReceiveBitrateAtQuality(QualityHighLow)
 		}
 	} else {
 		switch quality {
+		case QualityLowLow:
+			return c.track.ReceiveBitrate() / 16
+		case QualityLowMid:
+			return c.track.ReceiveBitrate() / 8
 		case QualityLow:
 			return c.track.ReceiveBitrate() / 4
+		case QualityMidLow:
+			return c.track.ReceiveBitrate() / 8
+		case QualityMidMid:
+			return c.track.ReceiveBitrate() / 4
 		case QualityMid:
+			return c.track.ReceiveBitrate() / 2
+		case QualityHighLow:
+			return c.track.ReceiveBitrate() / 4
+		case QualityHighMid:
 			return c.track.ReceiveBitrate() / 2
 		case QualityHigh:
 			return c.track.ReceiveBitrate()
@@ -72,13 +97,15 @@ type bitrateController struct {
 	lastBitrateAdjustmentTS time.Time
 	client                  *Client
 	claims                  map[string]*bitrateClaim
+	enabledQualityLevels    []QualityLevel
 }
 
-func newbitrateController(client *Client) *bitrateController {
+func newbitrateController(client *Client, qualityLevels []QualityLevel) *bitrateController {
 	bc := &bitrateController{
-		mu:     sync.RWMutex{},
-		client: client,
-		claims: make(map[string]*bitrateClaim, 0),
+		mu:                   sync.RWMutex{},
+		client:               client,
+		claims:               make(map[string]*bitrateClaim, 0),
+		enabledQualityLevels: qualityLevels,
 	}
 
 	go bc.loopMonitor()
@@ -179,8 +206,70 @@ func (bc *bitrateController) addAudioClaims(clientTracks []iClientTrack) (leftTr
 	return leftTracks, nil
 }
 
+func (bc *bitrateController) addStaticVideoClaims(clientTracks []iClientTrack) (leftTracks []iClientTrack, err error) {
+	errors := make([]error, 0)
+
+	leftTracks = make([]iClientTrack, 0)
+
+	for _, clientTrack := range clientTracks {
+		if clientTrack.Kind() == webrtc.RTPCodecTypeVideo && !clientTrack.IsSimulcast() && !clientTrack.IsScaleable() {
+			_, err := bc.addClaim(clientTrack, QualityHigh)
+
+			if err != nil {
+				errors = append(errors, err)
+			}
+		} else {
+			{
+				leftTracks = append(leftTracks, clientTrack)
+			}
+		}
+	}
+
+	if len(errors) > 0 {
+		return leftTracks, FlattenErrors(errors)
+	}
+
+	return leftTracks, nil
+}
+
+// calculate the quality level for each track based on the available bandwidth and max bitrate of tracks
+func (bc *bitrateController) qualityLevelPerTrack(clientTracks []iClientTrack) QualityLevel {
+	maxBitrate := uint32(0)
+
+	for _, clientTrack := range clientTracks {
+		if clientTrack.SendBitrate() > maxBitrate {
+			maxBitrate = clientTrack.ReceiveBitrate()
+		}
+	}
+
+	bandwidthLeft := bc.client.GetEstimatedBandwidth() - bc.totalReceivedBitrates()
+
+	bc.client.log.Debugf("bitratecontroller: bandwidth left %s", ThousandSeparator(int(bandwidthLeft)))
+
+	bandwidthPerTrack := bandwidthLeft / uint32(len(clientTracks))
+
+	bc.client.log.Debugf("bitratecontroller: bandwidth per track %s", ThousandSeparator(int(bandwidthPerTrack)))
+
+	if bandwidthPerTrack > maxBitrate {
+		return QualityHigh
+	} else if bandwidthPerTrack > maxBitrate/2 {
+		return QualityMid
+	} else if bandwidthPerTrack > maxBitrate/4 {
+		return QualityLow
+	} else if bandwidthPerTrack > maxBitrate/8 {
+		return QualityLowMid
+	} else {
+		return QualityLowLow
+	}
+}
+
 func (bc *bitrateController) addClaims(clientTracks []iClientTrack) error {
 	leftTracks, err := bc.addAudioClaims(clientTracks)
+	if err != nil {
+		return err
+	}
+
+	leftTracks, err = bc.addStaticVideoClaims(leftTracks)
 	if err != nil {
 		return err
 	}
@@ -188,12 +277,11 @@ func (bc *bitrateController) addClaims(clientTracks []iClientTrack) error {
 	errors := make([]error, 0)
 	claimed := 0
 
-	var trackQuality QualityLevel = QualityHigh
-	if len(leftTracks) > 4 {
-		trackQuality = QualityLow
-	} else if len(leftTracks) > 2 {
-		trackQuality = QualityMid
-	}
+	// calculate the available bandwidth after added all static tracks
+
+	var trackQuality QualityLevel = bc.qualityLevelPerTrack(leftTracks)
+
+	bc.client.log.Debugf("bitratecontroller: quality level per track %s", trackQuality)
 
 	for _, clientTrack := range leftTracks {
 		if clientTrack.Kind() == webrtc.RTPCodecTypeVideo {
@@ -206,10 +294,6 @@ func (bc *bitrateController) addClaims(clientTracks []iClientTrack) error {
 				continue
 			}
 			bc.mu.RUnlock()
-
-			if !clientTrack.IsSimulcast() && !clientTrack.IsScaleable() {
-				trackQuality = QualityHigh
-			}
 
 			// set last quality that use for requesting PLI after claim added
 			if clientTrack.IsSimulcast() {
@@ -286,6 +370,16 @@ func (bc *bitrateController) totalSentBitrates() uint32 {
 	return total
 }
 
+func (bc *bitrateController) totalReceivedBitrates() uint32 {
+	total := uint32(0)
+
+	for _, claim := range bc.Claims() {
+		total += claim.track.ReceiveBitrate()
+	}
+
+	return total
+}
+
 func (bc *bitrateController) canDecreaseBitrate() bool {
 	claims := bc.Claims()
 
@@ -316,7 +410,7 @@ func (bc *bitrateController) canIncreaseBitrate(availableBw uint32) bool {
 func (bc *bitrateController) MonitorBandwidth(estimator cc.BandwidthEstimator) {
 	estimator.OnTargetBitrateChange(func(bw int) {
 		// overshoot the bandwidth to allow test the bandwidth
-		bw = int(float64(bw) * 1.3)
+		// bw = int(float64(bw) * 1.3)
 
 		bc.mu.Lock()
 		bc.targetBitrate = uint32(bw)
@@ -343,7 +437,7 @@ func (bc *bitrateController) loopMonitor() {
 			bw := bc.targetBitrate
 			bc.mu.RUnlock()
 
-			// bc.client.log.Infof("bitratecontroller: available bandwidth ", ThousandSeparator(int(bw)), " total bitrate ", ThousandSeparator(int(totalSendBitrates)))
+			bc.client.log.Debugf("bitratecontroller: available bandwidth %s total bitrate %s", ThousandSeparator(int(bw)), ThousandSeparator(int(totalSendBitrates)))
 
 			availableBw := uint32(bw) - totalSendBitrates
 
@@ -357,7 +451,7 @@ func (bc *bitrateController) loopMonitor() {
 				continue
 			}
 
-			// bc.client.log.Infof("bitratecontroller: available bandwidth ", ThousandSeparator(int(bw)), " total bitrate ", ThousandSeparator(int(totalSendBitrates)))
+			bc.client.log.Debugf("bitratecontroller: available bandwidth %s total bitrate %s", ThousandSeparator(int(bw)), ThousandSeparator(int(totalSendBitrates)))
 
 			bc.fitBitratesToBandwidth(uint32(bw))
 
@@ -370,13 +464,18 @@ func (bc *bitrateController) loopMonitor() {
 
 }
 
+// TODO: use video size to prioritize the video. Higher resolution video should have higher priority
 func (bc *bitrateController) fitBitratesToBandwidth(bw uint32) {
 	totalSentBitrates := bc.totalSentBitrates()
 
 	claims := bc.Claims()
 	if totalSentBitrates > bw {
 		// reduce bitrates
-		for i := QualityHigh; i > QualityLow; i-- {
+		for i := QualityHigh; i > QualityLowLow; i-- {
+			if !slices.Contains(bc.enabledQualityLevels, QualityLevel(i)) {
+				continue
+			}
+
 			for _, claim := range claims {
 				if claim.IsAdjustable() &&
 					claim.Quality() == QualityLevel(i) {

@@ -97,7 +97,7 @@
             display: flex;
             flex-direction: column;
             justify-content: center;
-            align-items: center;    
+            align-items: center;
             overflow: hidden;
         }
 
@@ -198,7 +198,7 @@
                     reject(err)
                 };
             });
-           
+
             ws.onmessage = async function(e) {
                 const msg = JSON.parse(e.data);
                 try {
@@ -226,7 +226,7 @@
                         const trackType = {}
                         const tracksAdded = msg.data
                         Object.keys(tracksAdded).forEach(uid => {
-                            // we suppose to check tracksAdded[key].id and compare it with current track id from  navigator.mediaDevices.getUserMedia() to know the source is media 
+                            // we suppose to check tracksAdded[key].id and compare it with current track id from  navigator.mediaDevices.getUserMedia() to know the source is media
                             trackType[uid] = "media"
                         });
 
@@ -236,7 +236,7 @@
                         const subTracks = []
                         const availableTracks = msg.data
                         Object.keys(availableTracks).forEach(uid => {
-                            // we suppose to check tracksAdded[key].id and compare it with current track id from  navigator.mediaDevices.getUserMedia() to know the source is media 
+                            // we suppose to check tracksAdded[key].id and compare it with current track id from  navigator.mediaDevices.getUserMedia() to know the source is media
                             // ClientID string `json:"client_id"`
                             // StreamID string `json:"stream_id"`
                             // TrackID  string `json:"track_id"`
@@ -258,7 +258,7 @@
                         }
                     } else if(msg.type =='track_stats'){
                         updateTrackStats(msg.data)
-                    } 
+                    }
                 } catch (error) {
                     console.log(error);
                 }
@@ -295,7 +295,7 @@
 				const container = document.getElementById("container-"+streamid)
 				container.appendChild(vadEl)
 			}
-			
+
 			if (vad.data.audioLevels!==null){
 				vadEl.innerText = Math.floor(vad.data.audioLevels.reduce(function (sum, value) {
 									return sum + value.audioLevel;
@@ -315,74 +315,33 @@
             start('vp9')
         }
 
-		function setOpusSDP(sdp){
-			let fmtlineOpus = ''
 
-			let fmtNo = null
-			// find fmtline for opus from SDP
-			const opusFmtLines = sdp.match(/a=rtpmap:(\d+) opus\/(\d+)\/(\d+)/)
-			if (opusFmtLines) {
-				// extract only the first digit
-				const matchesNo = opusFmtLines[0].match(/(\d+)/)
-				if (matchesNo) {
-				fmtNo = matchesNo[0]
-				}
-			}
-
-			console.log('fmtNo', fmtNo)
-
-			// find fmtp line for opus from SDP
-			const opusFmtpLines = sdp.match(new RegExp(`a=fmtp:${fmtNo} .+`))
-			if (opusFmtpLines) {
-				fmtlineOpus = opusFmtpLines[0]
-			}
-
-			// check if DTX is enabled and if not, add it to the SDP
-			if (!fmtlineOpus.includes('usedtx=1')) {
-				fmtlineOpus += ';usedtx=1'
-			}
-
-			// check if inbandfec is enabled and if not, add it to the SDP
-			if (!fmtlineOpus.includes('useinbandfec=1')) {
-				fmtlineOpus += ';useinbandfec=1'
-			}
-
-			console.log('fmtlineOpus', fmtlineOpus)
-
-			// replace the old fmtp line with the new one
-			sdp = sdp.replace(
-				new RegExp(`a=fmtp:${fmtNo} .+`),
-				`a=fmtp:${fmtNo} ${fmtlineOpus}`
-			)
-
-			return sdp
-			}
 
         async function start(codec) {
             await startWs()
             document.getElementById("btnStart").disabled = true;
             document.getElementById("btnStartVP9").disabled = true;
-           
+
             const video =  {
-                width: {ideal: 1280}, 
-                height: {ideal: 720}, 
+                width: {ideal: 1280},
+                height: {ideal: 720},
                 advanced: [{
-                    frameRate: {min: 30}}, 
-                    {height: {min: 360}}, 
-                    {width: {min: 720}}, 
-                    {frameRate: {max: 30}}, 
-                    {width: {max: 1280}}, 
-                    {height: {max: 720}}, 
+                    frameRate: {min: 30}},
+                    {height: {min: 360}},
+                    {width: {min: 720}},
+                    {frameRate: {max: 30}},
+                    {width: {max: 1280}},
+                    {height: {max: 720}},
                     {aspectRatio: {exact: 1.77778}}
                 ]};
 
-           
+
             const constraints = {
                 audio: true,
                 video: video
                 // video: true
             };
-            
+
             const stream = await navigator.mediaDevices.getUserMedia(constraints)
 			const streamid = stream.id.replace('{','').replace('}','');
             let container = document.getElementById("container-"+streamid);
@@ -407,10 +366,10 @@
 
             peerConnection.ontrack = function(e) {
                 e.receiver.playoutDelayHint = 0.1;
-					
+
                 e.streams.forEach((stream) => {
                     console.log("ontrack", stream, e.track);
-                    
+
                     let container = document.getElementById("container-"+stream.id);
                     if (!container) {
                         container = document.createElement("div");
@@ -428,7 +387,7 @@
                         if (videoObserver!=null){
                             videoObserver.observe(remoteVideo)
                         }
-                        
+
                     }
 
                     if (e.track.kind == 'video'){
@@ -437,18 +396,18 @@
                         if (!stats){
                             const videoStats = document.createElement("div");
                             videoStats.className = "video-stats";
-                            
+
                             stats = document.createElement("div");
                             stats.appendChild(videoStats);
                             stats.className = "stats";
                             stats.id = "stats-"+trackid;
                             container.append(stats);
-                            
+
                         }
                     }
-                    
 
-                    
+
+
 
                     remoteVideo.srcObject =stream;
 
@@ -463,24 +422,24 @@
                     };
 
                 });
-                
+
             };
 
             // peerConnection.addTrack(stream.getAudioTracks()[0], stream);
             // peerConnection.addTrack(stream.getVideoTracks()[0], stream);
 
- 
+
             const audioTcvr= peerConnection.addTransceiver(stream.getAudioTracks()[0], {
                 direction: 'sendonly',
                 streams: [stream],
                 sendEncodings: [{priority: 'high'}],
             })
 
-            
+
 
             if(audioTcvr.setCodecPreferences != undefined && RTCRtpReceiver.getCapabilities != undefined){
                 const audioCodecs = RTCRtpReceiver.getCapabilities('audio').codecs;
-                
+
                 let audioCodecsPref = [];
                 if (red){
                     for(let i = 0; i < audioCodecs.length; i++){
@@ -490,23 +449,21 @@
                         }
                     }
                 }
-                
+
                 for(let i = 0; i < audioCodecs.length; i++){
                     if(audioCodecs[i].mimeType == "audio/opus"){
                         audioCodecsPref.push(audioCodecs[i]);
                     }
                 }
-                
+
                 audioTcvr.setCodecPreferences(audioCodecsPref);
             }
-        
+
 
 			setCodecPreferences(peerConnection,stream, codec, "L3T1")
 
             const offer=await peerConnection.createOffer()
 
-			// offer.sdp = setOpusSDP(offer.sdp)
-          
             await peerConnection.setLocalDescription(offer)
 
             ws.send(JSON.stringify({type:'offer',data:offer.sdp}));
@@ -517,7 +474,7 @@
                     ws.send(JSON.stringify({type:'candidate',data:e.candidate.candidate}));
                 }
             };
-            
+
             peerConnection.onconnectionstatechange = function(e) {
                 console.log("onconnectionstatechange", peerConnection.connectionState);
                 if (peerConnection.connectionState == "connected") {
@@ -532,10 +489,10 @@
 			const isSimulcast = document.querySelector("#simulcast").checked
 			const isSvc = document.querySelector("#svc").checked
 			const maxBitrate = document.querySelector("#maxBitrate").value
-			
+
             if (codec ==='vp9' && !isFirefox){
 				let videoTcvr = null
-				
+
 				console.log("simulcast: ",isSimulcast)
 
 				if (!isSimulcast){
@@ -547,10 +504,10 @@
 								maxBitrate: maxBitrate,
 								scalabilityMode: isSvc?scalabilityMode:'L1T1'
 							},
-						
+
 						]
 					})
-					
+
 				} else {
 					videoTcvr = peerConnection.addTransceiver(stream.getVideoTracks()[0], {
 					direction: 'sendonly',
@@ -610,10 +567,10 @@
 							{
 								maxBitrate: 1200*1000,
 							},
-						
+
 						]
 					})
-					
+
 				} else {
 					videoTcvr = peerConnection.addTransceiver(stream.getVideoTracks()[0], {
 					direction: 'sendonly',
@@ -688,7 +645,7 @@
                     await sleep(5000)
                     continue
                 }
-                
+
                 const ratio = bwController.available/totalBw
 
                 await sleep(5000)
@@ -716,7 +673,7 @@
 
                 `
                 trackStatsEl.innerHTML = statsText
-                
+
             })
             const receivedStats = trackStats.received_track_stats
        }
@@ -724,7 +681,7 @@
        const monitorStats =  async() => {
             while (peerConnection.connectionState =="connected") {
                 const stats = await peerConnection.getStats()
-                
+
                 const qualityLimitiationReason = {
                     cpu:false,
                     bandwidth:false,
@@ -781,7 +738,7 @@
                     }
 
                     if (report.type === 'outbound-rtp' && report.kind === 'video'){
-                        
+
 
                         if (report.rid === 'high' || typeof report.rid === 'undefined'){
                             if (prevHighBytesSent===0 || report.bytesSent == 0){
@@ -795,7 +752,7 @@
                                 highStatsEl.id = "stats-local-high"
                                 statsEl.append(highStatsEl)
                             }
-							
+
                             const deltaBytes = report.bytesSent - prevHighBytesSent
                             prevHighBytesSent = report.bytesSent
                             const bitrate = deltaBytes*8
@@ -819,14 +776,14 @@
 
                         }
 
-                        
+
 
                         if (report.rid === 'mid'){
                             if (prevMidBytesSent===0 || report.bytesSent == 0){
                                 prevMidBytesSent = report.bytesSent
                                 return
                             }
-                            
+
                             let midStatsEl = document.getElementById("stats-local-mid")
                             if (!midStatsEl){
                                 midStatsEl = document.createElement("div");
@@ -868,7 +825,7 @@
                                 lowStatsEl.id = "stats-local-low"
                                 statsEl.append(lowStatsEl)
                             }
-                        
+
 
                             const deltaBytes = report.bytesSent - prevLowBytesSent
                             prevLowBytesSent = report.bytesSent
@@ -892,8 +849,8 @@
                             }
 
                         }
-                        
-                       
+
+
                     }
                 })
 
@@ -923,7 +880,7 @@
 
                 await sleep(1000)
             }
-           
+
         };
 
         const toggleStats = () => {
@@ -972,7 +929,7 @@
             const container = document.createElement("div");
             container.className = "container";
             container.id = "container-"+videoTrack.id;
-            
+
             const video = document.createElement("video");
             video.id = "video-"+videoTrack.id;
             video.autoplay = true;
@@ -983,7 +940,7 @@
 
             videoTrack.addEventListener('ended', (e) => {
                 console.log('Video track ended, stopping screen sharing');
-				
+
                 document.querySelector('main').removeChild(container);
 
 				peerConnection.removeTrack(tscvVideo.sender);
@@ -1004,7 +961,7 @@
         const negotiate = async () => {
 			console.log("negotiate")
             const offer=await peerConnection.createOffer()
-          
+
             await peerConnection.setLocalDescription(offer)
             ws.send(JSON.stringify({type:'offer',data:offer.sdp}));
         }

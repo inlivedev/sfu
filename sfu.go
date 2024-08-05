@@ -115,7 +115,6 @@ type SFU struct {
 	mu                        sync.Mutex
 	onStop                    func()
 	pliInterval               time.Duration
-	qualityRef                QualityPresets
 	onTrackAvailableCallbacks []func(tracks []ITrack)
 	onClientRemovedCallbacks  []func(*Client)
 	onClientAddedCallbacks    []func(*Client)
@@ -131,13 +130,13 @@ type PublishedTrack struct {
 }
 
 type sfuOptions struct {
-	IceServers     []webrtc.ICEServer
-	Bitrates       BitrateConfigs
-	QualityPresets QualityPresets
-	Codecs         []string
-	PLIInterval    time.Duration
-	Log            logging.LeveledLogger
-	SettingEngine  *webrtc.SettingEngine
+	IceServers    []webrtc.ICEServer
+	Bitrates      BitrateConfigs
+	QualityLevels []QualityLevel
+	Codecs        []string
+	PLIInterval   time.Duration
+	Log           logging.LeveledLogger
+	SettingEngine *webrtc.SettingEngine
 }
 
 // @Param muxPort: port for udp mux
@@ -154,7 +153,6 @@ func New(ctx context.Context, opts sfuOptions) *SFU {
 		iceServers:                opts.IceServers,
 		bitrateConfigs:            opts.Bitrates,
 		pliInterval:               opts.PLIInterval,
-		qualityRef:                opts.QualityPresets,
 		relayTracks:               make(map[string]ITrack),
 		onTrackAvailableCallbacks: make([]func(tracks []ITrack), 0),
 		onClientRemovedCallbacks:  make([]func(*Client), 0),
@@ -412,13 +410,6 @@ func (s *SFU) PLIInterval() time.Duration {
 	defer s.mu.Unlock()
 
 	return s.pliInterval
-}
-
-func (s *SFU) QualityPresets() QualityPresets {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	return s.qualityRef
 }
 
 func (s *SFU) OnTracksAvailable(callback func(tracks []ITrack)) {

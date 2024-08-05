@@ -39,11 +39,17 @@ const (
 	ClientTypeUpBridge   = "upbridge"
 	ClientTypeDownBridge = "downbridge"
 
-	QualityAudioRed = 5
-	QualityAudio    = 4
-	QualityHigh     = 3
-	QualityMid      = 2
-	QualityLow      = 1
+	QualityAudioRed = 11
+	QualityAudio    = 10
+	QualityHigh     = 9
+	QualityHighMid  = 8
+	QualityHighLow  = 7
+	QualityMid      = 6
+	QualityMidMid   = 5
+	QualityMidLow   = 4
+	QualityLow      = 3
+	QualityLowMid   = 2
+	QualityLowLow   = 1
 	QualityNone     = 0
 
 	messageTypeVideoSize  = "video_size"
@@ -85,6 +91,7 @@ type ClientOptions struct {
 	ReorderPackets bool `json:"reorder_packets"`
 	Log            logging.LeveledLogger
 	settingEngine  webrtc.SettingEngine
+	qualityLevels  []QualityLevel
 }
 
 type internalDataMessage struct {
@@ -309,7 +316,9 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 	stateNew.Store(ClientStateNew)
 
 	var quality atomic.Uint32
+
 	quality.Store(QualityHigh)
+
 	client = &Client{
 		id:                             id,
 		name:                           name,
@@ -447,7 +456,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 
 	client.stats = newClientStats(client)
 
-	client.bitrateController = newbitrateController(client)
+	client.bitrateController = newbitrateController(client, opts.qualityLevels)
 
 	go func() {
 		estimator := <-estimatorChan
@@ -596,9 +605,6 @@ func (c *Client) ID() string {
 }
 
 func (c *Client) Name() string {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	return c.name
 }
 
@@ -610,8 +616,8 @@ func (c *Client) Context() context.Context {
 // If the event is not listened, the pending published tracks will be ignored and not published to other clients.
 // Once received, respond with `client.SetTracksSourceType()“ to confirm the source type of the pending published tracks
 func (c *Client) OnTracksAdded(callback func(addedTracks []ITrack)) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.muCallback.Lock()
+	defer c.muCallback.Unlock()
 
 	c.onTracksAdded = callback
 }
@@ -811,22 +817,12 @@ func (c *Client) setOpusSDP(sdp webrtc.SessionDescription) webrtc.SessionDescrip
 	return sdp
 }
 
-// OnBeforeRenegotiation event is called before the SFU is trying to renegotiate with the client.
-// The client must be listen for this event and set the callback to return true if the client is ready to renegotiate
-// and no current negotiation is in progress from the client.
-func (c *Client) OnBeforeRenegotiation(callback func(context.Context) bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	c.onBeforeRenegotiation = callback
-}
-
 // OnRenegotiation event is called when the SFU is trying to renegotiate with the client.
 // The callback will receive the SDP offer from the SFU that must be use to create the SDP answer from the client.
 // The SDP answer then can be passed back to the SFU using `client.CompleteNegotiation()` method.
 func (c *Client) OnRenegotiation(callback func(context.Context, webrtc.SessionDescription) (webrtc.SessionDescription, error)) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.muCallback.Lock()
+	defer c.muCallback.Unlock()
 
 	c.onRenegotiation = callback
 }
@@ -834,15 +830,12 @@ func (c *Client) OnRenegotiation(callback func(context.Context, webrtc.SessionDe
 func (c *Client) renegotiate() {
 	c.log.Debug("client: renegotiate")
 	c.negotiationNeeded.Store(true)
-	c.mu.Lock()
+
 	if c.onRenegotiation == nil {
 		c.log.Errorf("client: onRenegotiation is not set, can't do renegotiation")
-		c.mu.Unlock()
 
 		return
 	}
-
-	c.mu.Unlock()
 
 	if c.isInRemoteNegotiation.Load() {
 		c.log.Infof("sfu: renegotiation is delayed because the remote client %s is doing negotiation ", c.ID)
@@ -934,8 +927,8 @@ func (c *Client) renegotiate() {
 // and ready to receive the renegotiation from the client.
 // Use this event to trigger the client to do renegotiation if needed.
 func (c *Client) OnAllowedRemoteRenegotiation(callback func()) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.muCallback.Lock()
+	defer c.muCallback.Unlock()
 
 	c.onAllowedRemoteRenegotiation = callback
 }
@@ -1089,6 +1082,7 @@ func (c *Client) afterClosed() {
 	c.mu.Lock()
 	state := c.state.Load()
 	if state == ClientStateEnded {
+		c.mu.Unlock()
 		return
 	}
 	c.mu.Unlock()
@@ -1124,20 +1118,14 @@ func (c *Client) stop() error {
 	return nil
 }
 
-// End will wait until the client is completely stopped
-func (c *Client) End() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+// End the client connection and clean up the resources.
+func (c *Client) End() error {
+	err := c.stop()
+	if err != nil {
+		c.log.Errorf("client: error stop client %s", err.Error())
+	}
 
-	removed := make(chan bool)
-
-	c.sfu.OnClientRemoved(func(removedClient *Client) {
-		if removedClient.ID() == c.ID() {
-			removed <- true
-		}
-	})
-
-	<-removed
+	return err
 }
 
 func (c *Client) AddICECandidate(candidate webrtc.ICECandidateInit) error {
@@ -1199,8 +1187,8 @@ func (c *Client) onConnectionStateChanged(state webrtc.PeerConnectionState) {
 }
 
 func (c *Client) onJoined() {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+	c.muCallback.Lock()
+	defer c.muCallback.Unlock()
 
 	for _, callback := range c.onJoinedCallbacks {
 		callback()
@@ -1211,8 +1199,8 @@ func (c *Client) onJoined() {
 // This doesn't mean that the client's tracks are already published to the room.
 // This event can be use to track number of clients in the room.
 func (c *Client) OnJoined(callback func()) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.muCallback.Lock()
+	defer c.muCallback.Unlock()
 
 	c.onJoinedCallbacks = append(c.onJoinedCallbacks, callback)
 }
@@ -1220,15 +1208,15 @@ func (c *Client) OnJoined(callback func()) {
 // OnLeft event is called when the client is left from the room.
 // This event can be use to track number of clients in the room.
 func (c *Client) OnLeft(callback func()) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.muCallback.Lock()
+	defer c.muCallback.Unlock()
 
 	c.onLeftCallbacks = append(c.onLeftCallbacks, callback)
 }
 
 func (c *Client) onLeft() {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
+	c.muCallback.Lock()
+	defer c.muCallback.Unlock()
 
 	for _, callback := range c.onLeftCallbacks {
 		go callback()
@@ -1254,9 +1242,8 @@ func (c *Client) startIdleTimeout(timeout time.Duration) {
 		c.idleTimeoutCancel()
 	}
 
-	c.idleTimeoutContext, c.idleTimeoutCancel = context.WithTimeout(c.context, timeout)
-
 	go func() {
+		c.idleTimeoutContext, c.idleTimeoutCancel = context.WithTimeout(c.context, timeout)
 		<-c.idleTimeoutContext.Done()
 		if c == nil || c.idleTimeoutContext == nil || c.idleTimeoutCancel == nil {
 			return
@@ -1297,15 +1284,17 @@ func (c *Client) PeerConnection() *PeerConnection {
 
 func (c *Client) updateSenderStats(sender *webrtc.RTPSender, ssrc webrtc.SSRC) {
 	c.mu.RLock()
-	defer c.mu.RUnlock()
 
 	if sender == nil ||
 		c.statsGetter == nil ||
 		c.stats == nil ||
 		sender.Track() == nil {
 
+		c.mu.RUnlock()
 		return
 	}
+
+	c.mu.RUnlock()
 
 	stats := c.statsGetter.Get(uint32(ssrc))
 	if stats != nil {

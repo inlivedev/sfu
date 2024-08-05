@@ -208,7 +208,6 @@ func (v *Interceptor) getAudioLevel(ssrc uint32, header *rtp.Header) rtp.AudioLe
 
 	ext := header.GetExtension(headerID)
 	if ext == nil {
-		v.log.Debug("vad: audio level extension not found")
 		return audioLevel
 	}
 	_ = audioLevel.Unmarshal(ext)
