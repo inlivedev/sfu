@@ -146,7 +146,7 @@ type Client struct {
 	isInRemoteNegotiation *atomic.Bool
 	idleTimeoutContext    context.Context
 	idleTimeoutCancel     context.CancelFunc
-	mu                    sync.RWMutex
+	mu                    sync.Mutex
 	peerConnection        *PeerConnection
 	// pending received tracks are the remote tracks from other clients that waiting to add when the client is connected
 	pendingReceivedTracks []SubscribeTrackRequest
@@ -329,7 +329,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		isInRenegotiation:              &atomic.Bool{},
 		isInRemoteNegotiation:          &atomic.Bool{},
 		dataChannels:                   NewDataChannelList(localCtx),
-		mu:                             sync.RWMutex{},
+		mu:                             sync.Mutex{},
 		negotiationNeeded:              &atomic.Bool{},
 		peerConnection:                 newPeerConnection(peerConnection),
 		state:                          &stateNew,
@@ -1283,21 +1283,17 @@ func (c *Client) PeerConnection() *PeerConnection {
 }
 
 func (c *Client) updateSenderStats(sender *webrtc.RTPSender, ssrc webrtc.SSRC) {
-	c.mu.RLock()
+	c.mu.Lock()
+	defer c.mu.Unlock()
 
-	if sender == nil ||
-		c.statsGetter == nil ||
-		c.stats == nil ||
-		sender.Track() == nil {
+	if c.statsGetter == nil ||
+		c.stats == nil {
 
-		c.mu.RUnlock()
 		return
 	}
 
-	c.mu.RUnlock()
-
 	stats := c.statsGetter.Get(uint32(ssrc))
-	if stats != nil {
+	if stats != nil && sender != nil && sender.Track() != nil {
 		c.stats.SetSender(sender.Track().ID(), *stats)
 	}
 }
