@@ -277,6 +277,10 @@ func (bc *bitrateController) addClaims(clientTracks []iClientTrack) error {
 	errors := make([]error, 0)
 	claimed := 0
 
+	if len(leftTracks) == 0 {
+		return nil
+	}
+
 	// calculate the available bandwidth after added all static tracks
 
 	var trackQuality QualityLevel = bc.qualityLevelPerTrack(leftTracks)
@@ -436,6 +440,10 @@ func (bc *bitrateController) loopMonitor() {
 			totalSendBitrates := bc.totalSentBitrates()
 			bw := bc.targetBitrate
 			bc.mu.RUnlock()
+
+			if totalSendBitrates == 0 {
+				continue
+			}
 
 			bc.client.log.Debugf("bitratecontroller: available bandwidth %s total bitrate %s", ThousandSeparator(int(bw)), ThousandSeparator(int(totalSendBitrates)))
 
