@@ -245,8 +245,16 @@ func (bc *bitrateController) qualityLevelPerTrack(clientTracks []iClientTrack) Q
 	}
 
 	bw := bc.client.GetEstimatedBandwidth()
+
 	received := bc.totalReceivedBitrates()
-	bandwidthLeft := bw - received
+
+	var bandwidthLeft uint32
+
+	if bw < received {
+		bandwidthLeft = bw
+	} else {
+		bandwidthLeft = bw - received
+	}
 
 	bc.client.log.Debugf("bitratecontroller: estimated bandwidth %s, received %s, bandwidth left %s", ThousandSeparator(int(bw)), ThousandSeparator(int(received)), ThousandSeparator(int(bandwidthLeft)))
 
@@ -444,7 +452,12 @@ func (bc *bitrateController) loopMonitor() {
 
 			bc.client.log.Debugf("bitratecontroller: available bandwidth %s total bitrate %s", ThousandSeparator(int(bw)), ThousandSeparator(int(totalSendBitrates)))
 
-			availableBw := uint32(bw) - totalSendBitrates
+			var availableBw uint32
+			if bw < totalSendBitrates {
+				availableBw = 0
+			} else {
+				availableBw = bw - totalSendBitrates
+			}
 
 			if totalSendBitrates < uint32(bw) {
 				needAdjustment = bc.canIncreaseBitrate(availableBw)
@@ -456,7 +469,7 @@ func (bc *bitrateController) loopMonitor() {
 				continue
 			}
 
-			bc.client.log.Debugf("bitratecontroller: available bandwidth %s total bitrate %s", ThousandSeparator(int(bw)), ThousandSeparator(int(totalSendBitrates)))
+			bc.client.log.Debugf("bitratecontroller: available bandwidth %s total send bitrate %s", ThousandSeparator(int(bw)), ThousandSeparator(int(totalSendBitrates)))
 
 			bc.fitBitratesToBandwidth(uint32(bw))
 
