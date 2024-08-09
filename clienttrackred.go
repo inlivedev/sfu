@@ -50,21 +50,21 @@ func (t *clientTrackRed) push(p *rtp.Packet, _ QualityLevel) {
 		primaryPacket.Payload = t.getPrimaryEncoding(p.Payload[:len(p.Payload)])
 		primaryPacket.Header = p.Header
 		if err := t.localTrack.WriteRTP(primaryPacket); err != nil {
-			t.client.log.Errorf("clienttrack: error on write primary rtp", err)
+			t.client.log.Tracef("clienttrack: error on write primary rtp %s", err.Error())
 		}
 		t.remoteTrack.rtppool.PutPacket(primaryPacket)
 		return
 	}
 
 	if err := t.localTrack.WriteRTP(p); err != nil {
-		t.client.log.Errorf("clienttrack: error on write rtp", err)
+		t.client.log.Errorf("clienttrack: error on write rtp %s", err.Error())
 	}
 }
 
 func (t *clientTrackRed) getPrimaryEncoding(payload []byte) []byte {
 	primaryPayload, err := extractPrimaryEncodingForRED(payload)
 	if err != nil {
-		t.client.log.Errorf("clienttrack: error on extract primary encoding for red", err)
+		t.client.log.Tracef("clienttrack: error on extract primary encoding for red %s", err.Error())
 		return payload
 	}
 
