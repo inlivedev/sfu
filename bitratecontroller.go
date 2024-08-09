@@ -244,9 +244,11 @@ func (bc *bitrateController) qualityLevelPerTrack(clientTracks []iClientTrack) Q
 		}
 	}
 
-	bandwidthLeft := bc.client.GetEstimatedBandwidth() - bc.totalReceivedBitrates()
+	bw := bc.client.GetEstimatedBandwidth()
+	received := bc.totalReceivedBitrates()
+	bandwidthLeft := bw - received
 
-	bc.client.log.Debugf("bitratecontroller: bandwidth left %s", ThousandSeparator(int(bandwidthLeft)))
+	bc.client.log.Debugf("bitratecontroller: estimated bandwidth %s, received %s, bandwidth left %s", ThousandSeparator(int(bw)), ThousandSeparator(int(received)), ThousandSeparator(int(bandwidthLeft)))
 
 	bandwidthPerTrack := bandwidthLeft / uint32(len(clientTracks))
 
@@ -287,7 +289,7 @@ func (bc *bitrateController) addClaims(clientTracks []iClientTrack) error {
 
 	var trackQuality QualityLevel = bc.qualityLevelPerTrack(leftTracks)
 
-	bc.client.log.Debugf("bitratecontroller: quality level per track %s for  total %d tracks", trackQuality, len(leftTracks))
+	bc.client.log.Debugf("bitratecontroller: quality level per track is %d for  total %d tracks", trackQuality, len(leftTracks))
 
 	for _, clientTrack := range leftTracks {
 		if clientTrack.Kind() == webrtc.RTPCodecTypeVideo {
