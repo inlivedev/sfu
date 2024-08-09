@@ -464,8 +464,6 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		defer client.mu.Unlock()
 
 		client.estimator = estimator
-
-		client.bitrateController.MonitorBandwidth(estimator)
 	}()
 
 	// Set a handler for when a new remote track starts, this just distributes all our packets
@@ -1424,6 +1422,10 @@ func (c *Client) SetQuality(quality QualityLevel) {
 func (c *Client) GetEstimatedBandwidth() uint32 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+
+	if c.estimator == nil {
+		return c.sfu.bitrateConfigs.InitialBandwidth
+	}
 
 	return uint32(c.estimator.GetTargetBitrate())
 }

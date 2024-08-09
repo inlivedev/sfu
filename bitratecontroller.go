@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pion/interceptor/pkg/cc"
 	"github.com/pion/webrtc/v4"
 )
 
@@ -97,7 +96,6 @@ func (c *bitrateClaim) QualityLevelToBitrate(quality QualityLevel) uint32 {
 
 type bitrateController struct {
 	mu                      sync.RWMutex
-	targetBitrate           uint32
 	lastBitrateAdjustmentTS time.Time
 	client                  *Client
 	claims                  map[string]*bitrateClaim
@@ -419,17 +417,6 @@ func (bc *bitrateController) canIncreaseBitrate(availableBw uint32) bool {
 	return false
 }
 
-func (bc *bitrateController) MonitorBandwidth(estimator cc.BandwidthEstimator) {
-	estimator.OnTargetBitrateChange(func(bw int) {
-		// overshoot the bandwidth to allow test the bandwidth
-		// bw = int(float64(bw) * 1.3)
-
-		bc.mu.Lock()
-		bc.targetBitrate = uint32(bw)
-		bc.mu.Unlock()
-	})
-}
-
 func (bc *bitrateController) loopMonitor() {
 	ctx, cancel := context.WithCancel(bc.client.Context())
 	defer cancel()
@@ -446,7 +433,7 @@ func (bc *bitrateController) loopMonitor() {
 
 			bc.mu.RLock()
 			totalSendBitrates := bc.totalSentBitrates()
-			bw := bc.targetBitrate
+			bw := bc.client.GetEstimatedBandwidth()
 			bc.mu.RUnlock()
 
 			if totalSendBitrates == 0 {
