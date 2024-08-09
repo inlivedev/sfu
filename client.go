@@ -1057,8 +1057,14 @@ func (c *Client) enableReportAndStats(rtpSender *webrtc.RTPSender, track iClient
 		defer tick.Stop()
 
 		defer cancel()
+
+		clientCtx, cancelClientCtx := context.WithCancel(c.context)
+		defer cancelClientCtx()
+
 		for {
 			select {
+			case <-clientCtx.Done():
+				return
 			case <-localCtx.Done():
 				return
 			case <-tick.C:
