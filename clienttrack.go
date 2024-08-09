@@ -132,6 +132,16 @@ func (t *clientTrack) push(p *rtp.Packet, _ QualityLevel) {
 		// do something here with audio level
 	}
 
+	// if video quality is none we need to send blank frame
+	// make sure the player is paused when the quality is none.
+	// quality none only possible when the video is not displayed
+	if t.Kind() == webrtc.RTPCodecTypeVideo {
+		quality := t.getQuality()
+		if quality == QualityNone {
+			p.Payload = p.Payload[:0]
+		}
+	}
+
 	if err := t.localTrack.WriteRTP(p); err != nil {
 		t.client.log.Errorf("clienttrack: error on write rtp", err)
 	}
@@ -198,4 +208,21 @@ func (t *clientTrack) onEnded() {
 	for _, f := range t.onTrackEndedCallbacks {
 		f()
 	}
+}
+
+func (t *clientTrack) getQuality() QualityLevel {
+	claim := t.client.bitrateController.GetClaim(t.ID())
+
+	if claim == nil {
+		t.client.log.Warnf("scalabletrack: claim is nil")
+		return QualityNone
+	}
+
+	return min(t.MaxQuality(), claim.Quality(), Uint32ToQualityLevel(t.client.quality.Load()))
+}
+
+func qualityLevelToPreset(lvl QualityLevel) (qualityPreset QualityPreset) {
+	qualityPresets := DefaultQualityPresets()
+
+	return qualityPresets[lvl]
 }

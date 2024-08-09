@@ -449,12 +449,30 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 				case "low":
 					log.Println("switch to low quality")
 					client.SetQuality(sfu.QualityLow)
+				case "lowmid":
+					log.Println("switch to low mid quality")
+					client.SetQuality(sfu.QualityLowMid)
+				case "lowlow":
+					log.Println("switch to low low quality")
+					client.SetQuality(sfu.QualityLowLow)
 				case "mid":
 					log.Println("switch to mid quality")
 					client.SetQuality(sfu.QualityMid)
+				case "midmid":
+					log.Println("switch to mid mid quality")
+					client.SetQuality(sfu.QualityMidMid)
+				case "midlow":
+					log.Println("switch to mid low quality")
+					client.SetQuality(sfu.QualityMidLow)
 				case "high":
 					log.Println("switch to high quality")
 					client.SetQuality(sfu.QualityHigh)
+				case "highmid":
+					log.Println("switch to high mid quality")
+					client.SetQuality(sfu.QualityHighMid)
+				case "highlow":
+					log.Println("switch to high low quality")
+					client.SetQuality(sfu.QualityHighLow)
 				case "none":
 					log.Println("switch to high quality")
 					client.SetQuality(sfu.QualityNone)

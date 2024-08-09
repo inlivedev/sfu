@@ -460,7 +460,7 @@
             }
 
 
-			setCodecPreferences(peerConnection,stream, codec, "L3T1")
+			setCodecPreferences(peerConnection,stream, codec, "L3T3_KEY")
 
             const offer=await peerConnection.createOffer()
 
@@ -1001,8 +1001,14 @@
         <button id="btnStats">Toggle Stats</button>
         <span><label>Quality</label> <select id="selectQuality">
             <option selected value="high">high</option>
+			<option value="highmid">high-mid</option>
+            <option value="highlow">high-low</option>
             <option value="mid">mid</option>
+            <option value="midmid">mid-mid</option>
+            <option value="midlow">mid-low</option>
             <option value="low">low</option>
+            <option value="lowmid">low-mid</option>
+			<option value="lowlow">low-low</option>
             <option value="none">none</option>
         </select></span>
 

@@ -16,6 +16,10 @@ var (
 	ErrorInsufficientBandwidth = errors.New("bwcontroller: bandwidth is insufficient")
 )
 
+const (
+	DefaultReceiveBitrate = 1_500_000
+)
+
 type bitrateClaim struct {
 	mu        sync.RWMutex
 	track     iClientTrack
@@ -378,7 +382,11 @@ func (bc *bitrateController) totalReceivedBitrates() uint32 {
 	total := uint32(0)
 
 	for _, claim := range bc.Claims() {
-		total += claim.track.ReceiveBitrate()
+		bitrate := claim.track.ReceiveBitrate()
+		if bitrate == 0 {
+			bitrate = DefaultReceiveBitrate
+		}
+		total += bitrate
 	}
 
 	return total
@@ -559,17 +567,17 @@ func (bc *bitrateController) onRemoteViewedSizeChanged(videoSize videoSize) {
 		return
 	}
 
-	bc.client.log.Infof("bitrate: track %s video size changed  %dx%d=%d pixels", videoSize.TrackID, videoSize.Width, videoSize.Height, videoSize.Width*videoSize.Height)
+	bc.client.log.Debugf("bitrate: track %s video size changed  %dx%d=%d pixels", videoSize.TrackID, videoSize.Width, videoSize.Height, videoSize.Width*videoSize.Height)
 
 	// TODO: check if it is necessary to set max quality to none
 	if videoSize.Width == 0 || videoSize.Height == 0 {
-		bc.client.log.Infof("bitrate: track  %s video size is 0, set max quality to low", videoSize.TrackID)
+		bc.client.log.Debugf("bitrate: track  %s video size is 0, set max quality to none", videoSize.TrackID)
 		claim.track.SetMaxQuality(QualityNone)
 		return
 	}
 
 	if videoSize.Width*videoSize.Height < bc.client.sfu.bitrateConfigs.VideoMidPixels {
-		bc.client.log.Infof("bitrate: track %s video size is low, set max quality to low", videoSize.TrackID)
+		bc.client.log.Debugf("bitrate: track %s video size is low, set max quality to low", videoSize.TrackID)
 		claim.track.SetMaxQuality(QualityLow)
 	} else if videoSize.Width*videoSize.Height < bc.client.sfu.bitrateConfigs.VideoHighPixels {
 		bc.client.log.Infof("bitrate: track %s video size is mid, set max quality to mid", videoSize.TrackID)

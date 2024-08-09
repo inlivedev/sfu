@@ -1,6 +1,8 @@
 package sfu
 
 import (
+	"time"
+
 	"github.com/inlivedev/sfu/pkg/packetmap"
 	"github.com/pion/rtp"
 	"github.com/pion/rtp/codecs"
@@ -84,19 +86,25 @@ func DefaultQualityPresets() map[QualityLevel]QualityPreset {
 			SID: 0,
 			TID: 0,
 		},
+		QualityNone: QualityPreset{
+			SID: 0,
+			TID: 0,
+		},
 	}
 }
 
 type scaleableClientTrack struct {
 	*clientTrack
-	lastQuality   QualityLevel
-	maxQuality    QualityLevel
-	tid           uint8
-	sid           uint8
-	lastTimestamp uint32
-	lastSequence  uint16
-	init          bool
-	packetmap     *packetmap.Map
+	targetQuality      QualityLevel
+	lastQuality        QualityLevel
+	maxQuality         QualityLevel
+	tid                uint8
+	sid                uint8
+	lastTimestamp      uint32
+	lastBlankframeSent time.Time
+	lastSequence       uint16
+	init               bool
+	packetmap          *packetmap.Map
 }
 
 func newScaleableClientTrack(
@@ -144,13 +152,6 @@ func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 	}
 
 	quality := t.getQuality()
-	if quality == QualityNone {
-		// TODO: need to do if
-		// _ = t.packetmap.Drop(p.SequenceNumber, vp9Packet.PictureID)
-
-		// t.client.log.Infof("scalabletrack: packet ", p.SequenceNumber, " is dropped because of quality none")
-		// return
-	}
 
 	qualityPreset := qualityLevelToPreset(quality)
 
@@ -161,8 +162,6 @@ func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 		t.init = true
 		t.sid = targetSID
 		t.tid = targetTID
-	} else {
-		isLatePacket = IsRTPPacketLate(p.SequenceNumber, t.lastSequence)
 	}
 
 	t.lastSequence = p.Header.SequenceNumber
@@ -171,13 +170,13 @@ func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 	currentSID := t.sid
 
 	// check if possible to scale up/down temporal layer
-	if t.tid < targetTID && !isLatePacket {
+	if t.tid < targetTID {
 		if vp9Packet.U && vp9Packet.B && currentTID < vp9Packet.TID && vp9Packet.TID <= targetTID {
 			// scale temporal up
 			t.tid = vp9Packet.TID
 			currentTID = t.tid
 		}
-	} else if t.tid > targetTID && !isLatePacket {
+	} else if t.tid > targetTID {
 		if vp9Packet.E {
 			// scale temporal down
 			t.tid = vp9Packet.TID
@@ -186,7 +185,7 @@ func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 
 	// check if possible to scale up spatial layer
 
-	if currentSID < targetSID && !isLatePacket {
+	if currentSID < targetSID {
 		if !vp9Packet.P && vp9Packet.B && currentSID < vp9Packet.SID && vp9Packet.SID <= targetSID {
 			// scale spatial up
 			t.sid = vp9Packet.SID
@@ -209,8 +208,6 @@ func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 		if ok {
 			return
 		}
-		t.client.log.Infof("scalabletrack: packet ", p.SequenceNumber, " cannot be dropped")
-
 	}
 
 	// mark packet as a last spatial layer packet
@@ -224,6 +221,13 @@ func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 	}
 
 	p.SequenceNumber = newseqno
+
+	// if quality is none we need to send blank frame
+	// make sure the player is paused when the quality is none.
+	// quality none only possible when the video is not displayed
+	if quality == QualityNone {
+		p.Payload = p.Payload[:0]
+	}
 
 	t.send(p)
 }
@@ -281,21 +285,4 @@ func (t *scaleableClientTrack) IsScaleable() bool {
 
 func (t *scaleableClientTrack) RequestPLI() {
 	go t.remoteTrack.sendPLI()
-}
-
-func (t *scaleableClientTrack) getQuality() QualityLevel {
-	claim := t.client.bitrateController.GetClaim(t.ID())
-
-	if claim == nil {
-		t.client.log.Warnf("scalabletrack: claim is nil")
-		return QualityNone
-	}
-
-	return min(t.MaxQuality(), claim.Quality(), Uint32ToQualityLevel(t.client.quality.Load()))
-}
-
-func qualityLevelToPreset(lvl QualityLevel) (qualityPreset QualityPreset) {
-	qualityPresets := DefaultQualityPresets()
-
-	return qualityPresets[lvl]
 }
