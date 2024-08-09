@@ -246,6 +246,7 @@ func (t *Track) subscribe(c *Client) iClientTrack {
 	} else if t.Kind() == webrtc.RTPCodecTypeAudio && t.PayloadType() == 63 {
 		t.base.client.log.Infof("track: red enabled", c.receiveRED)
 
+		// TODO: detect if client supports RED and it's audio then send RED encoded packets
 		ct = newClientTrackRed(c, t)
 	} else {
 		ct = newClientTrack(c, t, t.IsScreen(), nil)

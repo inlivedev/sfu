@@ -251,7 +251,7 @@ func (bc *bitrateController) qualityLevelPerTrack(clientTracks []iClientTrack) Q
 	var bandwidthLeft uint32
 
 	if bw < received {
-		bandwidthLeft = bw
+		bandwidthLeft = 0
 	} else {
 		bandwidthLeft = bw - received
 	}
