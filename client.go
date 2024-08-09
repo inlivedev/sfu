@@ -1022,16 +1022,20 @@ func (c *Client) enableReportAndStats(rtpSender *webrtc.RTPSender, track iClient
 	ssrc := rtpSender.GetParameters().Encodings[0].SSRC
 	go func() {
 		localCtx, cancel := context.WithCancel(track.Context())
-
 		defer cancel()
+
+		clientCtx, cancelClientCtx := context.WithCancel(c.context)
+		defer cancelClientCtx()
 
 		for {
 			select {
+			case <-clientCtx.Done():
+				return
 			case <-localCtx.Done():
 				return
 			default:
 				rtcpPackets, _, err := rtpSender.ReadRTCP()
-				if err != nil && err == io.ErrClosedPipe {
+				if err != nil && (err == io.EOF || err == io.ErrClosedPipe) {
 					return
 				}
 

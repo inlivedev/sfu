@@ -287,7 +287,7 @@ func (bc *bitrateController) addClaims(clientTracks []iClientTrack) error {
 
 	var trackQuality QualityLevel = bc.qualityLevelPerTrack(leftTracks)
 
-	bc.client.log.Debugf("bitratecontroller: quality level per track %s", trackQuality)
+	bc.client.log.Debugf("bitratecontroller: quality level per track %s for  total %d tracks", trackQuality, len(leftTracks))
 
 	for _, clientTrack := range leftTracks {
 		if clientTrack.Kind() == webrtc.RTPCodecTypeVideo {
