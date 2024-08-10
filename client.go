@@ -205,6 +205,7 @@ func DefaultClientOptions() ClientOptions {
 		JitterBufferMinWait:  20 * time.Millisecond,
 		JitterBufferMaxWait:  150 * time.Millisecond,
 		ReorderPackets:       false,
+		Log:                  logging.NewDefaultLoggerFactory().NewLogger("sfu"),
 	}
 }
 

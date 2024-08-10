@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pion/logging"
 	"github.com/pion/webrtc/v4"
 )
 
@@ -107,6 +108,7 @@ type bitrateController struct {
 	client                  *Client
 	claims                  map[string]*bitrateClaim
 	enabledQualityLevels    []QualityLevel
+	log                     logging.LeveledLogger
 }
 
 func newbitrateController(client *Client, qualityLevels []QualityLevel) *bitrateController {
@@ -115,6 +117,7 @@ func newbitrateController(client *Client, qualityLevels []QualityLevel) *bitrate
 		client:               client,
 		claims:               make(map[string]*bitrateClaim, 0),
 		enabledQualityLevels: qualityLevels,
+		log:                  logging.NewDefaultLoggerFactory().NewLogger("bitratecontroller"),
 	}
 
 	go bc.loopMonitor()
@@ -263,11 +266,11 @@ func (bc *bitrateController) qualityLevelPerTrack(clientTracks []iClientTrack) Q
 		bandwidthLeft = bw - received
 	}
 
-	bc.client.log.Debugf("bitratecontroller: estimated bandwidth %s, received %s, bandwidth left %s", ThousandSeparator(int(bw)), ThousandSeparator(int(received)), ThousandSeparator(int(bandwidthLeft)))
+	bc.log.Debugf("bitratecontroller: estimated bandwidth %s, received %s, bandwidth left %s", ThousandSeparator(int(bw)), ThousandSeparator(int(received)), ThousandSeparator(int(bandwidthLeft)))
 
 	bandwidthPerTrack := bandwidthLeft / uint32(len(clientTracks))
 
-	bc.client.log.Debugf("bitratecontroller: bandwidth per track %s", ThousandSeparator(int(bandwidthPerTrack)))
+	bc.log.Debugf("bitratecontroller: bandwidth per track %s", ThousandSeparator(int(bandwidthPerTrack)))
 
 	if bandwidthPerTrack > maxBitrate {
 		return QualityHigh
@@ -304,12 +307,12 @@ func (bc *bitrateController) addClaims(clientTracks []iClientTrack) error {
 
 	var trackQuality QualityLevel = bc.qualityLevelPerTrack(leftTracks)
 
-	bc.client.log.Debugf("bitratecontroller: quality level per track is %d for  total %d tracks", trackQuality, len(leftTracks))
+	bc.log.Debugf("bitratecontroller: quality level per track is %d for  total %d tracks", trackQuality, len(leftTracks))
 
 	for _, clientTrack := range leftTracks {
 		if clientTrack.Kind() == webrtc.RTPCodecTypeVideo {
 
-			// bc.client.log.Infof("bitratecontroller: track ", clientTrack.ID(), " quality ", trackQuality)
+			// bc.log.Infof("bitratecontroller: track ", clientTrack.ID(), " quality ", trackQuality)
 			bc.mu.RLock()
 			if _, ok := bc.claims[clientTrack.ID()]; ok {
 				errors = append(errors, ErrAlreadyClaimed)
@@ -365,7 +368,7 @@ func (bc *bitrateController) removeClaim(id string) {
 	defer bc.mu.Unlock()
 
 	if _, ok := bc.claims[id]; !ok {
-		bc.client.log.Errorf("bitrate: track %s is not exists", id)
+		bc.log.Errorf("bitrate: track %s is not exists", id)
 		return
 	}
 
@@ -424,10 +427,17 @@ func (bc *bitrateController) canIncreaseBitrate(availableBw uint32) bool {
 	claims := bc.Claims()
 
 	for _, claim := range claims {
-		if claim.IsAdjustable() &&
-			claim.Quality() < claim.track.MaxQuality() &&
-			bc.isEnoughBandwidthToIncrase(availableBw, claim) {
-			return true
+		if claim.IsAdjustable() {
+			if claim.Quality() < claim.track.MaxQuality() {
+				if bc.isEnoughBandwidthToIncrase(availableBw, claim) {
+					return true
+				} else {
+					bc.log.Tracef("bitratecontroller: can't increase, track %s not enough bandwidth to increase bitrate", claim.track.ID())
+				}
+			} else {
+				bc.log.Tracef("bitratecontroller: can't increase, track %s quality %d is same or higher than max  %d", claim.track.ID(), claim.Quality(), claim.track.MaxQuality())
+			}
+
 		}
 	}
 
@@ -457,7 +467,7 @@ func (bc *bitrateController) loopMonitor() {
 				continue
 			}
 
-			bc.client.log.Debugf("bitratecontroller: available bandwidth %s total bitrate %s", ThousandSeparator(int(bw)), ThousandSeparator(int(totalSendBitrates)))
+			bc.log.Debugf("bitratecontroller: available bandwidth %s total bitrate %s", ThousandSeparator(int(bw)), ThousandSeparator(int(totalSendBitrates)))
 
 			var availableBw uint32
 			if bw < totalSendBitrates {
@@ -476,7 +486,7 @@ func (bc *bitrateController) loopMonitor() {
 				continue
 			}
 
-			bc.client.log.Debugf("bitratecontroller: available bandwidth %s total send bitrate %s", ThousandSeparator(int(bw)), ThousandSeparator(int(totalSendBitrates)))
+			bc.log.Debugf("bitratecontroller: available bandwidth %s total send bitrate %s", ThousandSeparator(int(bw)), ThousandSeparator(int(totalSendBitrates)))
 
 			bc.fitBitratesToBandwidth(uint32(bw))
 
@@ -509,17 +519,17 @@ func (bc *bitrateController) fitBitratesToBandwidth(bw uint32) {
 					newQuality := bc.getPrevQuality(quality)
 					newBitrate := claim.QualityLevelToBitrate(newQuality)
 					bitrateGap := oldBitrate - newBitrate
-					// bc.client.log.Infof("bitratecontroller: reduce bitrate for track ", claim.track.ID(), " from ", claim.Quality(), " to ", newQuality)
+					bc.log.Tracef("bitratecontroller: reduce bitrate for track %s from %d to %d", claim.track.ID(), claim.Quality(), newQuality)
 					bc.setQuality(claim.track.ID(), newQuality)
 
 					claim.track.RequestPLI()
 					totalSentBitrates = totalSentBitrates - bitrateGap
 
-					// bc.client.log.Infof("bitratecontroller: total sent bitrates ", ThousandSeparator(int(totalSentBitrates)), " bandwidth ", ThousandSeparator(int(bw)))
+					bc.log.Infof("bitratecontroller: total sent bitrates %s bandwidth %s", ThousandSeparator(int(totalSentBitrates)), ThousandSeparator(int(bw)))
 
 					// check if the reduced bitrate is fit to the available bandwidth
 					if totalSentBitrates <= bw {
-						// bc.client.log.Infof("bitratecontroller: reduce sent bitrates ", ThousandSeparator(int(totalSentBitrates)), " to bandwidth ", ThousandSeparator(int(bw)))
+						bc.log.Tracef("bitratecontroller: reduce sent bitrates %s to bandwidth %s", ThousandSeparator(int(totalSentBitrates)), ThousandSeparator(int(bw)))
 						return
 					}
 				}
@@ -541,15 +551,15 @@ func (bc *bitrateController) fitBitratesToBandwidth(bw uint32) {
 
 					// check if the bitrate increase will more than the available bandwidth
 					if totalSentBitrates+bitrateIncrease >= bw {
-						// bc.client.log.Infof("bitratecontroller: increase sent bitrates ", ThousandSeparator(int(totalSentBitrates)), " to bandwidth ", ThousandSeparator(int(bw)))
+						bc.log.Tracef("bitratecontroller: increase sent bitrates %s to bandwidth %s", ThousandSeparator(int(totalSentBitrates)), ThousandSeparator(int(bw)))
 						return
 					}
 
-					// bc.client.log.Infof("bitratecontroller: increase bitrate for track ", claim.track.ID(), " from ", claim.Quality(), " to ", claim.Quality()+1)
+					bc.log.Tracef("bitratecontroller: increase bitrate for track %s from %d to %d", claim.track.ID(), claim.Quality(), newQuality)
 					bc.setQuality(claim.track.ID(), newQuality)
 					// update current total bitrates
 					totalSentBitrates = totalSentBitrates + bitrateIncrease
-					// bc.client.log.Infof("bitratecontroller: total sent bitrates ", ThousandSeparator(int(totalSentBitrates)), " bandwidth ", ThousandSeparator(int(bw)))
+					bc.log.Infof("bitratecontroller: total sent bitrates %s bandwidth %s", ThousandSeparator(int(totalSentBitrates)), ThousandSeparator(int(bw)))
 					claim.track.RequestPLI()
 				}
 			}
@@ -560,7 +570,7 @@ func (bc *bitrateController) fitBitratesToBandwidth(bw uint32) {
 func (bc *bitrateController) getNextQuality(quality QualityLevel) QualityLevel {
 	ok := false
 	for !ok {
-		quality := quality + 1
+		quality = quality + 1
 		if slices.Contains(bc.enabledQualityLevels, quality) {
 			ok = true
 		}
@@ -571,7 +581,7 @@ func (bc *bitrateController) getNextQuality(quality QualityLevel) QualityLevel {
 func (bc *bitrateController) getPrevQuality(quality QualityLevel) QualityLevel {
 	ok := false
 	for !ok {
-		quality := quality - 1
+		quality = quality - 1
 		if slices.Contains(bc.enabledQualityLevels, quality) {
 			ok = true
 		}
@@ -585,32 +595,32 @@ func (bc *bitrateController) onRemoteViewedSizeChanged(videoSize videoSize) {
 
 	claim, ok := bc.claims[videoSize.TrackID]
 	if !ok {
-		bc.client.log.Errorf("bitrate: track %s is not exists", videoSize.TrackID)
+		bc.log.Errorf("bitrate: track %s is not exists", videoSize.TrackID)
 		return
 	}
 
 	if claim.track.Kind() != webrtc.RTPCodecTypeVideo {
-		bc.client.log.Errorf("bitrate: track %s is not video track", videoSize.TrackID)
+		bc.log.Errorf("bitrate: track %s is not video track", videoSize.TrackID)
 		return
 	}
 
-	bc.client.log.Debugf("bitrate: track %s video size changed  %dx%d=%d pixels", videoSize.TrackID, videoSize.Width, videoSize.Height, videoSize.Width*videoSize.Height)
+	bc.log.Debugf("bitrate: track %s video size changed  %dx%d=%d pixels", videoSize.TrackID, videoSize.Width, videoSize.Height, videoSize.Width*videoSize.Height)
 
 	// TODO: check if it is necessary to set max quality to none
 	if videoSize.Width == 0 || videoSize.Height == 0 {
-		bc.client.log.Debugf("bitrate: track  %s video size is 0, set max quality to none", videoSize.TrackID)
+		bc.log.Debugf("bitrate: track  %s video size is 0, set max quality to none", videoSize.TrackID)
 		claim.track.SetMaxQuality(QualityNone)
 		return
 	}
 
 	if videoSize.Width*videoSize.Height < bc.client.sfu.bitrateConfigs.VideoMidPixels {
-		bc.client.log.Debugf("bitrate: track %s video size is low, set max quality to low", videoSize.TrackID)
+		bc.log.Debugf("bitrate: track %s video size is low, set max quality to low", videoSize.TrackID)
 		claim.track.SetMaxQuality(QualityLow)
 	} else if videoSize.Width*videoSize.Height < bc.client.sfu.bitrateConfigs.VideoHighPixels {
-		bc.client.log.Infof("bitrate: track %s video size is mid, set max quality to mid", videoSize.TrackID)
+		bc.log.Infof("bitrate: track %s video size is mid, set max quality to mid", videoSize.TrackID)
 		claim.track.SetMaxQuality(QualityMid)
 	} else {
-		bc.client.log.Infof("bitrate: track %s video size is high, set max quality to high", videoSize.TrackID)
+		bc.log.Infof("bitrate: track %s video size is high, set max quality to high", videoSize.TrackID)
 		claim.track.SetMaxQuality(QualityHigh)
 	}
 }

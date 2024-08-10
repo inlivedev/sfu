@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"log"
 	"net/http"
@@ -70,16 +69,14 @@ const (
 var logger logging.LeveledLogger
 
 func main() {
-	flag.Set("logtostderr", "true")
-	// flag.Set("stderrthreshold", "DEBUG")
-	// flag.Set("PIONS_LOG_INFO", "sfu,vad")
+	_ = os.Setenv("logtostderr", "true")
+	os.Setenv("stderrthreshold", "TRACE")
 
-	flag.Set("PIONS_LOG_ERROR", "sfu,vad")
-	flag.Set("PIONS_LOG_WARN", "sfu,vad")
-	// flag.Set("PIONS_LOG_DEBUG", "sfu,vad")
-	// flag.Set("PIONS_LOG_TRACE", "sfu,vad")
-
-	flag.Parse()
+	os.Setenv("PIONS_LOG_TRACE", "sfu,vad,bitratecontroller")
+	os.Setenv("PIONS_LOG_DEBUG", "sfu,vad,bitratecontroller")
+	os.Setenv("PIONS_LOG_INFO", "sfu,vad,bitratecontroller")
+	os.Setenv("PIONS_LOG_WARN", "sfu,vad,bitratecontroller")
+	os.Setenv("PIONS_LOG_ERROR", "sfu,vad,bitratecontroller")
 
 	logger = logging.NewDefaultLoggerFactory().NewLogger("sfu")
 

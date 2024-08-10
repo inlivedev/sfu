@@ -274,6 +274,7 @@
 			const streamid = vad.data.streamID
 
             const videoEl = document.getElementById("video-"+streamid)
+			const container = document.getElementById("container-"+streamid)
             if (!videoEl){
 				console.log("video element not found ",streamid)
                 return
@@ -281,18 +282,20 @@
 
 
             if (vad.type === 'vad_ended'){
-                // voice ended
+                // voice ended	
                 videoEl.style.border = "none"
+				container.style.margin = "0"
             } else {
                 // voice detected
                 videoEl.style.border = "5px solid green"
+				container.style.margin = "-5px"
             }
 
 			let vadEl = document.getElementById("vad-"+streamid)
 			if (!vadEl){
 				vadEl = document.createElement("div");
 				vadEl.id = "vad-"+streamid
-				const container = document.getElementById("container-"+streamid)
+				
 				container.appendChild(vadEl)
 			}
 

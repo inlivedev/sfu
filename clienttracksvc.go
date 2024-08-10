@@ -113,8 +113,7 @@ func newScaleableClientTrack(
 		packetmap:   &packetmap.Map{},
 	}
 
-	// set default quality to none until client provide the video size
-	sct.SetMaxQuality(QualityNone)
+	sct.SetMaxQuality(QualityHigh)
 
 	return sct
 }
