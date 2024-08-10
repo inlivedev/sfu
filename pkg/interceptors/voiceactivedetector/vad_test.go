@@ -20,9 +20,10 @@ func BenchmarkVAD(b *testing.B) {
 		ClockRate: 48000,
 	})
 
-	vad.OnVoiceDetected(func(activity VoiceActivity) {
+	vad.OnVoiceDetected(func([]VoicePacketData) {
 		// Do nothing
 	})
+
 	header := &rtp.Header{}
 	for i := 0; i < b.N; i++ {
 		vad.addPacket(header, 3, true)

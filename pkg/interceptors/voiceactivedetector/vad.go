@@ -26,20 +26,17 @@ type VoiceActivity struct {
 }
 
 type VoiceDetector struct {
-	streamInfo     *interceptor.StreamInfo
-	config         Config
-	streamID       string
-	trackID        string
-	context        context.Context
-	cancel         context.CancelFunc
-	detected       bool
-	startDetected  uint32
-	lastDetectedTS uint32
-	channel        chan VoicePacketData
-	mu             sync.RWMutex
-	VoicePackets   []VoicePacketData
-	callback       func(activity VoiceActivity)
-	log            logging.LeveledLogger
+	streamInfo   *interceptor.StreamInfo
+	config       Config
+	streamID     string
+	trackID      string
+	context      context.Context
+	cancel       context.CancelFunc
+	channel      chan VoicePacketData
+	mu           sync.RWMutex
+	VoicePackets []VoicePacketData
+	callback     func([]VoicePacketData)
+	log          logging.LeveledLogger
 }
 
 func newVAD(ctx context.Context, config Config, streamInfo *interceptor.StreamInfo) *VoiceDetector {
@@ -58,6 +55,11 @@ func newVAD(ctx context.Context, config Config, streamInfo *interceptor.StreamIn
 	return v
 }
 
+func (v *VoiceDetector) SSRC() uint32 {
+
+	return v.streamInfo.SSRC
+}
+
 // run goroutine to process packets and detect voice
 // we keep the packets within the head and tail timestamp margin based on packet timestamp
 // if voice not detected, we drop the packets after out from head margin
@@ -71,7 +73,10 @@ func (v *VoiceDetector) run() {
 		ctx, cancel := context.WithCancel(v.context)
 		v.cancel = cancel
 
+		bufferTicker := time.NewTicker(v.config.Interval)
+
 		defer func() {
+			bufferTicker.Stop()
 			ticker.Stop()
 			cancel()
 		}()
@@ -79,35 +84,35 @@ func (v *VoiceDetector) run() {
 		active := false
 		lastSent := time.Now()
 
+		buffer := make([]VoicePacketData, 1024)
+		bufferLength := 0
+
 		for {
 			select {
 			case <-ctx.Done():
 				return
+			case <-bufferTicker.C:
+				if len(buffer) > 0 {
+					voicePackets := make([]VoicePacketData, bufferLength)
+					copy(voicePackets, buffer[:bufferLength])
+
+					v.onVoiceDetected(voicePackets)
+
+					buffer = buffer[:0]
+					bufferLength = 0
+				}
 			case voicePacket := <-v.channel:
 				if voicePacket.AudioLevel < v.config.Threshold {
 					// send all packets to callback
-					activity := VoiceActivity{
-						TrackID:     v.trackID,
-						StreamID:    v.streamID,
-						SSRC:        v.streamInfo.SSRC,
-						ClockRate:   v.streamInfo.ClockRate,
-						AudioLevels: []VoicePacketData{voicePacket},
-					}
-
-					v.onVoiceDetected(activity)
+					buffer = append(buffer, voicePacket)
+					bufferLength++
 					lastSent = time.Now()
 					active = true
 				}
 			case <-ticker.C:
 				if active && time.Since(lastSent) > v.config.TailMargin {
 					// we need to notify that the voice is stopped
-					v.onVoiceDetected(VoiceActivity{
-						TrackID:     v.trackID,
-						StreamID:    v.streamID,
-						SSRC:        v.streamInfo.SSRC,
-						ClockRate:   v.streamInfo.ClockRate,
-						AudioLevels: nil,
-					})
+					v.onVoiceDetected(nil)
 					active = false
 				}
 			}
@@ -115,91 +120,16 @@ func (v *VoiceDetector) run() {
 	}()
 }
 
-// TODO: this function is use together with isDetected function
-// need to fix isDetected function first before we can use this function
-func (v *VoiceDetector) dropExpiredPackets() {
-loop:
-	for {
-		v.mu.Lock()
-		if len(v.VoicePackets) == 0 {
-			v.mu.Unlock()
-			break loop
-		}
-
-		lastPacket := v.VoicePackets[len(v.VoicePackets)-1]
-
-		packet := v.VoicePackets[0]
-		if packet.Timestamp*1000/v.streamInfo.ClockRate+uint32(v.config.HeadMargin.Milliseconds()) < lastPacket.Timestamp*1000/v.streamInfo.ClockRate {
-			// release and packet
-			v.VoicePackets = v.VoicePackets[1:]
-		} else {
-			v.mu.Unlock()
-			break loop
-		}
-		v.mu.Unlock()
-	}
-}
-
-func (v *VoiceDetector) sendPacketsToCallback() int {
-	if v.callback == nil {
-		return 0
-	}
-
-	// get all packets from head margin until tail margin
-
-	packets := v.getPackets()
-
-	length := len(packets)
-
-	if length > 0 {
-		activity := VoiceActivity{
-			TrackID:     v.trackID,
-			StreamID:    v.streamID,
-			SSRC:        v.streamInfo.SSRC,
-			ClockRate:   v.streamInfo.ClockRate,
-			AudioLevels: packets,
-		}
-
-		v.onVoiceDetected(activity)
-	}
-
-	// clear packets
-	v.clearPackets()
-
-	return length
-}
-
-func (v *VoiceDetector) clearPackets() {
-	v.mu.Lock()
-	defer v.mu.Unlock()
-
-	v.VoicePackets = make([]VoicePacketData, 0)
-}
-
-func (v *VoiceDetector) getPackets() []VoicePacketData {
-	v.mu.RLock()
-	defer v.mu.RUnlock()
-
-	var packets []VoicePacketData
-	for _, packet := range v.VoicePackets {
-		if packet.AudioLevel < v.config.Threshold {
-			packets = append(packets, packet)
-		}
-	}
-
-	return packets
-}
-
-func (v *VoiceDetector) onVoiceDetected(activity VoiceActivity) {
+func (v *VoiceDetector) onVoiceDetected(pkts []VoicePacketData) {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 
 	if v.callback != nil {
-		v.callback(activity)
+		v.callback(pkts)
 	}
 }
 
-func (v *VoiceDetector) OnVoiceDetected(callback func(VoiceActivity)) {
+func (v *VoiceDetector) OnVoiceDetected(callback func([]VoicePacketData)) {
 	if v == nil {
 		return
 	}
@@ -207,65 +137,6 @@ func (v *VoiceDetector) OnVoiceDetected(callback func(VoiceActivity)) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.callback = callback
-}
-
-// TODO: this function is sometimes stop detecting the voice activity
-// we need to investigate why this is happening
-// for now we're fallback to threshold based detection
-func (v *VoiceDetector) isDetected(vp VoicePacketData) bool {
-	v.mu.RLock()
-	v.VoicePackets = append(v.VoicePackets, vp)
-	v.mu.RUnlock()
-
-	clockRate := v.streamInfo.ClockRate
-
-	isThresholdPassed := vp.AudioLevel < v.config.Threshold
-
-	// check if voice detected
-	if !v.detected && v.startDetected == 0 && isThresholdPassed {
-		v.startDetected = vp.Timestamp
-
-		return v.detected
-	}
-
-	currentTS := vp.Timestamp
-	durationGap := (currentTS - v.startDetected) * 1000 / clockRate
-
-	isTailMarginPassedAfterStarted := durationGap > uint32(v.config.TailMargin.Milliseconds())
-
-	// restart detected timestamp if audio level above threshold after previously start detected
-	if !v.detected && v.startDetected != 0 && isTailMarginPassedAfterStarted && !isThresholdPassed {
-		v.startDetected = 0
-		return v.detected
-	}
-
-	isHeadMarginPassed := durationGap > uint32(v.config.HeadMargin.Milliseconds())
-
-	// detected true after the audio level stay below threshold until pass the head margin
-	if !v.detected && v.startDetected != 0 && isHeadMarginPassed {
-		// start send packet to callback
-		v.detected = true
-		v.lastDetectedTS = vp.Timestamp
-
-		return v.detected
-	}
-
-	isTailMarginPassed := vp.Timestamp*1000/clockRate > (v.lastDetectedTS*1000/clockRate)+uint32(v.config.TailMargin.Milliseconds())
-
-	if v.detected && !isThresholdPassed && isTailMarginPassed {
-		// stop send packet to callback
-		v.detected = false
-		v.startDetected = 0
-
-		return v.detected
-	}
-
-	if v.detected && isThresholdPassed {
-		// keep send packets to callback
-		v.lastDetectedTS = vp.Timestamp
-	}
-
-	return v.detected
 }
 
 func (v *VoiceDetector) addPacket(header *rtp.Header, audioLevel uint8, isVoice bool) {

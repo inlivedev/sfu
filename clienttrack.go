@@ -46,11 +46,12 @@ type clientTrack struct {
 	onTrackEndedCallbacks []func()
 }
 
-func newClientTrack(c *Client, t *Track, isScreen bool, localTrack *webrtc.TrackLocalStaticRTP) *clientTrack {
+func newClientTrack(c *Client, t ITrack, isScreen bool, localTrack *webrtc.TrackLocalStaticRTP) *clientTrack {
 	ctx, cancel := context.WithCancel(t.Context())
+	track := t.(*Track)
 
 	if localTrack == nil {
-		localTrack = t.createLocalTrack()
+		localTrack = track.createLocalTrack()
 	}
 
 	ct := &clientTrack{
@@ -62,10 +63,10 @@ func newClientTrack(c *Client, t *Track, isScreen bool, localTrack *webrtc.Track
 		kind:                  localTrack.Kind(),
 		mimeType:              localTrack.Codec().MimeType,
 		localTrack:            localTrack,
-		remoteTrack:           t.remoteTrack,
-		baseTrack:             t.base,
+		remoteTrack:           track.remoteTrack,
+		baseTrack:             track.base,
 		isScreen:              isScreen,
-		ssrc:                  t.remoteTrack.track.SSRC(),
+		ssrc:                  track.remoteTrack.track.SSRC(),
 		onTrackEndedCallbacks: make([]func(), 0),
 	}
 
@@ -101,6 +102,7 @@ func (t *clientTrack) ReceiveBitrate() uint32 {
 func (t *clientTrack) SendBitrate() uint32 {
 	bitrate, err := t.client.stats.GetSenderBitrate(t.ID())
 	if err != nil {
+		t.client.log.Errorf("clienttrack: error on get sender bitrate %s", err.Error())
 		return 0
 	}
 
@@ -222,7 +224,6 @@ func (t *clientTrack) getQuality() QualityLevel {
 }
 
 func qualityLevelToPreset(lvl QualityLevel) (qualityPreset QualityPreset) {
-	qualityPresets := DefaultQualityPresets()
 
-	return qualityPresets[lvl]
+	return DefaultQualityPresets[lvl]
 }

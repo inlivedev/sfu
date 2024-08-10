@@ -33,6 +33,13 @@ func (c *bitrateClaim) Quality() QualityLevel {
 	return c.quality
 }
 
+func (c *bitrateClaim) SetQuality(quality QualityLevel) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.quality = quality
+}
+
 func (c *bitrateClaim) SendBitrate() uint32 {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
@@ -490,19 +497,16 @@ func (bc *bitrateController) fitBitratesToBandwidth(bw uint32) {
 	if totalSentBitrates > bw {
 		// reduce bitrates
 		for i := QualityHigh; i > QualityLowLow; i-- {
-			if !slices.Contains(bc.enabledQualityLevels, QualityLevel(i)) {
-				continue
-			}
-
 			for _, claim := range claims {
+				quality := claim.Quality()
 				if claim.IsAdjustable() &&
-					claim.Quality() == QualityLevel(i) {
+					quality == QualityLevel(i) {
 					oldBitrate := claim.SendBitrate()
 					if oldBitrate == 0 {
 						continue
 					}
 
-					newQuality := QualityLevel(i) - 1
+					newQuality := bc.getPrevQuality(quality)
 					newBitrate := claim.QualityLevelToBitrate(newQuality)
 					bitrateGap := oldBitrate - newBitrate
 					// bc.client.log.Infof("bitratecontroller: reduce bitrate for track ", claim.track.ID(), " from ", claim.Quality(), " to ", newQuality)
@@ -523,16 +527,15 @@ func (bc *bitrateController) fitBitratesToBandwidth(bw uint32) {
 		}
 	} else if totalSentBitrates < bw {
 		// increase bitrates
-		for i := QualityLow; i < QualityHigh; i++ {
-			for _, claim := range claims {
-				if claim.IsAdjustable() &&
-					claim.Quality() == QualityLevel(i) {
-					oldBitrate := claim.SendBitrate()
-					if oldBitrate == 0 {
-						continue
-					}
+		for i := QualityLowLow; i < QualityHigh; i++ {
 
-					newQuality := QualityLevel(i) + 1
+			for _, claim := range claims {
+				quality := claim.Quality()
+				if claim.IsAdjustable() &&
+					quality == QualityLevel(i) {
+					oldBitrate := claim.SendBitrate()
+
+					newQuality := bc.getNextQuality(quality)
 					newBitrate := claim.QualityLevelToBitrate(newQuality)
 					bitrateIncrease := newBitrate - oldBitrate
 
@@ -552,6 +555,28 @@ func (bc *bitrateController) fitBitratesToBandwidth(bw uint32) {
 			}
 		}
 	}
+}
+
+func (bc *bitrateController) getNextQuality(quality QualityLevel) QualityLevel {
+	ok := false
+	for !ok {
+		quality := quality + 1
+		if slices.Contains(bc.enabledQualityLevels, quality) {
+			ok = true
+		}
+	}
+	return quality
+}
+
+func (bc *bitrateController) getPrevQuality(quality QualityLevel) QualityLevel {
+	ok := false
+	for !ok {
+		quality := quality - 1
+		if slices.Contains(bc.enabledQualityLevels, quality) {
+			ok = true
+		}
+	}
+	return quality
 }
 
 func (bc *bitrateController) onRemoteViewedSizeChanged(videoSize videoSize) {

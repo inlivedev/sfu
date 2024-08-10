@@ -77,7 +77,8 @@ func newSimulcastClientTrack(c *Client, t *SimulcastTrack) *simulcastClientTrack
 		packetmapLow:            &packetmap.Map{},
 	}
 
-	ct.SetMaxQuality(QualityHigh)
+	// By default we set the max quality to none until the renderer provide the video size
+	ct.SetMaxQuality(QualityNone)
 
 	ct.remoteTrack.sendPLI()
 
@@ -288,6 +289,13 @@ func (t *simulcastClientTrack) onEnded() {
 
 func (t *simulcastClientTrack) SetMaxQuality(quality QualityLevel) {
 	t.maxQuality.Store(uint32(quality))
+	claim := t.Client().bitrateController.GetClaim(t.ID())
+	if claim != nil {
+		if claim.Quality() > quality {
+			claim.SetQuality(quality)
+		}
+	}
+
 	t.remoteTrack.sendPLI()
 }
 

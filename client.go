@@ -188,6 +188,7 @@ type Client struct {
 	ingressQualityLimitationReason *atomic.Value
 	isDebug                        bool
 	vadInterceptor                 *voiceactivedetector.Interceptor
+	vads                           map[uint32]*voiceactivedetector.VoiceDetector
 	log                            logging.LeveledLogger
 }
 
@@ -243,6 +244,8 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 
 	i.Add(statsInterceptorFactory)
 
+	var vads = make(map[uint32]*voiceactivedetector.VoiceDetector)
+
 	if opts.EnableVoiceDetection {
 		opts.Log.Infof("client: voice detection is enabled")
 		vadInterceptorFactory := voiceactivedetector.NewInterceptor(localCtx, opts.Log)
@@ -251,13 +254,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		vadInterceptorFactory.OnNew(func(i *voiceactivedetector.Interceptor) {
 			vadInterceptor = i
 			i.OnNewVAD(func(vad *voiceactivedetector.VoiceDetector) {
-				opts.Log.Infof("track: voice activity detector enabled")
-				vad.OnVoiceDetected(func(activity voiceactivedetector.VoiceActivity) {
-					// send through datachannel
-					if client != nil {
-						client.onVoiceDetected(activity)
-					}
-				})
+				vads[vad.SSRC()] = vad
 			})
 		})
 
@@ -348,6 +345,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		ingressQualityLimitationReason: &atomic.Value{},
 		onTracksAvailableCallbacks:     make([]func([]ITrack), 0),
 		vadInterceptor:                 vadInterceptor,
+		vads:                           vads,
 		log:                            opts.Log,
 	}
 
@@ -509,6 +507,15 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 				client.stats.removeReceiverStats(remoteTrack.ID() + remoteTrack.RID())
 				client.tracks.remove([]string{remoteTrack.ID()})
 			})
+
+			if opts.EnableVoiceDetection && remoteTrack.Kind() == webrtc.RTPCodecTypeAudio {
+				vad, ok := vads[uint32(remoteTrack.SSRC())]
+				if ok {
+					track.(*AudioTrack).SetVAD(vad)
+				} else {
+					client.log.Errorf("client: error voice detector not found")
+				}
+			}
 
 			if err := client.tracks.Add(track); err != nil {
 				client.log.Errorf("client: error add track ", err)
@@ -952,8 +959,14 @@ func (c *Client) setClientTrack(t ITrack) iClientTrack {
 		outputTrack = simulcastTrack.subscribe(c)
 
 	} else {
-		singleTrack := t.(*Track)
-		outputTrack = singleTrack.subscribe(c)
+		if t.Kind() == webrtc.RTPCodecTypeAudio {
+			singleTrack := t.(*AudioTrack)
+			outputTrack = singleTrack.subscribe(c)
+		} else {
+			singleTrack := t.(*Track)
+			outputTrack = singleTrack.subscribe(c)
+		}
+
 	}
 
 	localTrack := outputTrack.LocalTrack()
@@ -962,14 +975,6 @@ func (c *Client) setClientTrack(t ITrack) iClientTrack {
 	if err != nil {
 		c.log.Errorf("client: error on adding track ", err)
 		return nil
-	}
-
-	if t.Kind() == webrtc.RTPCodecTypeAudio {
-		if c.IsVADEnabled() {
-			c.log.Infof("track: voice activity detector enabled")
-			ssrc := senderTcv.Sender().GetParameters().Encodings[0].SSRC
-			c.vadInterceptor.MapAudioTrack(uint32(ssrc), localTrack)
-		}
 	}
 
 	// TODO: change to non goroutine
@@ -1589,15 +1594,30 @@ func (c *Client) Stats() ClientTrackStats {
 			}
 
 		} else {
-			t := track.(*Track)
-			stat, err := c.stats.GetReceiver(t.RemoteTrack().track.ID(), t.RemoteTrack().track.RID())
-			if err != nil {
-				continue
-			}
+			var receivedStats TrackReceivedStats
 
-			receivedStats, err := generateClientReceiverStats(c, track.(*Track).RemoteTrack().Track(), stat)
-			if err != nil {
-				continue
+			if track.Kind() == webrtc.RTPCodecTypeAudio {
+				t := track.(*AudioTrack)
+				stat, err := c.stats.GetReceiver(t.RemoteTrack().track.ID(), t.RemoteTrack().track.RID())
+				if err != nil {
+					continue
+				}
+
+				receivedStats, err = generateClientReceiverStats(c, t.RemoteTrack().Track(), stat)
+				if err != nil {
+					continue
+				}
+			} else {
+				t := track.(*Track)
+				stat, err := c.stats.GetReceiver(t.RemoteTrack().track.ID(), t.RemoteTrack().track.RID())
+				if err != nil {
+					continue
+				}
+
+				receivedStats, err = generateClientReceiverStats(c, t.RemoteTrack().Track(), stat)
+				if err != nil {
+					continue
+				}
 			}
 
 			clientStats.Receives = append(clientStats.Receives, receivedStats)

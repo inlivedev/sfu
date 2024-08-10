@@ -43,6 +43,8 @@ func (g *InterceptorFactory) OnNew(callback func(i *Interceptor)) {
 }
 
 type Config struct {
+	// Interval is the interval at which the VAD will send updates
+	Interval   time.Duration
 	HeadMargin time.Duration
 	TailMargin time.Duration
 	Threshold  uint8
@@ -50,6 +52,7 @@ type Config struct {
 
 func DefaultConfig() Config {
 	return Config{
+		Interval:   100 * time.Millisecond,
 		HeadMargin: 200 * time.Millisecond,
 		TailMargin: 300 * time.Millisecond,
 		Threshold:  40,
@@ -92,8 +95,20 @@ func (v *Interceptor) OnNewVAD(callback func(vad *VoiceDetector)) {
 // BindLocalStream lets you modify any outgoing RTP packets. It is called once for per LocalStream. The returned method
 // will be called once per rtp packet.
 func (v *Interceptor) BindLocalStream(info *interceptor.StreamInfo, writer interceptor.RTPWriter) interceptor.RTPWriter {
+
+	return writer
+}
+
+// UnbindLocalStream is called when the Stream is removed. It can be used to clean up any data related to that track.
+func (v *Interceptor) UnbindLocalStream(info *interceptor.StreamInfo) {
+
+}
+
+// BindRemoteStream lets you modify any incoming RTP packets. It is called once for per RemoteStream. The returned method
+// will be called once per rtp packet.
+func (v *Interceptor) BindRemoteStream(info *interceptor.StreamInfo, reader interceptor.RTPReader) interceptor.RTPReader {
 	if info.MimeType != webrtc.MimeTypeOpus && info.MimeType != "audio/red" {
-		return writer
+		return reader
 	}
 
 	vad := v.getVadBySSRC(info.SSRC)
@@ -113,14 +128,27 @@ func (v *Interceptor) BindLocalStream(info *interceptor.StreamInfo, writer inter
 		v.onNew(vad)
 	}
 
-	return interceptor.RTPWriterFunc(func(header *rtp.Header, payload []byte, attributes interceptor.Attributes) (int, error) {
+	return interceptor.RTPReaderFunc(func(b []byte, a interceptor.Attributes) (int, interceptor.Attributes, error) {
+		i, attr, err := reader.Read(b, a)
+		if err != nil {
+			return 0, nil, err
+		}
+
+		if attr == nil {
+			attr = make(interceptor.Attributes)
+		}
+		header, err := attr.GetRTPHeader(b[:i])
+		if err != nil {
+			return 0, nil, err
+		}
+
 		_ = v.processPacket(info.SSRC, header)
-		return writer.Write(header, payload, attributes)
+
+		return i, attr, nil
 	})
 }
 
-// UnbindLocalStream is called when the Stream is removed. It can be used to clean up any data related to that track.
-func (v *Interceptor) UnbindLocalStream(info *interceptor.StreamInfo) {
+func (v *Interceptor) UnbindRemoteStream(info *interceptor.StreamInfo) {
 	vad := v.getVadBySSRC(info.SSRC)
 	if vad != nil {
 		vad.Stop()
@@ -130,17 +158,6 @@ func (v *Interceptor) UnbindLocalStream(info *interceptor.StreamInfo) {
 	defer v.mu.Unlock()
 
 	delete(v.vads, info.SSRC)
-
-}
-
-// BindRemoteStream lets you modify any incoming RTP packets. It is called once for per RemoteStream. The returned method
-// will be called once per rtp packet.
-func (v *Interceptor) BindRemoteStream(info *interceptor.StreamInfo, reader interceptor.RTPReader) interceptor.RTPReader {
-	return reader
-}
-
-func (v *Interceptor) UnbindRemoteStream(info *interceptor.StreamInfo) {
-
 }
 
 func (v *Interceptor) Close() error {
@@ -235,7 +252,7 @@ func (v *Interceptor) getAudioLevelExtensionID(ssrc uint32) uint8 {
 }
 
 // AddAudioTrack adds audio track to interceptor
-func (v *Interceptor) MapAudioTrack(ssrc uint32, t webrtc.TrackLocal) *VoiceDetector {
+func (v *Interceptor) MapAudioTrack(ssrc uint32, t *webrtc.TrackRemote) *VoiceDetector {
 	if t.Kind() != webrtc.RTPCodecTypeAudio {
 		v.log.Errorf("vad: track is not audio track")
 		return nil

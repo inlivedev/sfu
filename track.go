@@ -7,6 +7,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/inlivedev/sfu/pkg/interceptors/voiceactivedetector"
 	"github.com/inlivedev/sfu/pkg/networkmonitor"
 	"github.com/inlivedev/sfu/pkg/rtppool"
 	"github.com/pion/interceptor/pkg/stats"
@@ -73,6 +74,12 @@ type Track struct {
 	remoteTrack      *remoteTrack
 	onEndedCallbacks []func()
 	onReadCallbacks  []func(*rtp.Packet, QualityLevel)
+}
+
+type AudioTrack struct {
+	*Track
+	vad          *voiceactivedetector.VoiceDetector
+	vadCallbacks []func([]voiceactivedetector.VoicePacketData)
 }
 
 func newTrack(ctx context.Context, client *Client, trackRemote IRemoteTrack, minWait, maxWait, pliInterval time.Duration, onPLI func(), stats stats.Getter, onStatsUpdated func(*stats.Stats)) ITrack {
@@ -144,6 +151,14 @@ func newTrack(ctx context.Context, client *Client, trackRemote IRemoteTrack, min
 		t.onEnded()
 	})
 
+	if trackRemote.Kind() == webrtc.RTPCodecTypeAudio {
+		ta := &AudioTrack{
+			Track: t,
+		}
+
+		return ta
+	}
+
 	return t
 }
 
@@ -186,6 +201,52 @@ func (t *Track) StreamID() string {
 
 func (t *Track) SSRC() webrtc.SSRC {
 	return t.remoteTrack.track.SSRC()
+}
+
+func (t *AudioTrack) SetVAD(vad *voiceactivedetector.VoiceDetector) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	t.vad = vad
+	vad.OnVoiceDetected(func(pkts []voiceactivedetector.VoicePacketData) {
+		// send through datachannel
+		t.onVoiceDetected(pkts)
+	})
+}
+
+func (t *AudioTrack) onVoiceDetected(pkts []voiceactivedetector.VoicePacketData) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	for _, callback := range t.vadCallbacks {
+		callback(pkts)
+	}
+}
+
+func (t *AudioTrack) OnVoiceDetected(callback func(pkts []voiceactivedetector.VoicePacketData)) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	t.vadCallbacks = append(t.vadCallbacks, callback)
+}
+
+func (t *AudioTrack) subscribe(c *Client) iClientTrack {
+	var ct iClientTrack
+
+	cta := newClientTrackAudio(c, t)
+
+	if t.PayloadType() == 63 {
+		t.base.client.log.Tracef("track: red enabled %v", c.receiveRED)
+
+		// TODO: detect if client supports RED and it's audio then send RED encoded packets
+		ct = newClientTrackRed(cta)
+	} else {
+		ct = cta
+	}
+
+	t.base.clientTracks.Add(ct)
+
+	return ct
 }
 
 func (t *Track) RemoteTrack() *remoteTrack {
@@ -243,14 +304,8 @@ func (t *Track) subscribe(c *Client) iClientTrack {
 
 	if t.MimeType() == webrtc.MimeTypeVP9 {
 		ct = newScaleableClientTrack(c, t)
-	} else if t.Kind() == webrtc.RTPCodecTypeAudio && t.PayloadType() == 63 {
-		t.base.client.log.Infof("track: red enabled", c.receiveRED)
-
-		// TODO: detect if client supports RED and it's audio then send RED encoded packets
-		ct = newClientTrackRed(c, t)
 	} else {
 		ct = newClientTrack(c, t, t.IsScreen(), nil)
-
 	}
 
 	if t.Kind() == webrtc.RTPCodecTypeVideo {

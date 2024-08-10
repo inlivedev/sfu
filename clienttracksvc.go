@@ -1,8 +1,6 @@
 package sfu
 
 import (
-	"time"
-
 	"github.com/inlivedev/sfu/pkg/packetmap"
 	"github.com/pion/rtp"
 	"github.com/pion/rtp/codecs"
@@ -16,6 +14,49 @@ type IQualityPreset interface {
 type QualityPreset struct {
 	SID uint8 `json:"sid" example:"2"`
 	TID uint8 `json:"tid" example:"2"`
+}
+
+var DefaultQualityPresets = map[QualityLevel]QualityPreset{
+	QualityHigh: QualityPreset{
+		SID: 2,
+		TID: 2,
+	},
+	QualityHighMid: QualityPreset{
+		SID: 2,
+		TID: 1,
+	},
+	QualityHighLow: QualityPreset{
+		SID: 2,
+		TID: 0,
+	},
+	QualityMid: QualityPreset{
+		SID: 1,
+		TID: 2,
+	},
+	QualityMidMid: QualityPreset{
+		SID: 1,
+		TID: 1,
+	},
+	QualityMidLow: QualityPreset{
+		SID: 1,
+		TID: 0,
+	},
+	QualityLow: QualityPreset{
+		SID: 0,
+		TID: 2,
+	},
+	QualityLowMid: QualityPreset{
+		SID: 0,
+		TID: 1,
+	},
+	QualityLowLow: QualityPreset{
+		SID: 0,
+		TID: 0,
+	},
+	QualityNone: QualityPreset{
+		SID: 0,
+		TID: 0,
+	},
 }
 
 func (q QualityPreset) GetSID() uint8 {
@@ -48,63 +89,16 @@ func DefaultQualityLevels() []QualityLevel {
 	}
 }
 
-func DefaultQualityPresets() map[QualityLevel]QualityPreset {
-	return map[QualityLevel]QualityPreset{
-		QualityHigh: QualityPreset{
-			SID: 2,
-			TID: 2,
-		},
-		QualityHighMid: QualityPreset{
-			SID: 2,
-			TID: 1,
-		},
-		QualityHighLow: QualityPreset{
-			SID: 2,
-			TID: 0,
-		},
-		QualityMid: QualityPreset{
-			SID: 1,
-			TID: 2,
-		},
-		QualityMidMid: QualityPreset{
-			SID: 1,
-			TID: 1,
-		},
-		QualityMidLow: QualityPreset{
-			SID: 1,
-			TID: 0,
-		},
-		QualityLow: QualityPreset{
-			SID: 0,
-			TID: 2,
-		},
-		QualityLowMid: QualityPreset{
-			SID: 0,
-			TID: 1,
-		},
-		QualityLowLow: QualityPreset{
-			SID: 0,
-			TID: 0,
-		},
-		QualityNone: QualityPreset{
-			SID: 0,
-			TID: 0,
-		},
-	}
-}
-
 type scaleableClientTrack struct {
 	*clientTrack
-	targetQuality      QualityLevel
-	lastQuality        QualityLevel
-	maxQuality         QualityLevel
-	tid                uint8
-	sid                uint8
-	lastTimestamp      uint32
-	lastBlankframeSent time.Time
-	lastSequence       uint16
-	init               bool
-	packetmap          *packetmap.Map
+	lastQuality   QualityLevel
+	maxQuality    QualityLevel
+	tid           uint8
+	sid           uint8
+	lastTimestamp uint32
+	lastSequence  uint16
+	init          bool
+	packetmap     *packetmap.Map
 }
 
 func newScaleableClientTrack(
@@ -118,6 +112,9 @@ func newScaleableClientTrack(
 		lastQuality: QualityHigh,
 		packetmap:   &packetmap.Map{},
 	}
+
+	// set default quality to none until client provide the video size
+	sct.SetMaxQuality(QualityNone)
 
 	return sct
 }
@@ -264,6 +261,13 @@ func (t *scaleableClientTrack) SetMaxQuality(quality QualityLevel) {
 	t.mu.Lock()
 	t.maxQuality = quality
 	t.mu.Unlock()
+
+	claim := t.Client().bitrateController.GetClaim(t.ID())
+	if claim != nil {
+		if claim.Quality() > quality {
+			claim.SetQuality(quality)
+		}
+	}
 
 	t.RequestPLI()
 }
