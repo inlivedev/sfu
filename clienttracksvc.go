@@ -137,6 +137,17 @@ func (t *scaleableClientTrack) isKeyframe(vp9 *codecs.VP9Packet) bool {
 	return (vp9.Payload[0]&0x6) == 0 && true
 }
 
+func (t *scaleableClientTrack) getQuality() QualityLevel {
+	claim := t.client.bitrateController.GetClaim(t.ID())
+
+	if claim == nil {
+		t.client.log.Warnf("scalabletrack: claim is nil")
+		return QualityNone
+	}
+
+	return min(t.MaxQuality(), claim.Quality(), Uint32ToQualityLevel(t.client.quality.Load()))
+}
+
 func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 	var isLatePacket bool
 
