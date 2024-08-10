@@ -290,7 +290,7 @@ func (t *simulcastClientTrack) SetMaxQuality(quality QualityLevel) {
 	t.maxQuality.Store(uint32(quality))
 	claim := t.Client().bitrateController.GetClaim(t.ID())
 	if claim != nil {
-		if claim.Quality() > quality {
+		if claim.Quality() > quality && quality != QualityNone {
 			claim.SetQuality(quality)
 		}
 	}

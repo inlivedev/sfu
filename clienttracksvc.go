@@ -263,7 +263,7 @@ func (t *scaleableClientTrack) SetMaxQuality(quality QualityLevel) {
 
 	claim := t.Client().bitrateController.GetClaim(t.ID())
 	if claim != nil {
-		if claim.Quality() > quality {
+		if claim.Quality() > quality && quality != QualityNone {
 			claim.SetQuality(quality)
 		}
 	}

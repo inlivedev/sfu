@@ -507,6 +507,7 @@ func (bc *bitrateController) fitBitratesToBandwidth(bw uint32) {
 	if totalSentBitrates > bw {
 		// reduce bitrates
 		for i := QualityHigh; i > QualityLowLow; i-- {
+			bc.log.Trace("bitratecontroller: trying to reduce bitrate")
 			for _, claim := range claims {
 				quality := claim.Quality()
 				if claim.IsAdjustable() &&
@@ -536,9 +537,9 @@ func (bc *bitrateController) fitBitratesToBandwidth(bw uint32) {
 			}
 		}
 	} else if totalSentBitrates < bw {
+		bc.log.Trace("bitratecontroller: trying to increase bitrate")
 		// increase bitrates
 		for i := QualityLowLow; i < QualityHigh; i++ {
-
 			for _, claim := range claims {
 				quality := claim.Quality()
 				if claim.IsAdjustable() &&
@@ -550,8 +551,9 @@ func (bc *bitrateController) fitBitratesToBandwidth(bw uint32) {
 					bitrateIncrease := newBitrate - oldBitrate
 
 					// check if the bitrate increase will more than the available bandwidth
-					if totalSentBitrates+bitrateIncrease >= bw {
-						bc.log.Tracef("bitratecontroller: increase sent bitrates %s to bandwidth %s", ThousandSeparator(int(totalSentBitrates)), ThousandSeparator(int(bw)))
+					newSentBitrates := totalSentBitrates + bitrateIncrease
+					if newSentBitrates > bw {
+						bc.log.Tracef("bitratecontroller: can't increase, new bitrates %s not fit to bandwidth %s", ThousandSeparator(int(newSentBitrates)), ThousandSeparator(int(bw)))
 						return
 					}
 
