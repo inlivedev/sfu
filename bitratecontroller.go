@@ -543,7 +543,8 @@ func (bc *bitrateController) fitBitratesToBandwidth(bw uint32) {
 			for _, claim := range claims {
 				quality := claim.Quality()
 				if claim.IsAdjustable() &&
-					quality == QualityLevel(i) {
+					quality == QualityLevel(i) &&
+					quality < claim.track.MaxQuality() {
 					oldBitrate := claim.SendBitrate()
 
 					newQuality := bc.getNextQuality(quality)
@@ -628,7 +629,7 @@ func (bc *bitrateController) onRemoteViewedSizeChanged(videoSize videoSize) {
 }
 
 func (bc *bitrateController) isEnoughBandwidthToIncrase(bandwidthLeft uint32, claim *bitrateClaim) bool {
-	nextQuality := claim.Quality() + 1
+	nextQuality := bc.getNextQuality(claim.Quality())
 
 	if nextQuality > QualityHigh {
 		return false
@@ -637,7 +638,13 @@ func (bc *bitrateController) isEnoughBandwidthToIncrase(bandwidthLeft uint32, cl
 	nextBitrate := claim.QualityLevelToBitrate(nextQuality)
 	currentBitrate := claim.SendBitrate()
 
+	if nextBitrate <= currentBitrate {
+		return false
+	}
+
 	bandwidthGap := nextBitrate - currentBitrate
+
+	bc.log.Tracef("bitratecontroller: track %s bandwidth gap %d , bandwidth left %d", claim.track.ID(), bandwidthGap, bandwidthLeft)
 
 	return bandwidthGap < bandwidthLeft
 }
