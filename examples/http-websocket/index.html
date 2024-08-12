@@ -311,21 +311,26 @@
 
 
         function startH264() {
-            start('h264')
+            start('h264',false)
         }
 
         function startVP9() {
-            start('vp9')
+            start('vp9',false)
         }
 
+		function viewOnly(){
+			start(null,true)
+		}
 
 
-        async function start(codec) {
+        async function start(codec,viewOnly) {
             await startWs()
-            document.getElementById("btnStart").disabled = true;
+            document.getElementById("btnStartH264").disabled = true;
             document.getElementById("btnStartVP9").disabled = true;
+			document.getElementById("btnViewOnly").disabled = true;
 
-            const video =  {
+			if(!viewOnly){
+				const video =  {
                 width: {ideal: 1280},
                 height: {ideal: 720},
                 advanced: [{
@@ -339,37 +344,76 @@
                 ]};
 
 
-            const constraints = {
-                audio: true,
-                video: video
-                // video: true
-            };
+				const constraints = {
+					audio: true,
+					video: video
+					// video: true
+				};
 
-            const stream = await navigator.mediaDevices.getUserMedia(constraints)
-			const streamid = stream.id.replace('{','').replace('}','');
-            let container = document.getElementById("container-"+streamid);
-            if (!container) {
-                container = document.createElement("div");
-                container.className = "container";
-                container.id = "container-"+streamid;
-                document.querySelector('main').appendChild(container);
-            }
+				const stream = await navigator.mediaDevices.getUserMedia(constraints)
+				const streamid = stream.id.replace('{','').replace('}','');
+				let container = document.getElementById("container-"+streamid);
+				if (!container) {
+					container = document.createElement("div");
+					container.className = "container";
+					container.id = "container-"+streamid;
+					document.querySelector('main').appendChild(container);
+				}
 
-            let localVideo = document.getElementById("video-"+streamid);
-            if (!localVideo) {
-                localVideo = document.createElement("video");
-                localVideo.id = "video-"+streamid;
-                localVideo.autoplay = true;
-                localVideo.muted = true;
-                container.appendChild(localVideo);
-            }
+				let localVideo = document.getElementById("video-"+streamid);
+				if (!localVideo) {
+					localVideo = document.createElement("video");
+					localVideo.id = "video-"+streamid;
+					localVideo.autoplay = true;
+					localVideo.muted = true;
+					container.appendChild(localVideo);
+				}
 
-            localVideo.srcObject =stream;
+				localVideo.srcObject =stream;
 
+				const audioTcvr= peerConnection.addTransceiver(stream.getAudioTracks()[0], {
+					direction: 'sendonly',
+					streams: [stream],
+					sendEncodings: [{priority: 'high'}],
+				})
+
+
+
+				if(audioTcvr.setCodecPreferences != undefined && RTCRtpReceiver.getCapabilities != undefined){
+					const audioCodecs = RTCRtpReceiver.getCapabilities('audio').codecs;
+
+					let audioCodecsPref = [];
+					if (red){
+						for(let i = 0; i < audioCodecs.length; i++){
+							// audio/red 48000 111/111
+							if(audioCodecs[i].mimeType == "audio/red"){
+								audioCodecsPref.push(audioCodecs[i]);
+							}
+						}
+					}
+
+					for(let i = 0; i < audioCodecs.length; i++){
+						if(audioCodecs[i].mimeType == "audio/opus"){
+							audioCodecsPref.push(audioCodecs[i]);
+						}
+					}
+
+					audioTcvr.setCodecPreferences(audioCodecsPref);
+				}
+
+
+				setCodecPreferences(peerConnection,stream, codec, "L3T3_KEY")
+			} else {
+				peerConnection.addTransceiver('video', {
+					direction: 'sendrecv',
+				})
+
+				peerConnection.addTransceiver('audio', {
+					direction: 'sendrecv',
+				})
+			}
 
             peerConnection.ontrack = function(e) {
-                e.receiver.playoutDelayHint = 0.1;
-
                 e.streams.forEach((stream) => {
                     console.log("ontrack", stream, e.track);
 
@@ -427,43 +471,6 @@
                 });
 
             };
-
-            // peerConnection.addTrack(stream.getAudioTracks()[0], stream);
-            // peerConnection.addTrack(stream.getVideoTracks()[0], stream);
-
-
-            const audioTcvr= peerConnection.addTransceiver(stream.getAudioTracks()[0], {
-                direction: 'sendonly',
-                streams: [stream],
-                sendEncodings: [{priority: 'high'}],
-            })
-
-
-
-            if(audioTcvr.setCodecPreferences != undefined && RTCRtpReceiver.getCapabilities != undefined){
-                const audioCodecs = RTCRtpReceiver.getCapabilities('audio').codecs;
-
-                let audioCodecsPref = [];
-                if (red){
-                    for(let i = 0; i < audioCodecs.length; i++){
-                        // audio/red 48000 111/111
-                        if(audioCodecs[i].mimeType == "audio/red"){
-                            audioCodecsPref.push(audioCodecs[i]);
-                        }
-                    }
-                }
-
-                for(let i = 0; i < audioCodecs.length; i++){
-                    if(audioCodecs[i].mimeType == "audio/opus"){
-                        audioCodecsPref.push(audioCodecs[i]);
-                    }
-                }
-
-                audioTcvr.setCodecPreferences(audioCodecsPref);
-            }
-
-
-			setCodecPreferences(peerConnection,stream, codec, "L3T3_KEY")
 
             const offer=await peerConnection.createOffer()
 
@@ -970,7 +977,8 @@
         }
 
         document.addEventListener("DOMContentLoaded", function(event) {
-            document.getElementById("btnStart").onclick = startH264;
+			document.getElementById("btnViewOnly").onclick = viewOnly;
+            document.getElementById("btnStartH264").onclick = startH264;
             document.getElementById("btnStartVP9").onclick = startVP9;
 			document.getElementById("btnToggleMic").onclick = toggleMic;
 			document.getElementById("btnToggleCam").onclick = toggleCam;
@@ -994,8 +1002,9 @@
         <div id="stats-local"></div>
     </aside>
     <footer>
-        <button id="btnStart">Start H264</button>
+        <button id="btnStartH264">Start H264</button>
         <button id="btnStartVP9">Start with VP9</button>
+		<button id="btnViewOnly">View only</button>
 		<button id="btnToggleMic">Mute Mic</button>
 		<button id="btnToggleCam">Mute Cam</button>
 		<span><input id="simulcast" type="checkbox" value="simulcast">Simulcast</span>

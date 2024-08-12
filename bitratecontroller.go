@@ -150,9 +150,10 @@ func (bc *bitrateController) Exist(id string) bool {
 
 func (bc *bitrateController) GetClaim(id string) *bitrateClaim {
 	bc.mu.RLock()
-	defer bc.mu.RUnlock()
+	claim, ok := bc.claims[id]
+	bc.mu.RUnlock()
 
-	if claim, ok := bc.claims[id]; ok && claim != nil {
+	if ok && claim != nil {
 		return claim
 	}
 
@@ -344,15 +345,18 @@ func (bc *bitrateController) addClaims(clientTracks []iClientTrack) error {
 }
 
 func (bc *bitrateController) addClaim(clientTrack iClientTrack, quality QualityLevel) (*bitrateClaim, error) {
-	bc.mu.Lock()
-	defer bc.mu.Unlock()
-
-	bc.claims[clientTrack.ID()] = &bitrateClaim{
+	claim := &bitrateClaim{
 		mu:        sync.RWMutex{},
 		track:     clientTrack,
 		quality:   quality,
 		simulcast: clientTrack.IsSimulcast(),
 	}
+
+	bc.mu.Lock()
+
+	bc.claims[clientTrack.ID()] = claim
+
+	bc.mu.Unlock()
 
 	clientTrack.OnEnded(func() {
 		bc.removeClaim(clientTrack.ID())
@@ -360,7 +364,7 @@ func (bc *bitrateController) addClaim(clientTrack iClientTrack, quality QualityL
 		clientTrack.Client().stats.removeSenderStats(clientTrack.ID())
 	})
 
-	return bc.claims[clientTrack.ID()], nil
+	return claim, nil
 }
 
 func (bc *bitrateController) removeClaim(id string) {
@@ -429,11 +433,7 @@ func (bc *bitrateController) canIncreaseBitrate(availableBw uint32) bool {
 	for _, claim := range claims {
 		if claim.IsAdjustable() {
 			if claim.Quality() < claim.track.MaxQuality() {
-				if bc.isEnoughBandwidthToIncrase(availableBw, claim) {
-					return true
-				} else {
-					bc.log.Tracef("bitratecontroller: can't increase, track %s not enough bandwidth to increase bitrate", claim.track.ID())
-				}
+				return bc.isEnoughBandwidthToIncrase(availableBw, claim)
 			} else {
 				bc.log.Tracef("bitratecontroller: can't increase, track %s quality %d is same or higher than max  %d", claim.track.ID(), claim.Quality(), claim.track.MaxQuality())
 			}
@@ -448,7 +448,7 @@ func (bc *bitrateController) loopMonitor() {
 	ctx, cancel := context.WithCancel(bc.client.Context())
 	defer cancel()
 
-	ticker := time.NewTicker(3 * time.Second)
+	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
 	for {
@@ -464,10 +464,9 @@ func (bc *bitrateController) loopMonitor() {
 			bc.mu.RUnlock()
 
 			if totalSendBitrates == 0 {
+				bc.log.Trace("bitratecontroller: no track to adjust")
 				continue
 			}
-
-			bc.log.Debugf("bitratecontroller: available bandwidth %s total bitrate %s", ThousandSeparator(int(bw)), ThousandSeparator(int(totalSendBitrates)))
 
 			var availableBw uint32
 			if bw < totalSendBitrates {
@@ -478,15 +477,19 @@ func (bc *bitrateController) loopMonitor() {
 
 			if totalSendBitrates < uint32(bw) {
 				needAdjustment = bc.canIncreaseBitrate(availableBw)
+				if needAdjustment {
+					bc.log.Tracef("bitratecontroller: need to increase bitrate, available bandwidth %s", ThousandSeparator(int(availableBw)))
+				}
 			} else {
 				needAdjustment = bc.canDecreaseBitrate()
+				if needAdjustment {
+					bc.log.Tracef("bitratecontroller: need to decrease bitrate, available bandwidth ", ThousandSeparator(int(availableBw)))
+				}
 			}
 
 			if !needAdjustment {
 				continue
 			}
-
-			bc.log.Debugf("bitratecontroller: available bandwidth %s total send bitrate %s", ThousandSeparator(int(bw)), ThousandSeparator(int(totalSendBitrates)))
 
 			bc.fitBitratesToBandwidth(uint32(bw))
 
@@ -632,6 +635,7 @@ func (bc *bitrateController) isEnoughBandwidthToIncrase(bandwidthLeft uint32, cl
 	nextQuality := bc.getNextQuality(claim.Quality())
 
 	if nextQuality > QualityHigh {
+		bc.log.Tracef("bitratecontroller: won't increase track %s quality %d is already high", claim.track.ID(), nextQuality)
 		return false
 	}
 
@@ -639,12 +643,17 @@ func (bc *bitrateController) isEnoughBandwidthToIncrase(bandwidthLeft uint32, cl
 	currentBitrate := claim.SendBitrate()
 
 	if nextBitrate <= currentBitrate {
+		bc.log.Tracef("bitratecontroller: can't increase the bitrate, next bitrate %d is less than current %d", nextBitrate, currentBitrate)
 		return false
 	}
 
 	bandwidthGap := nextBitrate - currentBitrate
 
-	bc.log.Tracef("bitratecontroller: track %s bandwidth gap %d , bandwidth left %d", claim.track.ID(), bandwidthGap, bandwidthLeft)
+	if bandwidthGap < bandwidthLeft {
+		bc.log.Tracef("bitratecontroller: track %s can increase, next bandwidth %d, bandwidth left %d", claim.track.ID(), bandwidthGap, bandwidthLeft)
+		return true
+	}
 
-	return bandwidthGap < bandwidthLeft
+	bc.log.Tracef("bitratecontroller: track %s can't increase, need bandwidth %d to increase, but bandwidth left %d", claim.track.ID(), bandwidthGap, bandwidthLeft)
+	return false
 }
