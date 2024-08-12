@@ -103,19 +103,16 @@ func (c *bitrateClaim) QualityLevelToBitrate(quality QualityLevel) uint32 {
 }
 
 type bitrateController struct {
-	mu                      sync.RWMutex
-	lastBitrateAdjustmentTS time.Time
-	client                  *Client
-	claims                  map[string]*bitrateClaim
-	enabledQualityLevels    []QualityLevel
-	log                     logging.LeveledLogger
+	client               *Client
+	claims               sync.Map
+	enabledQualityLevels []QualityLevel
+	log                  logging.LeveledLogger
 }
 
 func newbitrateController(client *Client, qualityLevels []QualityLevel) *bitrateController {
 	bc := &bitrateController{
-		mu:                   sync.RWMutex{},
 		client:               client,
-		claims:               make(map[string]*bitrateClaim, 0),
+		claims:               sync.Map{},
 		enabledQualityLevels: qualityLevels,
 		log:                  logging.NewDefaultLoggerFactory().NewLogger("bitratecontroller"),
 	}
@@ -126,22 +123,17 @@ func newbitrateController(client *Client, qualityLevels []QualityLevel) *bitrate
 }
 
 func (bc *bitrateController) Claims() map[string]*bitrateClaim {
-	bc.mu.RLock()
-	defer bc.mu.RUnlock()
-
 	claims := make(map[string]*bitrateClaim, 0)
-	for k, v := range bc.claims {
-		claims[k] = v
-	}
+	bc.claims.Range(func(key, value interface{}) bool {
+		claims[key.(string)] = value.(*bitrateClaim)
+		return true
+	})
 
 	return claims
 }
 
 func (bc *bitrateController) Exist(id string) bool {
-	bc.mu.RLock()
-	defer bc.mu.RUnlock()
-
-	if _, ok := bc.claims[id]; ok {
+	if _, ok := bc.claims.Load(id); ok {
 		return true
 	}
 
@@ -149,12 +141,9 @@ func (bc *bitrateController) Exist(id string) bool {
 }
 
 func (bc *bitrateController) GetClaim(id string) *bitrateClaim {
-	bc.mu.RLock()
-	claim, ok := bc.claims[id]
-	bc.mu.RUnlock()
-
+	claim, ok := bc.claims.Load(id)
 	if ok && claim != nil {
-		return claim
+		return claim.(*bitrateClaim)
 	}
 
 	return nil
@@ -175,15 +164,11 @@ func (bc *bitrateController) totalBitrates() uint32 {
 }
 
 func (bc *bitrateController) setQuality(clientTrackID string, quality QualityLevel) {
-	bc.mu.Lock()
-	defer bc.mu.Unlock()
-
-	if claim, ok := bc.claims[clientTrackID]; ok {
-		claim.mu.Lock()
+	if val, ok := bc.claims.Load(clientTrackID); ok {
+		claim := val.(*bitrateClaim)
 		claim.quality = quality
-		claim.mu.Unlock()
 
-		bc.claims[clientTrackID] = claim
+		bc.claims.Store(clientTrackID, claim)
 	}
 }
 
@@ -314,13 +299,11 @@ func (bc *bitrateController) addClaims(clientTracks []iClientTrack) error {
 		if clientTrack.Kind() == webrtc.RTPCodecTypeVideo {
 
 			// bc.log.Infof("bitratecontroller: track ", clientTrack.ID(), " quality ", trackQuality)
-			bc.mu.RLock()
-			if _, ok := bc.claims[clientTrack.ID()]; ok {
+
+			if _, ok := bc.claims.Load(clientTrack.ID()); ok {
 				errors = append(errors, ErrAlreadyClaimed)
-				bc.mu.RUnlock()
 				continue
 			}
-			bc.mu.RUnlock()
 
 			// set last quality that use for requesting PLI after claim added
 			if clientTrack.IsSimulcast() {
@@ -352,11 +335,7 @@ func (bc *bitrateController) addClaim(clientTrack iClientTrack, quality QualityL
 		simulcast: clientTrack.IsSimulcast(),
 	}
 
-	bc.mu.Lock()
-
-	bc.claims[clientTrack.ID()] = claim
-
-	bc.mu.Unlock()
+	bc.claims.Store(clientTrack.ID(), claim)
 
 	clientTrack.OnEnded(func() {
 		bc.removeClaim(clientTrack.ID())
@@ -368,26 +347,9 @@ func (bc *bitrateController) addClaim(clientTrack iClientTrack, quality QualityL
 }
 
 func (bc *bitrateController) removeClaim(id string) {
-	bc.mu.Lock()
-	defer bc.mu.Unlock()
-
-	if _, ok := bc.claims[id]; !ok {
+	if _, exist := bc.claims.LoadAndDelete(id); !exist {
 		bc.log.Errorf("bitrate: track %s is not exists", id)
-		return
 	}
-
-	delete(bc.claims, id)
-}
-
-func (bc *bitrateController) exists(id string) bool {
-	bc.mu.RLock()
-	defer bc.mu.RUnlock()
-
-	if _, ok := bc.claims[id]; ok {
-		return true
-	}
-
-	return false
 }
 
 func (bc *bitrateController) totalSentBitrates() uint32 {
@@ -458,10 +420,8 @@ func (bc *bitrateController) loopMonitor() {
 		case <-ticker.C:
 			var needAdjustment bool
 
-			bc.mu.RLock()
 			totalSendBitrates := bc.totalSentBitrates()
 			bw := bc.client.GetEstimatedBandwidth()
-			bc.mu.RUnlock()
 
 			if totalSendBitrates == 0 {
 				bc.log.Trace("bitratecontroller: no track to adjust")
@@ -492,11 +452,6 @@ func (bc *bitrateController) loopMonitor() {
 			}
 
 			bc.fitBitratesToBandwidth(uint32(bw))
-
-			bc.mu.Lock()
-			bc.lastBitrateAdjustmentTS = time.Now()
-			bc.mu.Unlock()
-
 		}
 	}
 
@@ -596,14 +551,13 @@ func (bc *bitrateController) getPrevQuality(quality QualityLevel) QualityLevel {
 }
 
 func (bc *bitrateController) onRemoteViewedSizeChanged(videoSize videoSize) {
-	bc.mu.RLock()
-	defer bc.mu.RUnlock()
-
-	claim, ok := bc.claims[videoSize.TrackID]
+	val, ok := bc.claims.Load(videoSize.TrackID)
 	if !ok {
 		bc.log.Errorf("bitrate: track %s is not exists", videoSize.TrackID)
 		return
 	}
+
+	claim := val.(*bitrateClaim)
 
 	if claim.track.Kind() != webrtc.RTPCodecTypeVideo {
 		bc.log.Errorf("bitrate: track %s is not video track", videoSize.TrackID)

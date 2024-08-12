@@ -134,7 +134,7 @@ func (t *simulcastClientTrack) push(p *rtp.Packet, quality QualityLevel) {
 		targetQuality = QualityLow
 	}
 
-	if !t.client.bitrateController.exists(t.ID()) {
+	if !t.client.bitrateController.Exist(t.ID()) {
 		// do nothing if the bitrate claim is not exist
 		return
 	}
