@@ -149,7 +149,6 @@ func (t *scaleableClientTrack) getQuality() QualityLevel {
 }
 
 func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
-	var isLatePacket bool
 
 	vp9Packet := &codecs.VP9Packet{}
 	if _, err := vp9Packet.Unmarshal(p.Payload); err != nil {
@@ -198,7 +197,7 @@ func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 			t.sid = vp9Packet.SID
 			currentSID = t.sid
 		}
-	} else if currentSID > targetSID && !isLatePacket {
+	} else if currentSID > targetSID {
 		if vp9Packet.E {
 			// scale spatsial down
 			t.sid = vp9Packet.SID
@@ -209,7 +208,8 @@ func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 		t.setLastQuality(quality)
 	}
 
-	if currentTID < vp9Packet.TID || currentSID < vp9Packet.SID {
+	sidNonReference := (p.Payload[0] & 0x01) != 0
+	if currentTID < vp9Packet.TID || currentSID < vp9Packet.SID || (vp9Packet.SID > currentSID && sidNonReference) {
 		// t.client.log.Infof("scalabletrack: packet ", p.SequenceNumber, " is dropped because of currentTID ", currentTID, "  < vp9Packet.TID", vp9Packet.TID)
 		ok := t.packetmap.Drop(p.SequenceNumber, vp9Packet.PictureID)
 		if ok {
@@ -222,9 +222,19 @@ func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 		p.Marker = true
 	}
 
-	ok, newseqno, _ := t.packetmap.Map(p.SequenceNumber, vp9Packet.PictureID)
+	ok, newseqno, piddelta := t.packetmap.Map(p.SequenceNumber, vp9Packet.PictureID)
 	if !ok {
 		return
+	}
+
+	marker := (p.Payload[1] & 0x80) != 0
+	if marker && newseqno == p.SequenceNumber && piddelta == 0 {
+		t.send(p)
+		return
+	}
+
+	if marker {
+		p.Payload[1] |= 0x80
 	}
 
 	p.SequenceNumber = newseqno

@@ -166,7 +166,6 @@ type Client struct {
 	onVoiceDetectedCallbacks          []func(voiceactivedetector.VoiceActivity)
 	onTrackRemovedCallbacks           []func(sourceType string, track *webrtc.TrackLocalStaticRTP)
 	onIceCandidate                    func(context.Context, *webrtc.ICECandidate)
-	onBeforeRenegotiation             func(context.Context) bool
 	onRenegotiation                   func(context.Context, webrtc.SessionDescription) (webrtc.SessionDescription, error)
 	onAllowedRemoteRenegotiation      func()
 	onTracksAvailableCallbacks        []func([]ITrack)
