@@ -226,7 +226,7 @@ func (c *ClientStats) SetReceiver(id, rid string, stats stats.Stats) {
 
 // UpdateVoiceActivity updates voice activity duration
 // 0 timestamp means ended
-func (c *ClientStats) UpdateVoiceActivity(ts uint32) {
+func (c *ClientStats) UpdateVoiceActivity(ts uint32, clockRate uint32) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -235,7 +235,8 @@ func (c *ClientStats) UpdateVoiceActivity(ts uint32) {
 		c.voiceActivity.start = ts
 	} else if c.voiceActivity.active && ts == 0 {
 		c.voiceActivity.active = false
-		c.voiceActivity.duration = c.voiceActivity.duration + ts - c.voiceActivity.start
+		duration := (ts - c.voiceActivity.start) * 1000 / clockRate
+		c.voiceActivity.duration = c.voiceActivity.duration + duration
 	}
 }
 

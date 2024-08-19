@@ -1455,8 +1455,8 @@ func (c *Client) GetEstimatedBandwidth() uint32 {
 		return c.sfu.bitrateConfigs.InitialBandwidth
 	}
 
-	// overshot the bandwidth by 10%
-	return uint32(c.estimator.GetTargetBitrate() * 1100 / 1000)
+	// overshot the bandwidth by 40%
+	return uint32(c.estimator.GetTargetBitrate() * 1400 / 1000)
 }
 
 // This should get from the publisher client using RTCIceCandidatePairStats.availableOutgoingBitrate
@@ -1568,7 +1568,7 @@ func (c *Client) Stats() ClientTrackStats {
 		Receives:                 make([]TrackReceivedStats, 0),
 		CurrentPublishLimitation: c.ingressQualityLimitationReason.Load().(string),
 		CurrentConsumerBitrate:   c.bitrateController.totalSentBitrates(),
-		VoiceActivityDuration:    uint32(c.stats.VoiceActivity().Milliseconds()),
+		VoiceActivityDurationMS:  uint32(c.stats.VoiceActivity().Milliseconds()),
 	}
 
 	for _, track := range c.Tracks() {
@@ -1792,13 +1792,12 @@ func (c *Client) OnVoiceReceivedDetected(callback func(activity voiceactivedetec
 func (c *Client) enableVADStatUpdate() {
 	c.OnVoiceReceivedDetected(func(activity voiceactivedetector.VoiceActivity) {
 		if len(activity.AudioLevels) == 0 {
-			c.stats.UpdateVoiceActivity(0)
+			c.stats.UpdateVoiceActivity(0, 0)
 			return
 		}
 
 		for _, data := range activity.AudioLevels {
-			duration := data.Timestamp * 1000 / activity.ClockRate
-			c.stats.UpdateVoiceActivity(duration)
+			c.stats.UpdateVoiceActivity(data.Timestamp, activity.ClockRate)
 		}
 	})
 }
