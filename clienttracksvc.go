@@ -271,6 +271,10 @@ func (t *scaleableClientTrack) setLastQuality(quality QualityLevel) {
 	t.lastQuality = quality
 }
 
+func (t *scaleableClientTrack) Quality() QualityLevel {
+	return t.LastQuality()
+}
+
 func (t *scaleableClientTrack) LastQuality() QualityLevel {
 	t.mu.RLock()
 	defer t.mu.RUnlock()

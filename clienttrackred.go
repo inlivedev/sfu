@@ -102,3 +102,8 @@ func extractPrimaryEncodingForRED(payload []byte) ([]byte, error) {
 func (t *clientTrackRed) Quality() QualityLevel {
 	return QualityAudioRed
 }
+
+func (t *clientTrackRed) MaxQuality() QualityLevel {
+
+	return QualityAudioRed
+}

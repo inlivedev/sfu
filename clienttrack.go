@@ -181,7 +181,11 @@ func (t *clientTrack) SetMaxQuality(_ QualityLevel) {
 }
 
 func (t *clientTrack) MaxQuality() QualityLevel {
-	return QualityHigh
+	if t.Kind() == webrtc.RTPCodecTypeVideo {
+		return QualityHigh
+	}
+
+	return QualityAudio
 }
 
 func (t *clientTrack) SSRC() webrtc.SSRC {
