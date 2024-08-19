@@ -163,7 +163,8 @@ type Client struct {
 	onConnectionStateChangedCallbacks []func(webrtc.PeerConnectionState)
 	onJoinedCallbacks                 []func()
 	onLeftCallbacks                   []func()
-	onVoiceDetectedCallbacks          []func(voiceactivedetector.VoiceActivity)
+	onVoiceSentDetectedCallbacks      []func(voiceactivedetector.VoiceActivity)
+	onVoiceReceivedDetectedCallbacks  []func(voiceactivedetector.VoiceActivity)
 	onTrackRemovedCallbacks           []func(sourceType string, track *webrtc.TrackLocalStaticRTP)
 	onIceCandidate                    func(context.Context, *webrtc.ICECandidate)
 	onRenegotiation                   func(context.Context, webrtc.SessionDescription) (webrtc.SessionDescription, error)
@@ -511,7 +512,19 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 			if opts.EnableVoiceDetection && remoteTrack.Kind() == webrtc.RTPCodecTypeAudio {
 				vad, ok := vads[uint32(remoteTrack.SSRC())]
 				if ok {
-					track.(*AudioTrack).SetVAD(vad)
+					audioTrack := track.(*AudioTrack)
+					audioTrack.SetVAD(vad)
+					audioTrack.OnVoiceDetected(func(pkts []voiceactivedetector.VoicePacketData) {
+						activity := voiceactivedetector.VoiceActivity{
+							TrackID:     track.ID(),
+							StreamID:    track.StreamID(),
+							SSRC:        uint32(audioTrack.SSRC()),
+							ClockRate:   audioTrack.base.codec.ClockRate,
+							AudioLevels: pkts,
+						}
+
+						client.onVoiceReceiveDetected(activity)
+					})
 				} else {
 					client.log.Errorf("client: error voice detector not found")
 				}
@@ -1442,7 +1455,8 @@ func (c *Client) GetEstimatedBandwidth() uint32 {
 		return c.sfu.bitrateConfigs.InitialBandwidth
 	}
 
-	return uint32(c.estimator.GetTargetBitrate())
+	// overshot the bandwidth by 10%
+	return uint32(c.estimator.GetTargetBitrate() * 1100 / 1000)
 }
 
 // This should get from the publisher client using RTCIceCandidatePairStats.availableOutgoingBitrate
@@ -1650,6 +1664,7 @@ func (c *Client) Stats() ClientTrackStats {
 			CurrentBitrate: track.SendBitrate(),
 			Source:         source,
 			Quality:        track.Quality(),
+			MaxQuality:     track.MaxQuality(),
 		}
 
 		clientStats.Sents = append(clientStats.Sents, sentStats)
@@ -1689,15 +1704,17 @@ func (c *Client) onTracksAvailable(tracks []ITrack) {
 
 // OnVoiceDetected event is called when the SFU is detecting voice activity in the room.
 // The callback will receive the voice activity data that can be use for visual indicator of current speaker.
-func (c *Client) OnVoiceDetected(callback func(activity voiceactivedetector.VoiceActivity)) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+func (c *Client) OnVoiceSentDetected(callback func(activity voiceactivedetector.VoiceActivity)) {
+	c.muCallback.Lock()
+	defer c.muCallback.Unlock()
 
-	c.onVoiceDetectedCallbacks = append(c.onVoiceDetectedCallbacks, callback)
+	c.onVoiceSentDetectedCallbacks = append(c.onVoiceSentDetectedCallbacks, callback)
 }
 
-func (c *Client) onVoiceDetected(activity voiceactivedetector.VoiceActivity) {
-	for _, callback := range c.onVoiceDetectedCallbacks {
+func (c *Client) onVoiceSentDetected(activity voiceactivedetector.VoiceActivity) {
+	c.muCallback.Lock()
+	defer c.muCallback.Unlock()
+	for _, callback := range c.onVoiceSentDetectedCallbacks {
 		callback(activity)
 	}
 }
@@ -1707,7 +1724,7 @@ func (c *Client) IsVADEnabled() bool {
 }
 
 func (c *Client) enableSendVADToInternalDataChannel() {
-	c.OnVoiceDetected(func(activity voiceactivedetector.VoiceActivity) {
+	c.OnVoiceSentDetected(func(activity voiceactivedetector.VoiceActivity) {
 		if c.internalDataChannel == nil {
 			return
 		}
@@ -1765,8 +1782,15 @@ func (c *Client) sendVad(dataType string, activity voiceactivedetector.VoiceActi
 	}
 }
 
+func (c *Client) OnVoiceReceivedDetected(callback func(activity voiceactivedetector.VoiceActivity)) {
+	c.muCallback.Lock()
+	defer c.muCallback.Unlock()
+
+	c.onVoiceReceivedDetectedCallbacks = append(c.onVoiceReceivedDetectedCallbacks, callback)
+}
+
 func (c *Client) enableVADStatUpdate() {
-	c.OnVoiceDetected(func(activity voiceactivedetector.VoiceActivity) {
+	c.OnVoiceReceivedDetected(func(activity voiceactivedetector.VoiceActivity) {
 		if len(activity.AudioLevels) == 0 {
 			c.stats.UpdateVoiceActivity(0)
 			return
@@ -1777,6 +1801,15 @@ func (c *Client) enableVADStatUpdate() {
 			c.stats.UpdateVoiceActivity(duration)
 		}
 	})
+}
+
+func (c *Client) onVoiceReceiveDetected(activity voiceactivedetector.VoiceActivity) {
+	c.muCallback.Lock()
+	defer c.muCallback.Unlock()
+
+	for _, callback := range c.onVoiceReceivedDetectedCallbacks {
+		callback(activity)
+	}
 }
 
 func (c *Client) Tracks() []ITrack {

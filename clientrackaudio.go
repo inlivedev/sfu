@@ -38,7 +38,7 @@ func newClientTrackAudio(c *Client, t ITrack) *clientTrackAudio {
 				AudioLevels: pkts,
 			}
 
-			c.onVoiceDetected(activity)
+			c.onVoiceSentDetected(activity)
 		})
 	}
 
