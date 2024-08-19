@@ -233,10 +233,12 @@ func (c *ClientStats) UpdateVoiceActivity(ts uint32, clockRate uint32) {
 	if !c.voiceActivity.active && ts != 0 {
 		c.voiceActivity.active = true
 		c.voiceActivity.start = ts
+	} else if c.voiceActivity.active && ts != 0 {
+		duration := (ts - c.voiceActivity.start) * 1000 / clockRate
+		c.voiceActivity.start = ts
+		c.voiceActivity.duration = c.voiceActivity.duration + duration
 	} else if c.voiceActivity.active && ts == 0 {
 		c.voiceActivity.active = false
-		duration := (ts - c.voiceActivity.start) * 1000 / clockRate
-		c.voiceActivity.duration = c.voiceActivity.duration + duration
 	}
 }
 
