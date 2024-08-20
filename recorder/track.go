@@ -1,15 +1,19 @@
 package recorder
 
 import (
-	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"io"
-	"sync"
 
 	"github.com/pion/rtp"
 )
+
+type TrackConfig struct {
+	TrackID  string
+	ClientID string
+	RoomID   string
+	MimeType string
+}
 
 type TrackRecorder interface {
 	Write(data []byte) (int, error)
@@ -18,14 +22,10 @@ type TrackRecorder interface {
 }
 
 type QuicTrack struct {
-	TrackID   string
-	ClientID  string
-	RoomID    string
-	stream    io.WriteCloser
-	buffer    bytes.Buffer
-	cancelFn  context.CancelFunc
-	cancelCtx context.Context
-	mu        sync.Mutex
+	TrackID  string
+	ClientID string
+	RoomID   string
+	stream   io.WriteCloser
 }
 
 func NewQuickTrackRecorder(conf *TrackConfig, stream io.WriteCloser) (TrackRecorder, error) {
@@ -33,16 +33,11 @@ func NewQuickTrackRecorder(conf *TrackConfig, stream io.WriteCloser) (TrackRecor
 		return nil, err
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
 	track := &QuicTrack{
-		TrackID:   conf.TrackID,
-		ClientID:  conf.ClientID,
-		RoomID:    conf.RoomID,
-		stream:    stream,
-		buffer:    bytes.Buffer{},
-		cancelFn:  cancel,
-		cancelCtx: ctx,
-		mu:        sync.Mutex{},
+		TrackID:  conf.TrackID,
+		ClientID: conf.ClientID,
+		RoomID:   conf.RoomID,
+		stream:   stream,
 	}
 
 	err := track.sendNewTrackPacket(conf)
@@ -65,10 +60,6 @@ func (q *QuicTrack) WritePacket(packet *rtp.Packet) (int, error) {
 	return q.Write(p)
 }
 
-func (q *QuicTrack) Close() error {
-	return q.stream.Close()
-}
-
 func (q *QuicTrack) sendNewTrackPacket(conf *TrackConfig) error {
 	data, err := json.Marshal(conf)
 	if err != nil {
@@ -77,6 +68,18 @@ func (q *QuicTrack) sendNewTrackPacket(conf *TrackConfig) error {
 
 	_, err = q.Write(data)
 	return err
+}
+
+func (q *QuicTrack) sendTrackEndPacket() error {
+	_, err := q.Write([]byte{0x00})
+	return err
+}
+func (q *QuicTrack) Close() error {
+	err := q.sendTrackEndPacket()
+	if err != nil {
+		return err
+	}
+	return q.stream.Close()
 }
 
 func validateTrackConfig(conf *TrackConfig) error {
