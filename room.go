@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/pion/webrtc/v4"
+	"github.com/quic-go/quic-go"
+	"github.com/samespace/sfu/recorder"
 )
 
 const (
@@ -68,6 +70,7 @@ type Room struct {
 	kind                    string
 	extensions              []IExtension
 	OnEvent                 func(event Event)
+	quicClient              quic.Connection
 	options                 RoomOptions
 }
 
@@ -84,7 +87,11 @@ type RoomOptions struct {
 	// Use this to use scalable video coding (SVC) to control the bitrate level of the video
 	QualityPresets *QualityPresets `json:"quality_presets,omitempty"`
 	// Configure the timeout in nanonseconds when the room is empty it will close after the timeout exceeded. Default is 5 minutes
-	EmptyRoomTimeout *time.Duration `json:"empty_room_timeout_ns,ompitempty" example:"300000000000" default:"300000000000"`
+	EmptyRoomTimeout *time.Duration `json:"empty_room_timeout_ns,omitempty" example:"300000000000" default:"300000000000"`
+	// Configure the auto record feature
+	AutoRecord bool `json:"auto_record"`
+	// Configure the quic configuration for recording
+	QuicConfig []*recorder.QuicConfig `json:"quic_config,omitempty"`
 }
 
 func DefaultRoomOptions() RoomOptions {
@@ -96,11 +103,13 @@ func DefaultRoomOptions() RoomOptions {
 		Codecs:           &[]string{webrtc.MimeTypeVP9, webrtc.MimeTypeH264, webrtc.MimeTypeVP8, "audio/red", webrtc.MimeTypeOpus, webrtc.MimeTypePCMU, webrtc.MimeTypePCMA},
 		PLIInterval:      &pli,
 		EmptyRoomTimeout: &emptyDuration,
+		AutoRecord:       true,
 	}
 }
 
 func newRoom(id, name string, sfu *SFU, kind string, opts RoomOptions) *Room {
 	localContext, cancel := context.WithCancel(sfu.context)
+	q, _ := recorder.GetRandomQuicClient(opts.QuicConfig)
 
 	room := &Room{
 		id:         id,
@@ -115,6 +124,7 @@ func newRoom(id, name string, sfu *SFU, kind string, opts RoomOptions) *Room {
 		meta:       NewMetadata(),
 		extensions: make([]IExtension, 0),
 		kind:       kind,
+		quicClient: q,
 		options:    opts,
 	}
 
@@ -197,6 +207,14 @@ func (r *Room) AddClient(id, name string, opts ClientOptions) (*Client, error) {
 	client, _ := r.sfu.GetClient(id)
 	if client != nil {
 		return nil, ErrClientExists
+	}
+
+	if r.options.AutoRecord {
+		opts.AutoRecord = true
+	}
+
+	if r.quicClient != nil {
+		opts.QuicConnection = r.quicClient
 	}
 
 	client = r.sfu.NewClient(id, name, opts)

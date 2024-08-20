@@ -2,15 +2,6 @@ package recorder
 
 import "encoding/json"
 
-type PacketType int
-
-const (
-	PacketTypeNewTrack PacketType = iota
-	PacketTypeRTP
-	PacketTypeRoomClosed
-	PacketTypeTrackClosed
-)
-
 type TrackConfig struct {
 	TrackID  string
 	ClientID string

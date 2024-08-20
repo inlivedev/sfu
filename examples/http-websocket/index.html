@@ -496,6 +496,12 @@
                 }
 
                 for (let i = 0; i < audioCodecs.length; i++) {
+                    if (audioCodecs[i].mimeType == "audio/opus") {
+                        audioCodecsPref.push(audioCodecs[i]);
+                    }
+                }
+
+                for (let i = 0; i < audioCodecs.length; i++) {
                     if (audioCodecs[i].mimeType == "audio/PCMA") {
                         audioCodecsPref.push(audioCodecs[i]);
                     }

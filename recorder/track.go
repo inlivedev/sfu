@@ -6,23 +6,29 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"log"
 	"sync"
-	"time"
+
+	"github.com/pion/rtp"
 )
+
+type TrackRecorder interface {
+	Write(data []byte) (int, error)
+	WritePacket(packet *rtp.Packet) (int, error)
+	Close() error
+}
 
 type QuicTrack struct {
 	TrackID   string
 	ClientID  string
 	RoomID    string
 	stream    io.WriteCloser
-	buffer    *bytes.Buffer
+	buffer    bytes.Buffer
 	cancelFn  context.CancelFunc
 	cancelCtx context.Context
 	mu        sync.Mutex
 }
 
-func NewTrack(conf *TrackConfig, stream io.WriteCloser) (*QuicTrack, error) {
+func NewQuickTrackRecorder(conf *TrackConfig, stream io.WriteCloser) (TrackRecorder, error) {
 	if err := validateTrackConfig(conf); err != nil {
 		return nil, err
 	}
@@ -33,86 +39,43 @@ func NewTrack(conf *TrackConfig, stream io.WriteCloser) (*QuicTrack, error) {
 		ClientID:  conf.ClientID,
 		RoomID:    conf.RoomID,
 		stream:    stream,
-		buffer:    bytes.NewBuffer(nil),
+		buffer:    bytes.Buffer{},
 		cancelFn:  cancel,
 		cancelCtx: ctx,
+		mu:        sync.Mutex{},
 	}
 
-	go track.startWriter()
-
-	if err := track.sendNewTrackPacket(conf); err != nil {
+	err := track.sendNewTrackPacket(conf)
+	if err != nil {
 		return nil, err
 	}
+
 	return track, nil
 }
 
-func (quicTrack *QuicTrack) startWriter() {
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-quicTrack.cancelCtx.Done():
-			quicTrack.flush()
-			return
-		case <-ticker.C:
-			quicTrack.flush()
-		}
-	}
+func (q *QuicTrack) Write(data []byte) (int, error) {
+	return q.stream.Write(data)
 }
 
-func (quicTrack *QuicTrack) flush() {
-	quicTrack.mu.Lock()
-	defer quicTrack.mu.Unlock()
-
-	if quicTrack.buffer.Len() > 0 {
-		data := quicTrack.buffer.Bytes()
-		if _, err := quicTrack.WriteRTP(data); err != nil {
-			log.Printf("Error writing RTP data: %v", err)
-		}
-		quicTrack.buffer.Reset()
-	}
-}
-
-func (quicTrack *QuicTrack) Write(p []byte) (int, error) {
-	quicTrack.mu.Lock()
-	defer quicTrack.mu.Unlock()
-	return quicTrack.buffer.Write(p)
-}
-
-func (quicTrack *QuicTrack) WritePacket(p *StreamPacket) (int, error) {
-	data, err := json.Marshal(p)
+func (q *QuicTrack) WritePacket(packet *rtp.Packet) (int, error) {
+	p, err := packet.Marshal()
 	if err != nil {
 		return 0, err
 	}
-	return quicTrack.stream.Write(data)
+	return q.Write(p)
 }
 
-func (quicTrack *QuicTrack) WriteRTP(data []byte) (int, error) {
-	packet := &StreamPacket{
-		PacketType: PacketTypeRTP,
-		Payload:    data,
-	}
-	return quicTrack.WritePacket(packet)
+func (q *QuicTrack) Close() error {
+	return q.stream.Close()
 }
 
-func (quicTrack *QuicTrack) Close() error {
-	quicTrack.flush()
-	return quicTrack.stream.Close()
-}
-
-func (quicTrack *QuicTrack) sendNewTrackPacket(conf *TrackConfig) error {
+func (q *QuicTrack) sendNewTrackPacket(conf *TrackConfig) error {
 	data, err := json.Marshal(conf)
 	if err != nil {
 		return err
 	}
 
-	packet := &StreamPacket{
-		PacketType: PacketTypeNewTrack,
-		Payload:    data,
-	}
-
-	_, err = quicTrack.WritePacket(packet)
+	_, err = q.Write(data)
 	return err
 }
 

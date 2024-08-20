@@ -20,6 +20,7 @@ import (
 	"github.com/pion/logging"
 	"github.com/pion/rtcp"
 	"github.com/pion/webrtc/v4"
+	"github.com/quic-go/quic-go"
 	"github.com/samespace/sfu/pkg/interceptors/playoutdelay"
 	"github.com/samespace/sfu/pkg/interceptors/voiceactivedetector"
 	"github.com/samespace/sfu/pkg/networkmonitor"
@@ -85,6 +86,8 @@ type ClientOptions struct {
 	ReorderPackets bool `json:"reorder_packets"`
 	Log            logging.LeveledLogger
 	settingEngine  webrtc.SettingEngine
+	AutoRecord     bool
+	QuicConnection quic.Connection
 }
 
 type internalDataMessage struct {
@@ -197,6 +200,7 @@ func DefaultClientOptions() ClientOptions {
 		JitterBufferMinWait:  20 * time.Millisecond,
 		JitterBufferMaxWait:  150 * time.Millisecond,
 		ReorderPackets:       false,
+		AutoRecord:           false,
 	}
 }
 
@@ -497,7 +501,11 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 			minWait := opts.JitterBufferMinWait
 			maxWait := opts.JitterBufferMaxWait
 
-			track = newTrack(client.context, client, remoteTrack, minWait, maxWait, s.pliInterval, onPLI, client.statsGetter, onStatsUpdated)
+			track, err = newTrack(client.context, client, remoteTrack, minWait, maxWait, s.pliInterval, onPLI, client.statsGetter, onStatsUpdated)
+			if err != nil {
+				fmt.Println(err)
+			}
+
 			track.OnEnded(func() {
 				client.stats.removeReceiverStats(remoteTrack.ID() + remoteTrack.RID())
 				client.tracks.remove([]string{remoteTrack.ID()})

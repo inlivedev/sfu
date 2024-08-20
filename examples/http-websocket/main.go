@@ -19,6 +19,7 @@ import (
 	"github.com/samespace/sfu/pkg/fakeclient"
 	"github.com/samespace/sfu/pkg/interceptors/voiceactivedetector"
 	"github.com/samespace/sfu/pkg/networkmonitor"
+	"github.com/samespace/sfu/recorder"
 	"golang.org/x/net/websocket"
 )
 
@@ -70,6 +71,42 @@ const (
 var logger logging.LeveledLogger
 
 func main() {
+
+	conn, err := recorder.NewQuicClient(context.Background(), &recorder.QuicConfig{
+		Host:     "127.0.0.1",
+		Port:     9000,
+		CertFile: "server.cert",
+		KeyFile:  "server.key",
+	})
+
+	fmt.Println(err)
+
+	if err != nil {
+		panic(err)
+	}
+
+	stream, err := conn.OpenUniStream()
+
+	quicStream := recorder.NewQuicStream(stream)
+
+	fmt.Println(err)
+	if err != nil {
+		panic(err)
+	}
+
+	rec, err := recorder.NewQuickTrackRecorder(&recorder.TrackConfig{
+		TrackID:  "test-track",
+		ClientID: "test-client",
+		RoomID:   "test-room",
+		MimeType: "audio/opus",
+	}, quicStream)
+
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Println(rec)
+
 	flag.Set("logtostderr", "true")
 	// flag.Set("stderrthreshold", "DEBUG")
 	// flag.Set("PIONS_LOG_INFO", "sfu,vad")
@@ -110,6 +147,14 @@ func main() {
 
 	// create new room
 	roomsOpts := sfu.DefaultRoomOptions()
+	roomsOpts.QuicConfig = []*recorder.QuicConfig{
+		{
+			Host:     "127.0.0.1",
+			Port:     9000,
+			CertFile: "server.cert",
+			KeyFile:  "server.key",
+		},
+	}
 	roomsOpts.Bitrates.InitialBandwidth = 1_000_000
 	// roomsOpts.PLIInterval = 3 * time.Second
 	defaultRoom, _ := roomManager.NewRoom(roomID, roomName, sfu.RoomTypeLocal, roomsOpts)
@@ -154,7 +199,7 @@ func main() {
 
 	logger.Info("Listening on http://localhost:8000 ...")
 
-	err := http.ListenAndServe(":8000", nil)
+	err = http.ListenAndServe(":8000", nil)
 	if err != nil {
 		log.Panic(err)
 	}

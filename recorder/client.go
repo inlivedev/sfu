@@ -3,10 +3,9 @@ package recorder
 import (
 	"context"
 	"crypto/tls"
-	"crypto/x509"
 	"fmt"
+	"math/rand"
 	"net"
-	"os"
 	"time"
 
 	"github.com/quic-go/quic-go"
@@ -19,38 +18,33 @@ type QuicConfig struct {
 	KeyFile  string
 }
 
-func NewQuicClient(ctx context.Context, config *QuicConfig) (quic.Connection, error) {
-	addr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", config.Host, config.Port))
-	if err != nil {
-		return nil, fmt.Errorf("failed to resolve UDP address: %w", err)
-	}
+func GetRandomQuicClient(config []*QuicConfig) (quic.Connection, error) {
+	return NewQuicClient(context.Background(), config[rand.Intn(len(config))])
+}
 
+func readCertAndKey() *tls.Config {
+	cert, err := tls.LoadX509KeyPair("server.cert", "server.key")
+	if err != nil {
+		panic(err)
+	}
+	return &tls.Config{
+		Certificates:       []tls.Certificate{cert},
+		NextProtos:         []string{"quic-echo-example"},
+		InsecureSkipVerify: true,
+	}
+}
+
+func NewQuicClient(ctx context.Context, config *QuicConfig) (quic.Connection, error) {
 	udpConn, err := net.ListenUDP("udp", nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to listen on UDP: %w", err)
 	}
 	defer udpConn.Close()
-	cert, err := tls.LoadX509KeyPair(config.CertFile, config.KeyFile)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load certificate and key: %w", err)
-	}
-
-	certPool := x509.NewCertPool()
-	certBytes, err := os.ReadFile(config.CertFile)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read certificate file: %w", err)
-	}
-	certPool.AppendCertsFromPEM(certBytes)
-	tlsConfig := &tls.Config{
-		RootCAs:            certPool,
-		Certificates:       []tls.Certificate{cert},
-		InsecureSkipVerify: true,
-	}
-
+	tlsConfig := readCertAndKey()
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	conn, err := quic.DialEarly(ctx, udpConn, addr, tlsConfig, &quic.Config{})
+	conn, err := quic.DialAddr(ctx, "127.0.0.1:9000", tlsConfig, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to dial QUIC connection: %w", err)
 	}
