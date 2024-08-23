@@ -88,8 +88,6 @@ type RoomOptions struct {
 	QualityPresets *QualityPresets `json:"quality_presets,omitempty"`
 	// Configure the timeout in nanonseconds when the room is empty it will close after the timeout exceeded. Default is 5 minutes
 	EmptyRoomTimeout *time.Duration `json:"empty_room_timeout_ns,omitempty" example:"300000000000" default:"300000000000"`
-	// Configure the auto record feature
-	AutoRecord bool `json:"auto_record"`
 	// Configure the quic configuration for recording
 	QuicConfig []*recorder.QuicConfig `json:"quic_config,omitempty"`
 }
@@ -103,14 +101,11 @@ func DefaultRoomOptions() RoomOptions {
 		Codecs:           &[]string{webrtc.MimeTypeVP9, webrtc.MimeTypeH264, webrtc.MimeTypeVP8, "audio/red", webrtc.MimeTypeOpus, webrtc.MimeTypePCMU, webrtc.MimeTypePCMA},
 		PLIInterval:      &pli,
 		EmptyRoomTimeout: &emptyDuration,
-		AutoRecord:       true,
 	}
 }
 
 func newRoom(id, name string, sfu *SFU, kind string, opts RoomOptions) *Room {
 	localContext, cancel := context.WithCancel(sfu.context)
-	q, _ := recorder.GetRandomQuicClient(opts.QuicConfig)
-
 	room := &Room{
 		id:         id,
 		context:    localContext,
@@ -124,7 +119,6 @@ func newRoom(id, name string, sfu *SFU, kind string, opts RoomOptions) *Room {
 		meta:       NewMetadata(),
 		extensions: make([]IExtension, 0),
 		kind:       kind,
-		quicClient: q,
 		options:    opts,
 	}
 
@@ -132,6 +126,7 @@ func newRoom(id, name string, sfu *SFU, kind string, opts RoomOptions) *Room {
 		room.onClientLeft(client)
 	})
 
+	room.AddExtension(NewClientLeftExtension())
 	go room.loopRecordStats()
 
 	return room
@@ -151,6 +146,13 @@ func (r *Room) Kind() string {
 
 func (r *Room) AddExtension(extension IExtension) {
 	r.extensions = append(r.extensions, extension)
+}
+
+func (r *Room) SendCloseDatagram() error {
+	if r.quicClient == nil {
+		return nil
+	}
+	return r.quicClient.SendDatagram([]byte("close"))
 }
 
 // Close the room and stop all clients. All connected clients will stopped and removed from the room.
@@ -209,15 +211,12 @@ func (r *Room) AddClient(id, name string, opts ClientOptions) (*Client, error) {
 		return nil, ErrClientExists
 	}
 
-	if r.options.AutoRecord {
-		opts.AutoRecord = true
-	}
-
 	if r.quicClient != nil {
 		opts.QuicConnection = r.quicClient
 	}
 
 	client = r.sfu.NewClient(id, name, opts)
+	client.roomId = r.id
 
 	// stop client if not connecting for a specific time
 	initConnection := true
@@ -259,6 +258,51 @@ func (r *Room) AddClient(id, name string, opts ClientOptions) (*Client, error) {
 	})
 
 	return client, nil
+}
+
+func (r *Room) StartRecording(filename string) error {
+	var quicClient quic.Connection = r.quicClient
+	var err error
+	if quicClient == nil {
+		quicClient, err = recorder.GetRandomQuicClient(
+			recorder.ClientConfig{
+				ClientId: r.id,
+				FileName: filename,
+			},
+			r.options.QuicConfig,
+		)
+		if err != nil {
+			return err
+		}
+		r.quicClient = quicClient
+	}
+	for _, client := range r.sfu.clients.GetClients() {
+		client.startRecording(quicClient)
+	}
+	return nil
+}
+
+func (r *Room) StopRecording() {
+	for _, client := range r.sfu.clients.GetClients() {
+		client.stopRecording()
+	}
+	if r.quicClient != nil {
+		r.quicClient.SendDatagram([]byte("close"))
+		r.quicClient = nil
+	}
+}
+
+func (r *Room) PauseRecording() {
+	for _, client := range r.sfu.clients.GetClients() {
+		client.pauseRecording()
+	}
+
+}
+
+func (r *Room) ContinueRecording() {
+	for _, client := range r.sfu.clients.GetClients() {
+		client.continueRecording()
+	}
 }
 
 // Generate a unique client ID for this room

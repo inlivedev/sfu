@@ -3,9 +3,9 @@ package recorder
 import (
 	"context"
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
 	"math/rand"
-	"net"
 	"time"
 
 	"github.com/quic-go/quic-go"
@@ -18,8 +18,13 @@ type QuicConfig struct {
 	KeyFile  string
 }
 
-func GetRandomQuicClient(config []*QuicConfig) (quic.Connection, error) {
-	return NewQuicClient(context.Background(), config[rand.Intn(len(config))])
+type ClientConfig struct {
+	ClientId string
+	FileName string
+}
+
+func GetRandomQuicClient(clientConfig ClientConfig, config []*QuicConfig) (quic.Connection, error) {
+	return NewQuicClient(context.Background(), clientConfig, config[rand.Intn(len(config))])
 }
 
 func readCertAndKey() *tls.Config {
@@ -34,20 +39,33 @@ func readCertAndKey() *tls.Config {
 	}
 }
 
-func NewQuicClient(ctx context.Context, config *QuicConfig) (quic.Connection, error) {
-	udpConn, err := net.ListenUDP("udp", nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to listen on UDP: %w", err)
-	}
-	defer udpConn.Close()
+func NewQuicClient(ctx context.Context, clientConfig ClientConfig, config *QuicConfig) (quic.Connection, error) {
+	var conn quic.Connection
+	var err error
+
 	tlsConfig := readCertAndKey()
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
+	address := fmt.Sprintf("%s:%d", config.Host, config.Port)
 
-	conn, err := quic.DialAddr(ctx, "127.0.0.1:9000", tlsConfig, nil)
-	if err != nil {
-		return nil, fmt.Errorf("failed to dial QUIC connection: %w", err)
+	for retries := 0; retries < 5; retries++ {
+		fmt.Printf("Attempting connection (attempt %d)...\n", retries+1)
+		ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+
+		conn, err = quic.DialAddr(ctx, address, tlsConfig, &quic.Config{
+			EnableDatagrams: true,
+		})
+		if err == nil {
+			j, _ := json.Marshal(clientConfig)
+			err := conn.SendDatagram(j)
+			if err != nil {
+				return nil, err
+			}
+			return conn, nil
+		}
+
+		fmt.Printf("Connection failed (attempt %d): %v\n", retries+1, err)
+		time.Sleep(time.Duration(2<<retries) * time.Second) // backoff exponentially
 	}
 
-	return conn, nil
+	return nil, fmt.Errorf("failed to establish QUIC connection after retries: %w", err)
 }

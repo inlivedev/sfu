@@ -11,7 +11,6 @@ import (
 	"github.com/pion/logging"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
-	"github.com/pion/webrtc/v4/pkg/media/oggwriter"
 	"github.com/quic-go/quic-go"
 	"github.com/samespace/sfu/pkg/networkmonitor"
 	"github.com/samespace/sfu/pkg/rtppool"
@@ -67,6 +66,10 @@ type ITrack interface {
 	Relay(func(webrtc.SSRC, *rtp.Packet))
 	PayloadType() webrtc.PayloadType
 	OnEnded(func())
+	StartRecording(quic.SendStream) error
+	StopRecording()
+	PauseRecording()
+	ContinueRecording()
 }
 
 type Track struct {
@@ -76,7 +79,7 @@ type Track struct {
 	remoteTrack      *remoteTrack
 	onEndedCallbacks []func()
 	onReadCallbacks  []func(*rtp.Packet, QualityLevel)
-	oggWriter        *oggwriter.OggWriter
+	trackRecorder    recorder.TrackRecorder
 	isRecording      atomic.Bool
 	isPaused         atomic.Bool
 }
@@ -96,34 +99,13 @@ func newTrack(ctx context.Context, client *Client, trackRemote IRemoteTrack, min
 		pool:         pool,
 	}
 
-	var stream quic.SendStream
-	var err error
-	stream, err = client.options.QuicConnection.OpenUniStream()
-	if err != nil {
-		return nil, err
-	}
-
-	tr, err := recorder.NewQuickTrackRecorder(&recorder.TrackConfig{
-		TrackID:  trackRemote.ID(),
-		ClientID: client.id,
-		RoomID:   client.name,
-		MimeType: trackRemote.Codec().MimeType,
-	}, stream)
-	if err != nil {
-		return nil, err
-	}
-
-	oggw, err := oggwriter.NewWith(tr, 48000, 2)
-	if err != nil {
-		return nil, err
-	}
-
 	t := &Track{
 		mu:               sync.Mutex{},
 		base:             baseTrack,
 		onReadCallbacks:  make([]func(*rtp.Packet, QualityLevel), 0),
 		onEndedCallbacks: make([]func(), 0),
-		oggWriter:        oggw,
+		isRecording:      atomic.Bool{},
+		isPaused:         atomic.Bool{},
 	}
 
 	onRead := func(p *rtp.Packet) {
@@ -151,7 +133,7 @@ func newTrack(ctx context.Context, client *Client, trackRemote IRemoteTrack, min
 		copyPacket.Header = *packet.Header()
 		copyPacket.Payload = packet.Payload()
 
-		if t.MimeType() == webrtc.MimeTypeOpus && t.oggWriter != nil {
+		if t.MimeType() == webrtc.MimeTypeOpus && t.trackRecorder != nil {
 			if t.isRecording.Load() {
 				var packet *rtp.Packet
 				if t.isPaused.Load() {
@@ -159,7 +141,8 @@ func newTrack(ctx context.Context, client *Client, trackRemote IRemoteTrack, min
 				} else {
 					packet = copyPacket.Clone()
 				}
-				t.oggWriter.WriteRTP(packet)
+				t.trackRecorder.WritePacket(packet)
+
 			}
 		}
 
@@ -188,11 +171,39 @@ func newTrack(ctx context.Context, client *Client, trackRemote IRemoteTrack, min
 	return t, nil
 }
 
-func (t *Track) StartRecording() {
+func (t *Track) StartRecording(stream quic.SendStream) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if t.Kind() != webrtc.RTPCodecTypeAudio {
+		return nil
+	}
+
+	if t.trackRecorder != nil {
+		return t.trackRecorder.Close()
+	}
+
+	tr, err := recorder.NewQuickTrackRecorder(&recorder.TrackConfig{
+		TrackID:  t.ID(),
+		ClientID: t.base.client.id,
+		RoomID:   t.base.client.roomId,
+		MimeType: t.MimeType(),
+	}, stream)
+
+	if err != nil {
+		return err
+	}
+
+	t.trackRecorder = tr
 	t.isRecording.CompareAndSwap(false, true)
+	return nil
 }
 
 func (t *Track) StopRecording() {
+	if t.trackRecorder != nil {
+		t.trackRecorder.Close()
+	}
+	t.trackRecorder = nil
 	t.isRecording.CompareAndSwap(true, false)
 }
 
@@ -200,7 +211,7 @@ func (t *Track) PauseRecording() {
 	t.isPaused.CompareAndSwap(false, true)
 }
 
-func (t *Track) ResumeRecording() {
+func (t *Track) ContinueRecording() {
 	t.isPaused.CompareAndSwap(true, false)
 }
 
@@ -486,6 +497,22 @@ func newSimulcastTrack(client *Client, track IRemoteTrack, minWait, maxWait, pli
 	})
 
 	return t
+}
+
+func (t *SimulcastTrack) StartRecording(stream quic.SendStream) error {
+	return nil
+}
+
+func (t *SimulcastTrack) StopRecording() {
+
+}
+
+func (t *SimulcastTrack) PauseRecording() {
+
+}
+
+func (t *SimulcastTrack) ContinueRecording() {
+
 }
 
 func (t *SimulcastTrack) ClientID() string {

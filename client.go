@@ -25,6 +25,7 @@ import (
 	"github.com/samespace/sfu/pkg/interceptors/voiceactivedetector"
 	"github.com/samespace/sfu/pkg/networkmonitor"
 	"github.com/samespace/sfu/pkg/pacer"
+	"github.com/samespace/sfu/recorder"
 )
 
 type ClientState int
@@ -86,7 +87,6 @@ type ClientOptions struct {
 	ReorderPackets bool `json:"reorder_packets"`
 	Log            logging.LeveledLogger
 	settingEngine  webrtc.SettingEngine
-	AutoRecord     bool
 	QuicConnection quic.Connection
 }
 
@@ -126,6 +126,7 @@ type remoteClientStats struct {
 type Client struct {
 	id                    string
 	name                  string
+	roomId                string
 	bitrateController     *bitrateController
 	context               context.Context
 	cancel                context.CancelFunc
@@ -144,6 +145,7 @@ type Client struct {
 	idleTimeoutCancel     context.CancelFunc
 	mu                    sync.RWMutex
 	peerConnection        *PeerConnection
+	quicClient            quic.Connection
 	// pending received tracks are the remote tracks from other clients that waiting to add when the client is connected
 	pendingReceivedTracks []SubscribeTrackRequest
 	// pending published tracks are the remote tracks that still state as unknown source, and can't be published until the client state the source media or screen
@@ -200,7 +202,6 @@ func DefaultClientOptions() ClientOptions {
 		JitterBufferMinWait:  20 * time.Millisecond,
 		JitterBufferMaxWait:  150 * time.Millisecond,
 		ReorderPackets:       false,
-		AutoRecord:           false,
 	}
 }
 
@@ -347,6 +348,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 	}
 
 	client.onTrack = func(track ITrack) {
+
 		if err := client.pendingPublishedTracks.Add(track); err == ErrTrackExists {
 			s.log.Errorf("client: client %s track already added ", track.ID())
 			// not an error could be because a simulcast track already added
@@ -583,6 +585,103 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 	})
 
 	return client
+}
+
+/*
+Starts an indivisual client recording session.
+Creates a new quic client solely for this client.
+*/
+func (c *Client) StartClientRecording(filename string) error {
+	c.log.Infof("client: start recording")
+
+	var quicClient quic.Connection = c.quicClient
+	var err error
+
+	if quicClient == nil {
+		quicClient, err = recorder.GetRandomQuicClient(
+			recorder.ClientConfig{
+				ClientId: c.ID(),
+				FileName: filename,
+			},
+			[]*recorder.QuicConfig{
+				{Host: "127.0.0.1",
+					Port:     9000,
+					CertFile: "server.cert",
+					KeyFile:  "server.key"},
+			},
+		)
+		c.quicClient = quicClient
+	}
+
+	if err != nil {
+		return err
+	}
+
+	for _, track := range c.tracks.GetTracks() {
+		stream, err := quicClient.OpenUniStream()
+		if err != nil {
+			return err
+		}
+		track.StartRecording(stream)
+	}
+
+	return nil
+}
+
+func (c *Client) StopClientRecording() {
+	for _, track := range c.tracks.GetTracks() {
+		track.StopRecording()
+	}
+	if c.quicClient != nil {
+		c.quicClient.SendDatagram([]byte("close"))
+		c.quicClient = nil
+	}
+}
+
+func (c *Client) PauseClientRecording() {
+	for _, track := range c.tracks.GetTracks() {
+		track.PauseRecording()
+	}
+}
+
+func (c *Client) ContinueClientRecording() {
+	for _, track := range c.tracks.GetTracks() {
+		track.ContinueRecording()
+	}
+}
+
+/*
+startRecording is called by the room to record the whole room
+*/
+func (c *Client) startRecording(conn quic.Connection) error {
+	c.log.Infof("client: start recording")
+	for _, track := range c.tracks.GetTracks() {
+		stream, err := conn.OpenUniStream()
+		if err != nil {
+			return err
+		}
+		track.StartRecording(stream)
+	}
+
+	return nil
+}
+
+func (c *Client) stopRecording() {
+	for _, track := range c.tracks.GetTracks() {
+		track.StopRecording()
+	}
+}
+
+func (c *Client) pauseRecording() {
+	for _, track := range c.tracks.GetTracks() {
+		track.PauseRecording()
+	}
+}
+
+func (c *Client) continueRecording() {
+	for _, track := range c.tracks.GetTracks() {
+		track.ContinueRecording()
+	}
 }
 
 func (c *Client) initDataChannel() {

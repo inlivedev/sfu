@@ -48,6 +48,8 @@ func NewManager(ctx context.Context, name string, options Options) *Manager {
 		log:        logger,
 	}
 
+	m.AddExtension(NewRecorderExtension())
+
 	return m
 }
 
