@@ -72,7 +72,12 @@ var logger logging.LeveledLogger
 
 func main() {
 
-	conn, err := recorder.NewQuicClient(context.Background(), &recorder.QuicConfig{
+	var err error
+
+	/* conn, err := recorder.NewQuicClient(context.Background(), recorder.ClientConfig{
+		ClientId: "test-client",
+		FileName: "test-room",
+	}, &recorder.QuicConfig{
 		Host:     "127.0.0.1",
 		Port:     9000,
 		CertFile: "server.cert",
@@ -87,8 +92,6 @@ func main() {
 
 	stream, err := conn.OpenUniStream()
 
-	quicStream := recorder.NewQuicStream(stream)
-
 	fmt.Println(err)
 	if err != nil {
 		panic(err)
@@ -99,14 +102,14 @@ func main() {
 		ClientID: "test-client",
 		RoomID:   "test-room",
 		MimeType: "audio/opus",
-	}, quicStream)
+	}, stream)
 
 	if err != nil {
 		panic(err)
 	}
 
 	fmt.Println(rec)
-
+	*/
 	flag.Set("logtostderr", "true")
 	// flag.Set("stderrthreshold", "DEBUG")
 	// flag.Set("PIONS_LOG_INFO", "sfu,vad")
@@ -521,6 +524,10 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 
 				conn.Write(respBytes)
 
+			} else if req.Type == "start_recording" {
+				r.StartRecording(client.ID() + ".webm")
+			} else if req.Type == "stop_recording" {
+				r.StopRecording()
 			} else {
 				logger.Errorf("unknown message type", req)
 			}
