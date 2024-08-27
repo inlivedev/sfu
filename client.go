@@ -589,7 +589,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 Starts an indivisual client recording session.
 Creates a new quic client solely for this client.
 */
-func (c *Client) StartClientRecording(filename string) error {
+func (c *Client) StartClientRecording(bucketName, filename string) error {
 	c.log.Infof("client: start recording")
 
 	var quicClient quic.Connection = c.quicClient
@@ -598,8 +598,9 @@ func (c *Client) StartClientRecording(filename string) error {
 	if quicClient == nil {
 		quicClient, err = recorder.GetRandomQuicClient(
 			recorder.ClientConfig{
-				ClientId: c.ID(),
-				FileName: filename,
+				ClientId:   c.ID(),
+				BucketName: bucketName,
+				FileName:   filename,
 			},
 			c.options.QuicConfig,
 		)

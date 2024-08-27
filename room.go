@@ -263,14 +263,15 @@ func (r *Room) AddClient(id, name string, opts ClientOptions) (*Client, error) {
 	return client, nil
 }
 
-func (r *Room) StartRecording(filename string) error {
+func (r *Room) StartRecording(bucketName, filename string) error {
 	var quicClient quic.Connection = r.quicClient
 	var err error
 	if quicClient == nil {
 		quicClient, err = recorder.GetRandomQuicClient(
 			recorder.ClientConfig{
-				ClientId: r.id,
-				FileName: filename,
+				ClientId:   r.id,
+				BucketName: bucketName,
+				FileName:   filename,
 			},
 			r.options.QuicConfig,
 		)

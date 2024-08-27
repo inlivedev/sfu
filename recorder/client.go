@@ -19,8 +19,9 @@ type QuicConfig struct {
 }
 
 type ClientConfig struct {
-	ClientId string
-	FileName string
+	ClientId   string
+	BucketName string
+	FileName   string
 }
 
 func GetRandomQuicClient(clientConfig ClientConfig, config []*QuicConfig) (quic.Connection, error) {

@@ -542,7 +542,7 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 				conn.Write(respBytes)
 
 			} else if req.Type == "start_recording" {
-				r.StartRecording(client.ID() + ".webm")
+				r.StartRecording("wave", client.ID()+".webm")
 			} else if req.Type == "stop_recording" {
 				r.StopRecording()
 			} else {
