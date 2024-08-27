@@ -183,7 +183,7 @@ func (t *Track) StartRecording(stream quic.SendStream) error {
 		return t.trackRecorder.Close()
 	}
 
-	tr, err := recorder.NewQuickTrackRecorder(&recorder.TrackConfig{
+	tr, err := recorder.NewTrackRecorder(&recorder.TrackConfig{
 		TrackID:  t.ID(),
 		ClientID: t.base.client.id,
 		RoomID:   t.base.client.roomId,

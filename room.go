@@ -126,7 +126,6 @@ func newRoom(id, name string, sfu *SFU, kind string, opts RoomOptions) *Room {
 		room.onClientLeft(client)
 	})
 
-	room.AddExtension(NewClientLeftExtension())
 	go room.loopRecordStats()
 
 	return room
@@ -215,6 +214,10 @@ func (r *Room) AddClient(id, name string, opts ClientOptions) (*Client, error) {
 		opts.QuicConnection = r.quicClient
 	}
 
+	if r.options.QuicConfig != nil {
+		opts.QuicConfig = r.options.QuicConfig
+	}
+
 	client = r.sfu.NewClient(id, name, opts)
 	client.roomId = r.id
 
@@ -277,14 +280,14 @@ func (r *Room) StartRecording(filename string) error {
 		r.quicClient = quicClient
 	}
 	for _, client := range r.sfu.clients.GetClients() {
-		client.startRecording(quicClient)
+		client.startRoomRecording(quicClient)
 	}
 	return nil
 }
 
 func (r *Room) StopRecording() {
 	for _, client := range r.sfu.clients.GetClients() {
-		client.stopRecording()
+		client.stopRoomRecording()
 	}
 	if r.quicClient != nil {
 		r.quicClient.SendDatagram([]byte("close"))
@@ -294,14 +297,14 @@ func (r *Room) StopRecording() {
 
 func (r *Room) PauseRecording() {
 	for _, client := range r.sfu.clients.GetClients() {
-		client.pauseRecording()
+		client.pauseRoomRecording()
 	}
 
 }
 
 func (r *Room) ContinueRecording() {
 	for _, client := range r.sfu.clients.GetClients() {
-		client.continueRecording()
+		client.continueRoomRecording()
 	}
 }
 

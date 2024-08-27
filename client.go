@@ -87,7 +87,8 @@ type ClientOptions struct {
 	ReorderPackets bool `json:"reorder_packets"`
 	Log            logging.LeveledLogger
 	settingEngine  webrtc.SettingEngine
-	QuicConnection quic.Connection
+	QuicConnection quic.Connection `json:"-"`
+	QuicConfig     []*recorder.QuicConfig
 }
 
 type internalDataMessage struct {
@@ -503,10 +504,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 			minWait := opts.JitterBufferMinWait
 			maxWait := opts.JitterBufferMaxWait
 
-			track, err = newTrack(client.context, client, remoteTrack, minWait, maxWait, s.pliInterval, onPLI, client.statsGetter, onStatsUpdated)
-			if err != nil {
-				fmt.Println(err)
-			}
+			track, _ = newTrack(client.context, client, remoteTrack, minWait, maxWait, s.pliInterval, onPLI, client.statsGetter, onStatsUpdated)
 
 			track.OnEnded(func() {
 				client.stats.removeReceiverStats(remoteTrack.ID() + remoteTrack.RID())
@@ -603,12 +601,7 @@ func (c *Client) StartClientRecording(filename string) error {
 				ClientId: c.ID(),
 				FileName: filename,
 			},
-			[]*recorder.QuicConfig{
-				{Host: "127.0.0.1",
-					Port:     9000,
-					CertFile: "server.cert",
-					KeyFile:  "server.key"},
-			},
+			c.options.QuicConfig,
 		)
 		c.quicClient = quicClient
 	}
@@ -651,9 +644,9 @@ func (c *Client) ContinueClientRecording() {
 }
 
 /*
-startRecording is called by the room to record the whole room
+startRoomRecording is called by the room to record the whole room
 */
-func (c *Client) startRecording(conn quic.Connection) error {
+func (c *Client) startRoomRecording(conn quic.Connection) error {
 	c.log.Infof("client: start recording")
 	for _, track := range c.tracks.GetTracks() {
 		stream, err := conn.OpenUniStream()
@@ -666,19 +659,19 @@ func (c *Client) startRecording(conn quic.Connection) error {
 	return nil
 }
 
-func (c *Client) stopRecording() {
+func (c *Client) stopRoomRecording() {
 	for _, track := range c.tracks.GetTracks() {
 		track.StopRecording()
 	}
 }
 
-func (c *Client) pauseRecording() {
+func (c *Client) pauseRoomRecording() {
 	for _, track := range c.tracks.GetTracks() {
 		track.PauseRecording()
 	}
 }
 
-func (c *Client) continueRecording() {
+func (c *Client) continueRoomRecording() {
 	for _, track := range c.tracks.GetTracks() {
 		track.ContinueRecording()
 	}

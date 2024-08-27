@@ -35,26 +35,26 @@ type TrackRecorder interface {
 	Close() error
 }
 
-type QuicTrack struct {
+type Track struct {
 	TrackID        string
 	ClientID       string
 	RoomID         string
-	quicStream     quic.SendStream
+	stream         quic.SendStream
 	mu             sync.Mutex
 	isConfigPacket atomic.Bool
 }
 
-func NewQuickTrackRecorder(conf *TrackConfig, stream quic.SendStream) (TrackRecorder, error) {
+func NewTrackRecorder(conf *TrackConfig, stream quic.SendStream) (TrackRecorder, error) {
 	if err := validateTrackConfig(conf); err != nil {
 		return nil, err
 	}
 
-	track := &QuicTrack{
-		TrackID:    conf.TrackID,
-		ClientID:   conf.ClientID,
-		RoomID:     conf.RoomID,
-		quicStream: stream,
-		mu:         sync.Mutex{},
+	track := &Track{
+		TrackID:  conf.TrackID,
+		ClientID: conf.ClientID,
+		RoomID:   conf.RoomID,
+		stream:   stream,
+		mu:       sync.Mutex{},
 	}
 
 	track.isConfigPacket.Store(true)
@@ -67,7 +67,7 @@ func NewQuickTrackRecorder(conf *TrackConfig, stream quic.SendStream) (TrackReco
 	return track, nil
 }
 
-func (q *QuicTrack) Write(p []byte) (int, error) {
+func (q *Track) Write(p []byte) (int, error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
@@ -84,7 +84,7 @@ func (q *QuicTrack) Write(p []byte) (int, error) {
 	binary.BigEndian.PutUint16(header[1:], uint16(len(p)))
 
 	packet := append(header, p...)
-	n, err := q.quicStream.Write(packet)
+	n, err := q.stream.Write(packet)
 	if err != nil {
 		return 0, err
 	}
@@ -96,7 +96,7 @@ func (q *QuicTrack) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func (q *QuicTrack) WritePacket(packet *rtp.Packet) (int, error) {
+func (q *Track) WritePacket(packet *rtp.Packet) (int, error) {
 	p, err := packet.Marshal()
 	if err != nil {
 		return 0, err
@@ -104,7 +104,7 @@ func (q *QuicTrack) WritePacket(packet *rtp.Packet) (int, error) {
 	return q.Write(p)
 }
 
-func (q *QuicTrack) sendNewTrackPacket(conf *TrackConfig) error {
+func (q *Track) sendNewTrackPacket(conf *TrackConfig) error {
 	data, err := json.Marshal(conf)
 	if err != nil {
 		return err
@@ -114,16 +114,16 @@ func (q *QuicTrack) sendNewTrackPacket(conf *TrackConfig) error {
 	return err
 }
 
-func (q *QuicTrack) sendTrackEndPacket() error {
+func (q *Track) sendTrackEndPacket() error {
 	_, err := q.Write([]byte{byte(TrackEndPacket)})
 	return err
 }
-func (q *QuicTrack) Close() error {
+func (q *Track) Close() error {
 	err := q.sendTrackEndPacket()
 	if err != nil {
 		return err
 	}
-	return q.quicStream.Close()
+	return q.stream.Close()
 }
 
 func validateTrackConfig(conf *TrackConfig) error {

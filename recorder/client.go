@@ -27,14 +27,14 @@ func GetRandomQuicClient(clientConfig ClientConfig, config []*QuicConfig) (quic.
 	return NewQuicClient(context.Background(), clientConfig, config[rand.Intn(len(config))])
 }
 
-func readCertAndKey() *tls.Config {
-	cert, err := tls.LoadX509KeyPair("server.cert", "server.key")
+func readCertAndKey(config *QuicConfig) *tls.Config {
+	cert, err := tls.LoadX509KeyPair(config.CertFile, config.KeyFile)
 	if err != nil {
 		panic(err)
 	}
 	return &tls.Config{
 		Certificates:       []tls.Certificate{cert},
-		NextProtos:         []string{"quic-echo-example"},
+		NextProtos:         []string{"samespace-recorder"},
 		InsecureSkipVerify: true,
 	}
 }
@@ -43,7 +43,7 @@ func NewQuicClient(ctx context.Context, clientConfig ClientConfig, config *QuicC
 	var conn quic.Connection
 	var err error
 
-	tlsConfig := readCertAndKey()
+	tlsConfig := readCertAndKey(config)
 	address := fmt.Sprintf("%s:%d", config.Host, config.Port)
 
 	for retries := 0; retries < 5; retries++ {
