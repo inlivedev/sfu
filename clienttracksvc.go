@@ -1,7 +1,6 @@
 package sfu
 
 import (
-	"github.com/inlivedev/sfu/pkg/packetmap"
 	"github.com/pion/rtp"
 	"github.com/pion/rtp/codecs"
 )
@@ -98,7 +97,6 @@ type scaleableClientTrack struct {
 	lastTimestamp uint32
 	lastSequence  uint16
 	init          bool
-	packetmap     *packetmap.Map
 }
 
 func newScaleableClientTrack(
@@ -110,7 +108,6 @@ func newScaleableClientTrack(
 		clientTrack: newClientTrack(c, t, false, nil),
 		maxQuality:  QualityHigh,
 		lastQuality: QualityHigh,
-		packetmap:   &packetmap.Map{},
 	}
 
 	sct.SetMaxQuality(QualityHigh)
@@ -243,6 +240,10 @@ func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 	// make sure the player is paused when the quality is none.
 	// quality none only possible when the video is not displayed
 	if quality == QualityNone {
+		if ok := t.packetmap.Drop(p.SequenceNumber, vp9Packet.PictureID); ok {
+			return
+		}
+
 		p.Payload = p.Payload[:0]
 	}
 

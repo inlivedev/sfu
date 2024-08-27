@@ -166,7 +166,7 @@ func (bc *bitrateController) totalBitrates() uint32 {
 func (bc *bitrateController) setQuality(clientTrackID string, quality QualityLevel) {
 	if val, ok := bc.claims.Load(clientTrackID); ok {
 		claim := val.(*bitrateClaim)
-		claim.quality = quality
+		claim.SetQuality(quality)
 
 		bc.claims.Store(clientTrackID, claim)
 	}

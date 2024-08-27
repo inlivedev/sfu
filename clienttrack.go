@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 
+	"github.com/inlivedev/sfu/pkg/packetmap"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
 )
@@ -41,6 +42,7 @@ type clientTrack struct {
 	localTrack            *webrtc.TrackLocalStaticRTP
 	remoteTrack           *remoteTrack
 	baseTrack             *baseTrack
+	packetmap             *packetmap.Map
 	isScreen              bool
 	ssrc                  webrtc.SSRC
 	onTrackEndedCallbacks []func()
@@ -68,6 +70,7 @@ func newClientTrack(c *Client, t ITrack, isScreen bool, localTrack *webrtc.Track
 		isScreen:              isScreen,
 		ssrc:                  track.remoteTrack.track.SSRC(),
 		onTrackEndedCallbacks: make([]func(), 0),
+		packetmap:             &packetmap.Map{},
 	}
 
 	t.OnEnded(func() {
@@ -130,6 +133,13 @@ func (t *clientTrack) push(p *rtp.Packet, _ QualityLevel) {
 		return
 	}
 
+	ok, newseqno, _ := t.packetmap.Map(p.SequenceNumber, 0)
+	if !ok {
+		return
+	}
+
+	p.SequenceNumber = newseqno
+
 	if t.Kind() == webrtc.RTPCodecTypeAudio {
 		// do something here with audio level
 	}
@@ -140,6 +150,10 @@ func (t *clientTrack) push(p *rtp.Packet, _ QualityLevel) {
 	if t.Kind() == webrtc.RTPCodecTypeVideo {
 		quality := t.getQuality()
 		if quality == QualityNone {
+			if ok := t.packetmap.Drop(p.SequenceNumber, 0); ok {
+				return
+			}
+
 			p.Payload = p.Payload[:0]
 		}
 	}
