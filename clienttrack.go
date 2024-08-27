@@ -46,7 +46,7 @@ type clientTrack struct {
 	onTrackEndedCallbacks []func()
 }
 
-func newClientTrack(c *Client, t *Track, isScreen bool, localTrack *webrtc.TrackLocalStaticRTP) *clientTrack {
+func newClientTrack(c *Client, t *Track, isScreen bool, localTrack webrtc.TrackLocal) *clientTrack {
 	ctx, cancel := context.WithCancel(t.Context())
 
 	if localTrack == nil {
@@ -60,8 +60,7 @@ func newClientTrack(c *Client, t *Track, isScreen bool, localTrack *webrtc.Track
 		mu:                    sync.RWMutex{},
 		client:                c,
 		kind:                  localTrack.Kind(),
-		mimeType:              localTrack.Codec().MimeType,
-		localTrack:            localTrack,
+		localTrack:            localTrack.(*webrtc.TrackLocalStaticRTP),
 		remoteTrack:           t.remoteTrack,
 		baseTrack:             t.base,
 		isScreen:              isScreen,
