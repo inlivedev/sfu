@@ -393,22 +393,6 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 		_, _ = conn.Write(respBytes)
 	})
 
-	done := make(chan bool)
-
-	player, err := client.GetPlayer(done)
-	if err != nil {
-		log.Panic(err)
-		return
-	}
-
-	go func() {
-		time.Sleep(5 * time.Second)
-		fmt.Println(player.PlayFile("audio.opus"))
-
-		<-done
-		fmt.Println("done")
-	}()
-
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
