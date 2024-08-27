@@ -16,6 +16,7 @@ require (
 	github.com/pion/ice/v3 v3.0.13
 	github.com/pion/turn/v3 v3.0.3
 	github.com/pion/webrtc/v4 v4.0.0-beta.26
+	github.com/quic-go/quic-go v0.46.0
 	golang.org/x/exp v0.0.0-20240719175910-8a7402abbf56
 	golang.org/x/text v0.16.0
 )
@@ -29,7 +30,6 @@ require (
 	github.com/pion/srtp/v3 v3.0.3 // indirect
 	github.com/pion/stun/v2 v2.0.0 // indirect
 	github.com/pion/transport/v3 v3.0.6 // indirect
-	github.com/quic-go/quic-go v0.46.0 // indirect
 	github.com/wlynxg/anet v0.0.3 // indirect
 	go.uber.org/mock v0.4.0 // indirect
 	golang.org/x/mod v0.19.0 // indirect
