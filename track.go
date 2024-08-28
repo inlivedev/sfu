@@ -11,8 +11,10 @@ import (
 	"github.com/pion/logging"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
+	"github.com/quic-go/quic-go"
 	"github.com/samespace/sfu/pkg/networkmonitor"
 	"github.com/samespace/sfu/pkg/rtppool"
+	"github.com/samespace/sfu/recorder"
 )
 
 const (
@@ -64,6 +66,10 @@ type ITrack interface {
 	Relay(func(webrtc.SSRC, *rtp.Packet))
 	PayloadType() webrtc.PayloadType
 	OnEnded(func())
+	StartRecording(quic.SendStream) error
+	StopRecording()
+	PauseRecording()
+	ContinueRecording()
 }
 
 type Track struct {
@@ -73,9 +79,12 @@ type Track struct {
 	remoteTrack      *remoteTrack
 	onEndedCallbacks []func()
 	onReadCallbacks  []func(*rtp.Packet, QualityLevel)
+	trackRecorder    recorder.TrackRecorder
+	isRecording      atomic.Bool
+	isPaused         atomic.Bool
 }
 
-func newTrack(ctx context.Context, client *Client, trackRemote IRemoteTrack, minWait, maxWait, pliInterval time.Duration, onPLI func(), stats stats.Getter, onStatsUpdated func(*stats.Stats)) ITrack {
+func newTrack(ctx context.Context, client *Client, trackRemote IRemoteTrack, minWait, maxWait, pliInterval time.Duration, onPLI func(), stats stats.Getter, onStatsUpdated func(*stats.Stats)) (ITrack, error) {
 	ctList := newClientTrackList()
 	pool := rtppool.New()
 	baseTrack := &baseTrack{
@@ -95,6 +104,8 @@ func newTrack(ctx context.Context, client *Client, trackRemote IRemoteTrack, min
 		base:             baseTrack,
 		onReadCallbacks:  make([]func(*rtp.Packet, QualityLevel), 0),
 		onEndedCallbacks: make([]func(), 0),
+		isRecording:      atomic.Bool{},
+		isPaused:         atomic.Bool{},
 	}
 
 	onRead := func(p *rtp.Packet) {
@@ -122,6 +133,19 @@ func newTrack(ctx context.Context, client *Client, trackRemote IRemoteTrack, min
 		copyPacket.Header = *packet.Header()
 		copyPacket.Payload = packet.Payload()
 
+		if t.MimeType() == webrtc.MimeTypeOpus && t.trackRecorder != nil {
+			if t.isRecording.Load() {
+				var packet *rtp.Packet
+				if t.isPaused.Load() {
+					packet = t.getSilencePacket(copyPacket)
+				} else {
+					packet = copyPacket.Clone()
+				}
+				t.trackRecorder.WritePacket(packet)
+
+			}
+		}
+
 		t.onRead(copyPacket, QualityHigh)
 
 		pool.PutPacket(copyPacket)
@@ -144,7 +168,76 @@ func newTrack(ctx context.Context, client *Client, trackRemote IRemoteTrack, min
 		t.onEnded()
 	})
 
-	return t
+	return t, nil
+}
+
+func (t *Track) StartRecording(stream quic.SendStream) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if t.Kind() != webrtc.RTPCodecTypeAudio {
+		return nil
+	}
+
+	if t.trackRecorder != nil {
+		return t.trackRecorder.Close()
+	}
+
+	tr, err := recorder.NewTrackRecorder(&recorder.TrackConfig{
+		TrackID:  t.ID(),
+		ClientID: t.base.client.id,
+		RoomID:   t.base.client.roomId,
+		MimeType: t.MimeType(),
+	}, stream)
+
+	if err != nil {
+		return err
+	}
+
+	t.trackRecorder = tr
+	t.isRecording.CompareAndSwap(false, true)
+	return nil
+}
+
+func (t *Track) StopRecording() {
+	if t.trackRecorder != nil {
+		t.trackRecorder.Close()
+	}
+	t.trackRecorder = nil
+	t.isRecording.CompareAndSwap(true, false)
+}
+
+func (t *Track) PauseRecording() {
+	t.isPaused.CompareAndSwap(false, true)
+}
+
+func (t *Track) ContinueRecording() {
+	t.isPaused.CompareAndSwap(true, false)
+}
+
+func (t *Track) IsRecording() bool {
+	return t.isRecording.Load()
+}
+
+func (t *Track) IsPaused() bool {
+	return t.isPaused.Load()
+}
+
+func (t *Track) getSilencePacket(packet *rtp.Packet) *rtp.Packet {
+	//get opus silence packet
+	return &rtp.Packet{
+		Header: rtp.Header{
+			Version:        2,
+			Padding:        false,
+			Extension:      false,
+			Marker:         false,
+			PayloadType:    packet.PayloadType,
+			SequenceNumber: packet.SequenceNumber,
+			Timestamp:      packet.Timestamp,
+			SSRC:           packet.SSRC,
+		},
+		Payload: []byte{0xF8, 0xFF, 0xFE},
+	}
 }
 
 func (t *Track) ClientID() string {
@@ -404,6 +497,22 @@ func newSimulcastTrack(client *Client, track IRemoteTrack, minWait, maxWait, pli
 	})
 
 	return t
+}
+
+func (t *SimulcastTrack) StartRecording(stream quic.SendStream) error {
+	return nil
+}
+
+func (t *SimulcastTrack) StopRecording() {
+
+}
+
+func (t *SimulcastTrack) PauseRecording() {
+
+}
+
+func (t *SimulcastTrack) ContinueRecording() {
+
 }
 
 func (t *SimulcastTrack) ClientID() string {

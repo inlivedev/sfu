@@ -136,6 +136,36 @@
 
         const trackStreamIDs = {}
 
+        const btnToggleRecording = document.getElementById("btnToggleRecording")
+        const btnTogglePause = document.getElementById("btnTogglePause")
+
+        btnToggleRecording.onclick = toggleRecording
+        btnTogglePause.onclick = pauseRecording
+
+        let isRecording = false
+        let isPaused = false
+
+        function toggleRecording() {
+            if (isRecording) {
+                ws.send(JSON.stringify({ type: 'stop_recording' }));
+                isRecording = false
+            } else {
+                ws.send(JSON.stringify({ type: 'start_recording' }));
+                isRecording = true
+            }
+        }
+
+        function pauseRecording(e) {
+            e.preventDefault();
+            if (isPaused) {
+                ws.send(JSON.stringify({ type: 'continue_recording' }));
+                isPaused = false
+            } else {
+                ws.send(JSON.stringify({ type: 'pause_recording' }));
+                isPaused = true
+            }
+        }
+
         peerConnection.ondatachannel = function (e) {
             console.log("ondatachannel: ", e.channel.label);
             if (e.channel.label == "internal") {
@@ -383,7 +413,7 @@
 
             const constraints = {
                 audio: true,
-                video: video
+                video: false
                 // video: true
             };
 
@@ -490,10 +520,20 @@
                 let audioCodecsPref = [];
 
                 for (let i = 0; i < audioCodecs.length; i++) {
+                    if (audioCodecs[i].mimeType == "audio/opus") {
+                        audioCodecsPref.push(audioCodecs[i]);
+                    }
+                }
+
+                for (let i = 0; i < audioCodecs.length; i++) {
+
+
                     if (audioCodecs[i].mimeType == "audio/PCMU") {
                         audioCodecsPref.push(audioCodecs[i]);
                     }
                 }
+
+
 
                 for (let i = 0; i < audioCodecs.length; i++) {
                     if (audioCodecs[i].mimeType == "audio/PCMA") {
@@ -1041,6 +1081,9 @@
         <button id="btnStartVP9">Start with VP9</button>
         <button id="btnToggleMic">Mute Mic</button>
         <button id="btnToggleCam">Mute Cam</button>
+        <button id="btnToggleRecording">Start Recording</button>
+        <button id="btnTogglePause">Pause Recording</button>
+
         <span><input id="simulcast" type="checkbox" value="simulcast">Simulcast</span>
         <span><input id="svc" type="checkbox" value="svc" checked>SVC</span>
         <button id="btnShareScreen">Share Screen</button>

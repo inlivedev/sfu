@@ -31,7 +31,7 @@ func (p *PeerConnection) Close() error {
 	return p.pc.Close()
 }
 
-func (p *PeerConnection) AddTrack(track *webrtc.TrackLocalStaticRTP) (*webrtc.RTPSender, error) {
+func (p *PeerConnection) AddTrack(track webrtc.TrackLocal) (*webrtc.RTPSender, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 

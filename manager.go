@@ -101,6 +101,7 @@ func (m *Manager) NewRoom(id, name, roomType string, opts RoomOptions) (*Room, e
 	// TODO: what manager should do when a room is closed?
 	// is there any neccesary resource to be released?
 	room.OnRoomClosed(func(id string) {
+		room.SendCloseDatagram()
 		for _, ext := range m.extension {
 			ext.OnRoomClosed(m, room)
 		}
