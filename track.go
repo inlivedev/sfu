@@ -114,7 +114,7 @@ func newTrack(ctx context.Context, client *Client, trackRemote IRemoteTrack, min
 
 	onRead := func(p *rtp.Packet) {
 		tracks := t.base.clientTracks.GetTracks()
-		if t.isMuted.Load() {
+		if t.isMuted.Load() && t.MimeType() == webrtc.MimeTypeOpus {
 			p = t.getSilencePacket(p)
 		}
 
