@@ -147,6 +147,7 @@ type Client struct {
 	mu                    sync.RWMutex
 	peerConnection        *PeerConnection
 	quicClient            quic.Connection
+	isMuted               *atomic.Bool
 	// pending received tracks are the remote tracks from other clients that waiting to add when the client is connected
 	pendingReceivedTracks []SubscribeTrackRequest
 	// pending published tracks are the remote tracks that still state as unknown source, and can't be published until the client state the source media or screen
@@ -329,6 +330,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		mu:                             sync.RWMutex{},
 		negotiationNeeded:              &atomic.Bool{},
 		peerConnection:                 newPeerConnection(peerConnection),
+		isMuted:                        &atomic.Bool{},
 		state:                          &stateNew,
 		tracks:                         newTrackList(opts.Log),
 		options:                        opts,
@@ -583,6 +585,21 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 	})
 
 	return client
+}
+
+func (c *Client) IsMuted() bool {
+	return c.isMuted.Load()
+}
+
+func (c *Client) Mute() {
+	c.isMuted.CompareAndSwap(false, true)
+	for _, track := range c.tracks.GetTracks() {
+		track.Mute()
+	}
+}
+
+func (c *Client) Unmute() {
+	c.isMuted.CompareAndSwap(true, false)
 }
 
 /*
