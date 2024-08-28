@@ -600,6 +600,9 @@ func (c *Client) Mute() {
 
 func (c *Client) Unmute() {
 	c.isMuted.CompareAndSwap(true, false)
+	for _, track := range c.tracks.GetTracks() {
+		track.Unmute()
+	}
 }
 
 /*
