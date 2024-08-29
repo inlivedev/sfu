@@ -70,6 +70,8 @@ type ITrack interface {
 	StopRecording()
 	PauseRecording()
 	ContinueRecording()
+	Mute()
+	Unmute()
 }
 
 type Track struct {
@@ -82,6 +84,7 @@ type Track struct {
 	trackRecorder    recorder.TrackRecorder
 	isRecording      atomic.Bool
 	isPaused         atomic.Bool
+	isMuted          atomic.Bool
 }
 
 func newTrack(ctx context.Context, client *Client, trackRemote IRemoteTrack, minWait, maxWait, pliInterval time.Duration, onPLI func(), stats stats.Getter, onStatsUpdated func(*stats.Stats)) (ITrack, error) {
@@ -106,10 +109,16 @@ func newTrack(ctx context.Context, client *Client, trackRemote IRemoteTrack, min
 		onEndedCallbacks: make([]func(), 0),
 		isRecording:      atomic.Bool{},
 		isPaused:         atomic.Bool{},
+		isMuted:          atomic.Bool{},
 	}
 
 	onRead := func(p *rtp.Packet) {
 		tracks := t.base.clientTracks.GetTracks()
+		if t.MimeType() == webrtc.MimeTypeOpus {
+			if t.isMuted.Load() {
+				p = t.getSilencePacket(p)
+			}
+		}
 
 		for _, track := range tracks {
 			//nolint:ineffassign,staticcheck // packet is from the pool
@@ -169,6 +178,14 @@ func newTrack(ctx context.Context, client *Client, trackRemote IRemoteTrack, min
 	})
 
 	return t, nil
+}
+
+func (t *Track) Mute() {
+	t.isMuted.CompareAndSwap(false, true)
+}
+
+func (t *Track) Unmute() {
+	t.isMuted.CompareAndSwap(true, false)
 }
 
 func (t *Track) StartRecording(stream quic.SendStream) error {
@@ -499,6 +516,9 @@ func newSimulcastTrack(client *Client, track IRemoteTrack, minWait, maxWait, pli
 	return t
 }
 
+func (t *SimulcastTrack) Mute()   {}
+func (t *SimulcastTrack) Unmute() {}
+
 func (t *SimulcastTrack) StartRecording(stream quic.SendStream) error {
 	return nil
 }
@@ -621,6 +641,7 @@ func (t *SimulcastTrack) AddRemoteTrack(track IRemoteTrack, minWait, maxWait tim
 		}
 
 		tracks := t.base.clientTracks.GetTracks()
+
 		for _, track := range tracks {
 			//nolint:ineffassign,staticcheck // packet is from the pool
 			packet := t.base.pool.NewPacket(&p.Header, p.Payload)
