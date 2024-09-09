@@ -112,7 +112,8 @@ func (t *remoteTrack) readRTP() {
 					return
 				}
 
-				t.log.Errorf("remotetrack: read error: %s", readErr.Error())
+				t.log.Tracef("remotetrack: read error: %s", readErr.Error())
+				t.rtppool.PutPayload(buffer)
 				continue
 			}
 
