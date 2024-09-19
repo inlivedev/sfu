@@ -2,6 +2,7 @@ package sfu
 
 import (
 	"context"
+	"errors"
 	"sync"
 
 	"github.com/inlivedev/sfu/pkg/packetmap"
@@ -104,7 +105,7 @@ func (t *clientTrack) ReceiveBitrate() uint32 {
 
 func (t *clientTrack) SendBitrate() uint32 {
 	bitrate, err := t.client.stats.GetSenderBitrate(t.ID())
-	if err != nil {
+	if err != nil && !errors.Is(err, ErrCLientStatsNotFound) {
 		t.client.log.Errorf("clienttrack: error on get sender bitrate %s", err.Error())
 		return 0
 	}
@@ -234,7 +235,7 @@ func (t *clientTrack) getQuality() QualityLevel {
 	claim := t.client.bitrateController.GetClaim(t.ID())
 
 	if claim == nil {
-		t.client.log.Warnf("scalabletrack: claim is nil")
+		t.client.log.Warnf("clienttrack: claim is nil")
 		return QualityNone
 	}
 
