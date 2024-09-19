@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"regexp"
 	"strings"
 	"sync"
@@ -1076,15 +1075,12 @@ func (c *Client) enableReportAndStats(rtpSender *webrtc.RTPSender, track iClient
 					return
 				}
 
-				log.Println("rtcp packets PLI", rtcpPackets)
 				for _, p := range rtcpPackets {
 					switch p.(type) {
 					case *rtcp.PictureLossIndication:
-						log.Println("rtcp packets PLI", rtcpPackets)
 						track.RequestPLI()
 					case *rtcp.FullIntraRequest:
 						track.RequestPLI()
-						log.Println("rtcp packets FullI", rtcpPackets)
 					}
 				}
 			}
