@@ -396,10 +396,7 @@ func (bc *bitrateController) canIncreaseBitrate(availableBw uint32) bool {
 		if claim.IsAdjustable() {
 			if claim.Quality() < claim.track.MaxQuality() {
 				return bc.isEnoughBandwidthToIncrase(availableBw, claim)
-			} else {
-				bc.log.Tracef("bitratecontroller: can't increase, track %s quality %d is same or higher than max  %d", claim.track.ID(), claim.Quality(), claim.track.MaxQuality())
 			}
-
 		}
 	}
 
@@ -424,7 +421,6 @@ func (bc *bitrateController) loopMonitor() {
 			bw := bc.client.GetEstimatedBandwidth()
 
 			if totalSendBitrates == 0 {
-				bc.log.Trace("bitratecontroller: no track to adjust")
 				continue
 			}
 
@@ -597,8 +593,7 @@ func (bc *bitrateController) isEnoughBandwidthToIncrase(bandwidthLeft uint32, cl
 	currentBitrate := claim.SendBitrate()
 
 	if nextBitrate <= currentBitrate {
-		bc.log.Tracef("bitratecontroller: can't increase the bitrate, next bitrate %d is less than current %d", nextBitrate, currentBitrate)
-		return false
+		return true
 	}
 
 	bandwidthGap := nextBitrate - currentBitrate
