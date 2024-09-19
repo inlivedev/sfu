@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"regexp"
 	"strings"
 	"sync"
@@ -1035,7 +1036,6 @@ func (c *Client) ClientTracks() map[string]iClientTrack {
 }
 
 func readRTCP(r *webrtc.RTPSender, b []byte) ([]rtcp.Packet, interceptor.Attributes, error) {
-	b = b[:0]
 	n, attributes, err := r.Read(b)
 	if err != nil {
 		return nil, nil, err
@@ -1043,8 +1043,11 @@ func readRTCP(r *webrtc.RTPSender, b []byte) ([]rtcp.Packet, interceptor.Attribu
 
 	pkts, err := attributes.GetRTCPPackets(b[:n])
 	if err != nil {
+		b = b[:0]
 		return nil, nil, err
 	}
+
+	b = b[:0]
 
 	return pkts, attributes, nil
 }
@@ -1073,12 +1076,15 @@ func (c *Client) enableReportAndStats(rtpSender *webrtc.RTPSender, track iClient
 					return
 				}
 
+				log.Println("rtcp packets PLI", rtcpPackets)
 				for _, p := range rtcpPackets {
 					switch p.(type) {
 					case *rtcp.PictureLossIndication:
+						log.Println("rtcp packets PLI", rtcpPackets)
 						track.RequestPLI()
 					case *rtcp.FullIntraRequest:
 						track.RequestPLI()
+						log.Println("rtcp packets FullI", rtcpPackets)
 					}
 				}
 			}
