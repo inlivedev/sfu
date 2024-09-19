@@ -15,7 +15,6 @@ import (
 	"github.com/inlivedev/sfu/pkg/interceptors/playoutdelay"
 	"github.com/inlivedev/sfu/pkg/interceptors/voiceactivedetector"
 	"github.com/inlivedev/sfu/pkg/networkmonitor"
-	"github.com/inlivedev/sfu/pkg/pacer"
 	"github.com/pion/interceptor"
 	"github.com/pion/interceptor/pkg/cc"
 	"github.com/pion/interceptor/pkg/gcc"
@@ -274,8 +273,8 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		// TODO: we need to use packet loss based bandwidth adjuster when the bandwidth is below 100_000
 		return gcc.NewSendSideBWE(
 			gcc.SendSideBWEInitialBitrate(int(s.bitrateConfigs.InitialBandwidth)),
-			gcc.SendSideBWEPacer(pacer.NewLeakyBucketPacer(opts.Log, int(s.bitrateConfigs.InitialBandwidth), true)),
-			// gcc.SendSideBWEPacer(gcc.NewNoOpPacer()),
+			// gcc.SendSideBWEPacer(pacer.NewLeakyBucketPacer(opts.Log, int(s.bitrateConfigs.InitialBandwidth), true)),
+			gcc.SendSideBWEPacer(gcc.NewNoOpPacer()),
 		)
 	})
 	if err != nil {
@@ -1035,6 +1034,21 @@ func (c *Client) ClientTracks() map[string]iClientTrack {
 	return clientTracks
 }
 
+func readRTCP(r *webrtc.RTPSender, b []byte) ([]rtcp.Packet, interceptor.Attributes, error) {
+	b = b[:0]
+	n, attributes, err := r.Read(b)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	pkts, err := attributes.GetRTCPPackets(b[:n])
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return pkts, attributes, nil
+}
+
 // TODO: need to improve and reduce goroutine usage
 func (c *Client) enableReportAndStats(rtpSender *webrtc.RTPSender, track iClientTrack) {
 	ssrc := rtpSender.GetParameters().Encodings[0].SSRC
@@ -1045,6 +1059,8 @@ func (c *Client) enableReportAndStats(rtpSender *webrtc.RTPSender, track iClient
 		clientCtx, cancelClientCtx := context.WithCancel(c.context)
 		defer cancelClientCtx()
 
+		buff := make([]byte, 1500)
+
 		for {
 			select {
 			case <-clientCtx.Done():
@@ -1052,7 +1068,7 @@ func (c *Client) enableReportAndStats(rtpSender *webrtc.RTPSender, track iClient
 			case <-localCtx.Done():
 				return
 			default:
-				rtcpPackets, _, err := rtpSender.ReadRTCP()
+				rtcpPackets, _, err := readRTCP(rtpSender, buff)
 				if err != nil && (err == io.EOF || err == io.ErrClosedPipe) {
 					return
 				}
