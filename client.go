@@ -98,7 +98,7 @@ type internalDataMessage struct {
 	Data interface{} `json:"data"`
 }
 
-type internalDataVAD struct {
+type InternalDataVAD struct {
 	Type string                            `json:"type"`
 	Data voiceactivedetector.VoiceActivity `json:"data"`
 }
@@ -1782,7 +1782,7 @@ func (c *Client) enableSendVADToInternalDataChannel() {
 }
 
 func (c *Client) sendVad(dataType string, activity voiceactivedetector.VoiceActivity) {
-	dataMessage := internalDataVAD{
+	dataMessage := InternalDataVAD{
 		Type: dataType,
 		Data: activity,
 	}
