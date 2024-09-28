@@ -142,7 +142,10 @@ func (v *Interceptor) BindRemoteStream(info *interceptor.StreamInfo, reader inte
 			return 0, nil, err
 		}
 
-		_ = v.processPacket(info.SSRC, header)
+		audioAttribute := v.processPacket(info.SSRC, header)
+
+		attr.Set(ATTRIBUTE_KEY, audioAttribute.Level)
+		attr.Set("isVoice", audioAttribute.Voice)
 
 		return i, attr, nil
 	})
