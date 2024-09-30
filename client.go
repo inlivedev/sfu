@@ -169,6 +169,7 @@ type Client struct {
 	onRenegotiation                   func(context.Context, webrtc.SessionDescription) (webrtc.SessionDescription, error)
 	onAllowedRemoteRenegotiation      func()
 	onTracksAvailableCallbacks        []func([]ITrack)
+	onTracksReadyCallbacks            []func([]ITrack)
 	onNetworkConditionChangedFunc     func(networkmonitor.NetworkConditionType)
 	// onTrack is used by SFU to take action when a new track is added to the client
 	onTrack                        func(ITrack)
@@ -597,7 +598,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 	})
 
 	peerConnection.OnNegotiationNeeded(func() {
-		client.renegotiate()
+		client.renegotiate(false)
 	})
 
 	return client
@@ -684,7 +685,7 @@ func (c *Client) Negotiate(offer webrtc.SessionDescription) (*webrtc.SessionDesc
 	defer func() {
 		c.isInRemoteNegotiation.Store(false)
 		if c.negotiationNeeded.Load() {
-			c.renegotiate()
+			c.renegotiate(false)
 		}
 	}()
 
@@ -844,7 +845,7 @@ func (c *Client) OnRenegotiation(callback func(context.Context, webrtc.SessionDe
 	c.onRenegotiation = callback
 }
 
-func (c *Client) renegotiate() {
+func (c *Client) renegotiate(offerFlexFec bool) {
 	c.log.Debug("client: renegotiate")
 	c.negotiationNeeded.Store(true)
 
@@ -899,6 +900,12 @@ func (c *Client) renegotiate() {
 				if err != nil {
 					c.log.Errorf("sfu: error create offer on renegotiation ", err)
 					return
+				}
+
+				if offerFlexFec {
+					// munge the offer to include FlexFEC
+					// get the payload code of video track
+
 				}
 
 				// Sets the LocalDescription, and starts our UDP listeners
@@ -1366,6 +1373,7 @@ func (c *Client) SetTracksSourceType(trackTypes map[string]TrackType) {
 		// broadcast to other clients available tracks from this client
 		c.log.Debugf("client: %s set source tracks %d", c.ID(), len(availableTracks))
 		c.sfu.onTracksAvailable(c.ID(), availableTracks)
+		c.onTracksReady(availableTracks)
 	}
 }
 
@@ -1708,6 +1716,7 @@ func (c *Client) SFU() *SFU {
 
 // OnTracksAvailable event is called when the SFU is trying to publish new tracks to the client.
 // The client then can subscribe to the tracks by calling `client.SubscribeTracks()` method.
+// The callback will receive the list of tracks from other clients that are available to subscribe.
 func (c *Client) OnTracksAvailable(callback func([]ITrack)) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -1716,6 +1725,20 @@ func (c *Client) OnTracksAvailable(callback func([]ITrack)) {
 
 func (c *Client) onTracksAvailable(tracks []ITrack) {
 	for _, callback := range c.onTracksAvailableCallbacks {
+		callback(tracks)
+	}
+}
+
+// OnTracksReady event is called when the client's tracks are use from the client
+// This can be use to hook a processing like transcription/video processing to client published tracks
+func (c *Client) OnTracksReady(callback func([]ITrack)) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.onTracksReadyCallbacks = append(c.onTracksReadyCallbacks, callback)
+}
+
+func (c *Client) onTracksReady(tracks []ITrack) {
+	for _, callback := range c.onTracksReadyCallbacks {
 		callback(tracks)
 	}
 }

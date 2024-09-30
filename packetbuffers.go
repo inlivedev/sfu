@@ -17,15 +17,14 @@ var (
 	ErrPacketDuplicate = errors.New("packetbuffers: packet is duplicate")
 )
 
-type packet struct {
-	packet    *rtppool.RetainablePacket
+type Packet struct {
+	Packet    *rtppool.RetainablePacket
 	addedTime time.Time
 }
 
 // buffer ring for cached packets
-type packetBuffers struct {
+type PacketBuffers struct {
 	context            context.Context
-	cancel             context.CancelFunc
 	init               bool
 	mu                 sync.RWMutex
 	buffers            *list.List
@@ -35,7 +34,7 @@ type packetBuffers struct {
 	minLatency time.Duration
 	// max duration to wait before sending
 	maxLatency           time.Duration
-	oldestPacket         *packet
+	oldestPacket         *Packet
 	initSequence         uint16
 	packetCount          uint64
 	waitTimeMu           sync.RWMutex
@@ -51,9 +50,9 @@ type packetBuffers struct {
 
 const waitTimeSize = 2500
 
-func newPacketBuffers(ctx context.Context, minLatency, maxLatency time.Duration, dynamicLatency bool, log logging.LeveledLogger) *packetBuffers {
+func NewPacketBuffers(ctx context.Context, minLatency, maxLatency time.Duration, dynamicLatency bool, log logging.LeveledLogger) *PacketBuffers {
 	ctx, cancel := context.WithCancel(ctx)
-	p := &packetBuffers{
+	p := &PacketBuffers{
 		context:              ctx,
 		mu:                   sync.RWMutex{},
 		buffers:              list.New(),
@@ -77,24 +76,24 @@ func newPacketBuffers(ctx context.Context, minLatency, maxLatency time.Duration,
 	return p
 }
 
-func (p *packetBuffers) MaxLatency() time.Duration {
+func (p *PacketBuffers) MaxLatency() time.Duration {
 	p.latencyMu.RLock()
 	defer p.latencyMu.RUnlock()
 	return p.maxLatency
 }
 
-func (p *packetBuffers) MinLatency() time.Duration {
+func (p *PacketBuffers) MinLatency() time.Duration {
 	p.latencyMu.RLock()
 	defer p.latencyMu.RUnlock()
 	return p.minLatency
 }
-func (p *packetBuffers) Initiated() bool {
+func (p *PacketBuffers) Initiated() bool {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 	return p.init
 }
 
-func (p *packetBuffers) Add(pkt *rtppool.RetainablePacket) error {
+func (p *PacketBuffers) Add(pkt *rtppool.RetainablePacket) error {
 	p.mu.Lock()
 	defer func() {
 		p.checkOrderedPacketAndRecordTimes()
@@ -110,8 +109,8 @@ func (p *packetBuffers) Add(pkt *rtppool.RetainablePacket) error {
 		p.log.Warnf("packet cache: packet sequence ", pkt.Header().SequenceNumber, " is too late, last sent was ", p.lastSequenceNumber, ", will not adding the packet")
 
 		// add to to front of the list to make sure pop take it first
-		p.buffers.PushFront(&packet{
-			packet:    pkt,
+		p.buffers.PushFront(&Packet{
+			Packet:    pkt,
 			addedTime: time.Now(),
 		})
 
@@ -119,8 +118,8 @@ func (p *packetBuffers) Add(pkt *rtppool.RetainablePacket) error {
 	}
 
 	if p.buffers.Len() == 0 {
-		p.buffers.PushBack(&packet{
-			packet:    pkt,
+		p.buffers.PushBack(&Packet{
+			Packet:    pkt,
 			addedTime: time.Now(),
 		})
 
@@ -129,84 +128,84 @@ func (p *packetBuffers) Add(pkt *rtppool.RetainablePacket) error {
 	// add packet in order
 Loop:
 	for e := p.buffers.Back(); e != nil; e = e.Prev() {
-		currentPkt := e.Value.(*packet)
+		currentpkt := e.Value.(*Packet)
 
-		if err := currentPkt.packet.Retain(); err != nil {
+		if err := currentpkt.Packet.Retain(); err != nil {
 			// already released
 			continue
 		}
 
-		if currentPkt.packet.Header().SequenceNumber == pkt.Header().SequenceNumber {
+		if currentpkt.Packet.Header().SequenceNumber == pkt.Header().SequenceNumber {
 			// p.log.Warnf("packet cache: packet sequence ", pkt.SequenceNumber, " already exists in the cache, will not adding the packet")
-			currentPkt.packet.Release()
+			currentpkt.Packet.Release()
 			return ErrPacketDuplicate
 		}
 
-		if currentPkt.packet.Header().SequenceNumber < pkt.Header().SequenceNumber && pkt.Header().SequenceNumber-currentPkt.packet.Header().SequenceNumber < uint16SizeHalf {
-			p.buffers.InsertAfter(&packet{
-				packet:    pkt,
+		if currentpkt.Packet.Header().SequenceNumber < pkt.Header().SequenceNumber && pkt.Header().SequenceNumber-currentpkt.Packet.Header().SequenceNumber < uint16SizeHalf {
+			p.buffers.InsertAfter(&Packet{
+				Packet:    pkt,
 				addedTime: time.Now(),
 			}, e)
-			currentPkt.packet.Release()
+			currentpkt.Packet.Release()
 			break Loop
 		}
 
-		if currentPkt.packet.Header().SequenceNumber-pkt.Header().SequenceNumber > uint16SizeHalf {
-			p.buffers.InsertAfter(&packet{
-				packet:    pkt,
+		if currentpkt.Packet.Header().SequenceNumber-pkt.Header().SequenceNumber > uint16SizeHalf {
+			p.buffers.InsertAfter(&Packet{
+				Packet:    pkt,
 				addedTime: time.Now(),
 			}, e)
-			currentPkt.packet.Release()
+			currentpkt.Packet.Release()
 			break Loop
 		}
 
 		if e.Prev() == nil {
-			p.buffers.PushFront(&packet{
-				packet:    pkt,
+			p.buffers.PushFront(&Packet{
+				Packet:    pkt,
 				addedTime: time.Now(),
 			})
-			currentPkt.packet.Release()
+			currentpkt.Packet.Release()
 			break Loop
 		}
 
-		currentPkt.packet.Release()
+		currentpkt.Packet.Release()
 	}
 
 	return nil
 }
 
-func (p *packetBuffers) pop(el *list.Element) *packet {
-	pkt := el.Value.(*packet)
+func (p *PacketBuffers) pop(el *list.Element) *Packet {
+	pkt := el.Value.(*Packet)
 
-	if err := pkt.packet.Retain(); err != nil {
+	if err := pkt.Packet.Retain(); err != nil {
 		// already released
 		return nil
 	}
 
 	defer func() {
-		pkt.packet.Release()
+		pkt.Packet.Release()
 	}()
 
 	// make sure packet is not late
-	if IsRTPPacketLate(pkt.packet.Header().SequenceNumber, p.lastSequenceNumber) {
-		p.log.Warnf("packet cache: packet sequence ", pkt.packet.Header().SequenceNumber, " is too late, last sent was ", p.lastSequenceNumber)
+	if IsRTPPacketLate(pkt.Packet.Header().SequenceNumber, p.lastSequenceNumber) {
+		p.log.Warnf("packet cache: packet sequence ", pkt.Packet.Header().SequenceNumber, " is too late, last sent was ", p.lastSequenceNumber)
 	}
 
-	if p.init && pkt.packet.Header().SequenceNumber > p.lastSequenceNumber && pkt.packet.Header().SequenceNumber-p.lastSequenceNumber > 1 {
+	if p.init && pkt.Packet.Header().SequenceNumber > p.lastSequenceNumber && pkt.Packet.Header().SequenceNumber-p.lastSequenceNumber > 1 {
 		// make sure packet has no gap
-		p.log.Warnf("packet cache: packet sequence ", pkt.packet.Header().SequenceNumber, " has a gap with last sent ", p.lastSequenceNumber)
+		p.log.Warnf("packet cache: packet sequence ", pkt.Packet.Header().SequenceNumber, " has a gap with last sent ", p.lastSequenceNumber)
 	}
 
 	p.mu.Lock()
-	p.lastSequenceNumber = pkt.packet.Header().SequenceNumber
+	p.lastSequenceNumber = pkt.Packet.Header().SequenceNumber
 	p.packetCount++
 	p.mu.Unlock()
 
-	if p.oldestPacket != nil && p.oldestPacket.packet.Header().SequenceNumber == pkt.packet.Header().SequenceNumber {
+	if p.oldestPacket != nil && p.oldestPacket.Packet.Header().SequenceNumber == pkt.Packet.Header().SequenceNumber {
 		// oldest packet will be remove, find the next oldest packet in the list
 		p.mu.RLock()
 		for e := el.Next(); e != nil; e = e.Next() {
-			packet := e.Value.(*packet)
+			packet := e.Value.(*Packet)
 			if packet.addedTime.After(p.oldestPacket.addedTime) {
 				p.oldestPacket = packet
 			}
@@ -223,8 +222,8 @@ func (p *packetBuffers) pop(el *list.Element) *packet {
 	return pkt
 }
 
-func (p *packetBuffers) flush() []*packet {
-	packets := make([]*packet, 0)
+func (p *PacketBuffers) flush() []*Packet {
+	packets := make([]*Packet, 0)
 
 	if p.oldestPacket != nil && time.Since(p.oldestPacket.addedTime) > p.maxLatency {
 		// we have waited too long, we should send the packets
@@ -244,10 +243,10 @@ Loop:
 	return packets
 }
 
-func (p *packetBuffers) sendOldestPacket() *packet {
+func (p *PacketBuffers) sendOldestPacket() *Packet {
 	for e := p.buffers.Front(); e != nil; e = e.Next() {
-		packet := e.Value.(*packet)
-		if packet.packet.Header().SequenceNumber == p.oldestPacket.packet.Header().SequenceNumber {
+		packet := e.Value.(*Packet)
+		if packet.Packet.Header().SequenceNumber == p.oldestPacket.Packet.Header().SequenceNumber {
 			return p.pop(e)
 		}
 	}
@@ -255,19 +254,19 @@ func (p *packetBuffers) sendOldestPacket() *packet {
 	return nil
 }
 
-func (p *packetBuffers) fetch(e *list.Element) *packet {
+func (p *PacketBuffers) fetch(e *list.Element) *Packet {
 	p.latencyMu.RLock()
 	maxLatency := p.maxLatency
 	minLatency := p.minLatency
 	p.latencyMu.RUnlock()
 
-	currentPacket := e.Value.(*packet)
+	currentPacket := e.Value.(*Packet)
 
-	currentSeq := currentPacket.packet.Header().SequenceNumber
+	currentSeq := currentPacket.Packet.Header().SequenceNumber
 
 	latency := time.Since(currentPacket.addedTime)
 
-	if !p.Initiated() && latency > minLatency && e.Next() != nil && !IsRTPPacketLate(e.Next().Value.(*rtppool.RetainablePacket).Header().SequenceNumber, currentSeq) {
+	if !p.Initiated() && latency > minLatency && e.Next() != nil && !IsRTPPacketLate(e.Next().Value.(*Packet).Packet.Header().SequenceNumber, currentSeq) {
 		// first packet to send, but make sure we have the packet in order
 		p.mu.Lock()
 		p.initSequence = currentSeq
@@ -294,14 +293,14 @@ func (p *packetBuffers) fetch(e *list.Element) *packet {
 	// p.log.Infof("packet latency: ", packetLatency, " gap: ", gap, " currentSeq: ", currentSeq, " nextSeq: ", nextSeq)
 	if latency > maxLatency {
 		// we have waited too long, we should send the packets
-		p.log.Warnf("packet cache: packet sequence ", currentPacket.packet.Header().SequenceNumber, " latency ", latency, ", reached max latency ", maxLatency, ", will sending the packets")
+		p.log.Warnf("packet cache: packet sequence ", currentPacket.Packet.Header().SequenceNumber, " latency ", latency, ", reached max latency ", maxLatency, ", will sending the packets")
 		return p.pop(e)
 	}
 
 	return nil
 }
 
-func (p *packetBuffers) Pop() *packet {
+func (p *PacketBuffers) Pop() *Packet {
 	p.mu.RLock()
 	if p.oldestPacket != nil && time.Since(p.oldestPacket.addedTime) > p.maxLatency {
 		p.mu.RUnlock()
@@ -316,16 +315,16 @@ func (p *packetBuffers) Pop() *packet {
 		return nil
 	}
 
-	item := frontElement.Value.(*rtppool.RetainablePacket)
-	if err := item.Retain(); err != nil {
+	item := frontElement.Value.(*Packet)
+	if err := item.Packet.Retain(); err != nil {
 		return nil
 	}
 
 	defer func() {
-		item.Release()
+		item.Packet.Release()
 	}()
 
-	if IsRTPPacketLate(item.Header().SequenceNumber, p.lastSequenceNumber) {
+	if IsRTPPacketLate(item.Packet.Header().SequenceNumber, p.lastSequenceNumber) {
 
 		return p.pop(frontElement)
 	}
@@ -333,11 +332,11 @@ func (p *packetBuffers) Pop() *packet {
 	return p.fetch(frontElement)
 }
 
-func (p *packetBuffers) Flush() []*packet {
+func (p *PacketBuffers) Flush() []*Packet {
 	return p.flush()
 }
 
-func (p *packetBuffers) Last() *packet {
+func (p *PacketBuffers) Last() *Packet {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
@@ -345,23 +344,23 @@ func (p *packetBuffers) Last() *packet {
 		return nil
 	}
 
-	return p.buffers.Back().Value.(*packet)
+	return p.buffers.Back().Value.(*Packet)
 }
 
-func (p *packetBuffers) Len() int {
+func (p *PacketBuffers) Len() int {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
 	return p.buffers.Len()
 }
 
-func (p *packetBuffers) Clear() {
+func (p *PacketBuffers) Clear() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
 	for e := p.buffers.Front(); e != nil; e = e.Next() {
-		packet := e.Value.(*rtppool.RetainablePacket)
-		packet.Release()
+		packet := e.Value.(*Packet)
+		packet.Packet.Release()
 		p.buffers.Remove(e)
 	}
 
@@ -370,7 +369,7 @@ func (p *packetBuffers) Clear() {
 	p.oldestPacket = nil
 }
 
-func (p *packetBuffers) Close() {
+func (p *PacketBuffers) Close() {
 	p.mu.Lock()
 	p.ended = true
 	p.mu.Unlock()
@@ -380,7 +379,7 @@ func (p *packetBuffers) Close() {
 	// make sure we don't have any waiters
 	p.packetAvailableWait.Signal()
 }
-func (p *packetBuffers) WaitAvailablePacket() {
+func (p *PacketBuffers) WaitAvailablePacket() {
 	p.mu.RLock()
 	if p.buffers.Len() == 0 {
 		p.mu.RUnlock()
@@ -399,20 +398,20 @@ func (p *packetBuffers) WaitAvailablePacket() {
 	p.packetAvailableWait.Wait()
 }
 
-func (p *packetBuffers) checkOrderedPacketAndRecordTimes() {
+func (p *PacketBuffers) checkOrderedPacketAndRecordTimes() {
 	for e := p.buffers.Front(); e != nil; e = e.Next() {
-		pkt := e.Value.(*packet)
+		pkt := e.Value.(*Packet)
 
 		// make sure call retain to prevent packet from being released when we are still using it
-		if err := pkt.packet.Retain(); err != nil {
+		if err := pkt.Packet.Retain(); err != nil {
 			// already released
 			continue
 		}
 
-		currentSeq := pkt.packet.Header().SequenceNumber
+		currentSeq := pkt.Packet.Header().SequenceNumber
 		latency := time.Since(pkt.addedTime)
 
-		if !p.init && latency > p.minLatency && e.Next() != nil && !IsRTPPacketLate(e.Next().Value.(*rtppool.RetainablePacket).Header().SequenceNumber, currentSeq) {
+		if !p.init && latency > p.minLatency && e.Next() != nil && !IsRTPPacketLate(e.Next().Value.(*Packet).Packet.Header().SequenceNumber, currentSeq) {
 			// signal first packet to send
 			p.packetAvailableWait.Signal()
 		} else if (p.lastSequenceNumber < currentSeq || p.lastSequenceNumber-currentSeq > uint16SizeHalf) && currentSeq-p.lastSequenceNumber == 1 {
@@ -429,17 +428,17 @@ func (p *packetBuffers) checkOrderedPacketAndRecordTimes() {
 		}
 
 		// release the packet after we are done with it
-		pkt.packet.Release()
+		pkt.Packet.Release()
 	}
 }
 
-func (p *packetBuffers) recordWaitTime(el *list.Element) {
+func (p *PacketBuffers) recordWaitTime(el *list.Element) {
 	p.waitTimeMu.Lock()
 	defer p.waitTimeMu.Unlock()
 
-	pkt := el.Value.(*packet)
+	pkt := el.Value.(*Packet)
 
-	if p.lastSequenceWaitTime == pkt.packet.Header().SequenceNumber || IsRTPPacketLate(pkt.packet.Header().SequenceNumber, p.lastSequenceWaitTime) || p.previousAddedTime.IsZero() {
+	if p.lastSequenceWaitTime == pkt.Packet.Header().SequenceNumber || IsRTPPacketLate(pkt.Packet.Header().SequenceNumber, p.lastSequenceWaitTime) || p.previousAddedTime.IsZero() {
 		// don't record late packet or already recorded packet
 		if p.previousAddedTime.IsZero() {
 			p.previousAddedTime = pkt.addedTime
@@ -448,7 +447,7 @@ func (p *packetBuffers) recordWaitTime(el *list.Element) {
 		return
 	}
 
-	p.lastSequenceWaitTime = pkt.packet.Header().SequenceNumber
+	p.lastSequenceWaitTime = pkt.Packet.Header().SequenceNumber
 
 	// remove oldest packet from the wait times if more than 500
 	if uint16(len(p.waitTimes)+1) > waitTimeSize {
@@ -462,7 +461,7 @@ func (p *packetBuffers) recordWaitTime(el *list.Element) {
 
 }
 
-func (p *packetBuffers) checkWaitTimeAdjuster() {
+func (p *PacketBuffers) checkWaitTimeAdjuster() {
 	if p.waitTimeResetCounter > waitTimeSize {
 		p.waitTimeMu.Lock()
 		defer p.waitTimeMu.Unlock()

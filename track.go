@@ -10,6 +10,7 @@ import (
 	"github.com/inlivedev/sfu/pkg/interceptors/voiceactivedetector"
 	"github.com/inlivedev/sfu/pkg/networkmonitor"
 	"github.com/inlivedev/sfu/pkg/rtppool"
+	"github.com/pion/interceptor"
 	"github.com/pion/interceptor/pkg/stats"
 	"github.com/pion/logging"
 	"github.com/pion/rtp"
@@ -55,14 +56,14 @@ type ITrack interface {
 	SetSourceType(TrackType)
 	SourceType() TrackType
 	SetAsProcessed()
-	OnRead(func(*rtp.Packet, QualityLevel))
+	OnRead(func(interceptor.Attributes, *rtp.Packet, QualityLevel))
 	IsScreen() bool
 	IsRelay() bool
 	Kind() webrtc.RTPCodecType
 	MimeType() string
 	TotalTracks() int
 	Context() context.Context
-	Relay(func(webrtc.SSRC, *rtp.Packet))
+	Relay(func(webrtc.SSRC, interceptor.Attributes, *rtp.Packet))
 	PayloadType() webrtc.PayloadType
 	OnEnded(func())
 }
@@ -73,7 +74,7 @@ type Track struct {
 	base             *baseTrack
 	remoteTrack      *remoteTrack
 	onEndedCallbacks []func()
-	onReadCallbacks  []func(*rtp.Packet, QualityLevel)
+	onReadCallbacks  []func(interceptor.Attributes, *rtp.Packet, QualityLevel)
 }
 
 type AudioTrack struct {
@@ -100,11 +101,11 @@ func newTrack(ctx context.Context, client *Client, trackRemote IRemoteTrack, min
 	t := &Track{
 		mu:               sync.Mutex{},
 		base:             baseTrack,
-		onReadCallbacks:  make([]func(*rtp.Packet, QualityLevel), 0),
+		onReadCallbacks:  make([]func(interceptor.Attributes, *rtp.Packet, QualityLevel), 0),
 		onEndedCallbacks: make([]func(), 0),
 	}
 
-	onRead := func(p *rtp.Packet) {
+	onRead := func(attrs interceptor.Attributes, p *rtp.Packet) {
 		tracks := t.base.clientTracks.GetTracks()
 
 		for _, track := range tracks {
@@ -129,7 +130,7 @@ func newTrack(ctx context.Context, client *Client, trackRemote IRemoteTrack, min
 		copyPacket.Header = *packet.Header()
 		copyPacket.Payload = packet.Payload()
 
-		t.onRead(copyPacket, QualityHigh)
+		t.onRead(attrs, copyPacket, QualityHigh)
 
 		pool.PutPacket(copyPacket)
 
@@ -336,29 +337,32 @@ func (t *Track) SetAsProcessed() {
 	t.base.isProcessed = true
 }
 
-func (t *Track) OnRead(callback func(*rtp.Packet, QualityLevel)) {
+func (t *Track) OnRead(callback func(interceptor.Attributes, *rtp.Packet, QualityLevel)) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	t.onReadCallbacks = append(t.onReadCallbacks, callback)
 }
 
-func (t *Track) onRead(p *rtp.Packet, quality QualityLevel) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
+func (t *Track) onRead(attrs interceptor.Attributes, p *rtp.Packet, quality QualityLevel) {
+	callbacks := make([]func(interceptor.Attributes, *rtp.Packet, QualityLevel), 0)
 
-	for _, callback := range t.onReadCallbacks {
+	t.mu.Lock()
+	callbacks = append(callbacks, t.onReadCallbacks...)
+	t.mu.Unlock()
+
+	for _, callback := range callbacks {
 		copyPacket := t.base.pool.GetPacket()
 		copyPacket.Header = p.Header
 		copyPacket.Payload = p.Payload
-		callback(p, quality)
+		callback(attrs, p, quality)
 		t.base.pool.PutPacket(copyPacket)
 	}
 }
 
-func (t *Track) Relay(f func(webrtc.SSRC, *rtp.Packet)) {
-	t.OnRead(func(p *rtp.Packet, quality QualityLevel) {
-		f(t.SSRC(), p)
+func (t *Track) Relay(f func(webrtc.SSRC, interceptor.Attributes, *rtp.Packet)) {
+	t.OnRead(func(attrs interceptor.Attributes, p *rtp.Packet, quality QualityLevel) {
+		f(t.SSRC(), attrs, p)
 	})
 }
 
@@ -412,7 +416,7 @@ type SimulcastTrack struct {
 	lastMidKeyframeTS           *atomic.Int64
 	lastLowKeyframeTS           *atomic.Int64
 	onAddedRemoteTrackCallbacks []func(*remoteTrack)
-	onReadCallbacks             []func(*rtp.Packet, QualityLevel)
+	onReadCallbacks             []func(interceptor.Attributes, *rtp.Packet, QualityLevel)
 	pliInterval                 time.Duration
 	onNetworkConditionChanged   func(networkmonitor.NetworkConditionType)
 	reordered                   bool
@@ -442,7 +446,7 @@ func newSimulcastTrack(client *Client, track IRemoteTrack, minWait, maxWait, pli
 		lastLowKeyframeTS:           &atomic.Int64{},
 		onTrackCompleteCallbacks:    make([]func(), 0),
 		onAddedRemoteTrackCallbacks: make([]func(*remoteTrack), 0),
-		onReadCallbacks:             make([]func(*rtp.Packet, QualityLevel), 0),
+		onReadCallbacks:             make([]func(interceptor.Attributes, *rtp.Packet, QualityLevel), 0),
 		pliInterval:                 pliInterval,
 		onNetworkConditionChanged: func(condition networkmonitor.NetworkConditionType) {
 			client.onNetworkConditionChanged(condition)
@@ -535,7 +539,7 @@ func (t *SimulcastTrack) AddRemoteTrack(track IRemoteTrack, minWait, maxWait tim
 
 	quality := RIDToQuality(track.RID())
 
-	onRead := func(p *rtp.Packet) {
+	onRead := func(attrs interceptor.Attributes, p *rtp.Packet) {
 
 		// set the base timestamp for the track if it is not set yet
 		if t.baseTS == 0 {
@@ -590,7 +594,7 @@ func (t *SimulcastTrack) AddRemoteTrack(track IRemoteTrack, minWait, maxWait tim
 		copyPacket.Header = *packet.Header()
 		copyPacket.Payload = packet.Payload()
 
-		t.onRead(copyPacket, quality)
+		t.onRead(attrs, copyPacket, quality)
 
 		t.base.pool.PutPacket(copyPacket)
 
@@ -808,16 +812,16 @@ func (t *SimulcastTrack) MimeType() string {
 	return t.base.codec.MimeType
 }
 
-func (t *SimulcastTrack) OnRead(callback func(*rtp.Packet, QualityLevel)) {
+func (t *SimulcastTrack) OnRead(callback func(interceptor.Attributes, *rtp.Packet, QualityLevel)) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	t.onReadCallbacks = append(t.onReadCallbacks, callback)
 }
 
-func (t *SimulcastTrack) onRead(p *rtp.Packet, quality QualityLevel) {
+func (t *SimulcastTrack) onRead(attr interceptor.Attributes, p *rtp.Packet, quality QualityLevel) {
 	for _, callback := range t.onReadCallbacks {
-		callback(p, quality)
+		callback(attr, p, quality)
 	}
 }
 
@@ -887,15 +891,15 @@ func (t *SimulcastTrack) RIDLow() string {
 	return t.remoteTrackLow.track.RID()
 }
 
-func (t *SimulcastTrack) Relay(f func(webrtc.SSRC, *rtp.Packet)) {
-	t.OnRead(func(p *rtp.Packet, quality QualityLevel) {
+func (t *SimulcastTrack) Relay(f func(webrtc.SSRC, interceptor.Attributes, *rtp.Packet)) {
+	t.OnRead(func(attrs interceptor.Attributes, p *rtp.Packet, quality QualityLevel) {
 		switch quality {
 		case QualityHigh:
-			f(t.SSRCHigh(), p)
+			f(t.SSRCHigh(), attrs, p)
 		case QualityMid:
-			f(t.SSRCMid(), p)
+			f(t.SSRCMid(), attrs, p)
 		case QualityLow:
-			f(t.SSRCLow(), p)
+			f(t.SSRCLow(), attrs, p)
 		}
 	})
 }

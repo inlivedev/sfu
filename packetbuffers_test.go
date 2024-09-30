@@ -37,7 +37,7 @@ func TestAdd(t *testing.T) {
 	minLatency := 10 * time.Millisecond
 	maxLatency := 100 * time.Millisecond
 
-	caches := newPacketBuffers(ctx, minLatency, maxLatency, false, logging.NewDefaultLoggerFactory().NewLogger("sfu"))
+	caches := NewPacketBuffers(ctx, minLatency, maxLatency, false, logging.NewDefaultLoggerFactory().NewLogger("sfu"))
 
 	for i, pkt := range packets {
 		rp := pool.NewPacket(&pkt.Header, pkt.Payload)
@@ -77,7 +77,7 @@ func TestAddLost(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	caches := newPacketBuffers(ctx, minLatency, maxLatency, false, logging.NewDefaultLoggerFactory().NewLogger("sfu"))
+	caches := NewPacketBuffers(ctx, minLatency, maxLatency, false, logging.NewDefaultLoggerFactory().NewLogger("sfu"))
 
 	for i, pkt := range packets {
 		if pkt.SequenceNumber == 65533 {
@@ -126,7 +126,7 @@ func TestDuplicateAdd(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	caches := newPacketBuffers(ctx, minLatency, maxLatency, false, logging.NewDefaultLoggerFactory().NewLogger("sfu"))
+	caches := NewPacketBuffers(ctx, minLatency, maxLatency, false, logging.NewDefaultLoggerFactory().NewLogger("sfu"))
 
 	for i, pkt := range packets {
 		if i == 9 {
@@ -152,7 +152,7 @@ func TestDuplicateAdd(t *testing.T) {
 
 	// i := 0
 	// for e := caches.buffers.Front(); e != nil; e = e.Next() {
-	// 	packet := e.Value.(*packet)
+	// 	packet := e.Value.(*Packet)
 	// 	require.Equal(t, packet.RTP.Header().SequenceNumber, sortedNumbers[i], fmt.Sprintf("packet sequence number %d should be equal to sortedNumbers sequence number %d", packet.RTP.Header().SequenceNumber, sortedNumbers[i]))
 	// 	i++
 	// }
@@ -176,7 +176,7 @@ func TestFlush(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	caches := newPacketBuffers(ctx, minLatency, maxLatency, false, logging.NewDefaultLoggerFactory().NewLogger("sfu"))
+	caches := NewPacketBuffers(ctx, minLatency, maxLatency, false, logging.NewDefaultLoggerFactory().NewLogger("sfu"))
 
 	for i, pkt := range packets {
 		rp := pool.NewPacket(&pkt.Header, pkt.Payload)
@@ -218,9 +218,9 @@ func TestFlushBetweenAdded(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	caches := newPacketBuffers(ctx, minLatency, maxLatency, false, logging.NewDefaultLoggerFactory().NewLogger("sfu"))
+	caches := NewPacketBuffers(ctx, minLatency, maxLatency, false, logging.NewDefaultLoggerFactory().NewLogger("sfu"))
 
-	sorted := make([]*packet, 0)
+	sorted := make([]*Packet, 0)
 
 	for i, pkt := range packets {
 		rp := pool.NewPacket(&pkt.Header, pkt.Payload)
@@ -266,9 +266,9 @@ func TestLatency(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	caches := newPacketBuffers(ctx, minLatency, maxLatency, false, logging.NewDefaultLoggerFactory().NewLogger("sfu"))
+	caches := NewPacketBuffers(ctx, minLatency, maxLatency, false, logging.NewDefaultLoggerFactory().NewLogger("sfu"))
 
-	sorted := make([]*packet, 0)
+	sorted := make([]*Packet, 0)
 	seqs := make([]uint16, 0)
 	resultsSeqs := make([]uint16, 0)
 	dropped := 0
@@ -339,7 +339,7 @@ func BenchmarkPushPool(b *testing.B) {
 		}
 	}
 
-	packetBuffers := newPacketBuffers(ctx, 10*time.Millisecond, 100*time.Millisecond, false, logging.NewDefaultLoggerFactory().NewLogger("sfu"))
+	packetBuffers := NewPacketBuffers(ctx, 10*time.Millisecond, 100*time.Millisecond, false, logging.NewDefaultLoggerFactory().NewLogger("sfu"))
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -353,7 +353,7 @@ func BenchmarkPushPool(b *testing.B) {
 func BenchmarkPopPool(b *testing.B) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	packetBuffers := newPacketBuffers(ctx, 10*time.Millisecond, 100*time.Millisecond, false, logging.NewDefaultLoggerFactory().NewLogger("sfu"))
+	packetBuffers := NewPacketBuffers(ctx, 10*time.Millisecond, 100*time.Millisecond, false, logging.NewDefaultLoggerFactory().NewLogger("sfu"))
 
 	for i := 0; i < b.N; i++ {
 		rp := pool.NewPacket(&rtp.Header{}, make([]byte, 1400))

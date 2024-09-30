@@ -309,6 +309,10 @@ func (s *SFU) GetClient(id string) (*Client, error) {
 	return s.clients.GetClient(id)
 }
 
+func (s *SFU) GetClients() map[string]*Client {
+	return s.clients.GetClients()
+}
+
 func (s *SFU) removeClient(client *Client) error {
 	if err := s.clients.Remove(client); err != nil {
 		s.log.Errorf("sfu: failed to remove client ", err)
@@ -389,7 +393,7 @@ func (s *SFU) createExistingDataChannels(c *Client) {
 		}
 
 		if err := c.createDataChannel(dc.label, initOpts); err != nil {
-			s.log.Errorf("datachanel: error on create existing data channels, ", err)
+			s.log.Errorf("datachanel: error on create existing data channel %s, error %s", dc.label, err.Error())
 		}
 	}
 }
