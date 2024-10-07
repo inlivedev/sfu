@@ -2,7 +2,9 @@ package sfu
 
 import (
 	"encoding/binary"
+	"log"
 	"strings"
+	"time"
 
 	"github.com/pion/rtp"
 	"github.com/pion/rtp/codecs"
@@ -209,7 +211,7 @@ func getH264BlankFrame() []byte {
 }
 
 // reuse from pion media engine and media sample
-func payloaderForCodec(codec webrtc.RTPCodecCapability) (rtp.Payloader, error) {
+func PayloaderForCodec(codec webrtc.RTPCodecCapability) (rtp.Payloader, error) {
 	switch strings.ToLower(codec.MimeType) {
 	case strings.ToLower(webrtc.MimeTypeH264):
 		return &codecs.H264Payloader{}, nil
@@ -232,25 +234,12 @@ func payloaderForCodec(codec webrtc.RTPCodecCapability) (rtp.Payloader, error) {
 	}
 }
 
-func SendBlackImageFrames(startSequence uint16, localRTP *webrtc.TrackLocalStaticRTP, sample *media.Sample) (uint16, error) {
-	sequencer := rtp.NewFixedSequencer(startSequence)
-	payloader, _ := payloaderForCodec(localRTP.Codec())
-	p := rtp.NewPacketizer(
-		1450,
-		0, // Value is handled when writing
-		0, // Value is handled when writing
-		payloader,
-		sequencer,
-		localRTP.Codec().ClockRate,
-	)
-
+func SendMediaSamples(p rtp.Packetizer, sequencer rtp.Sequencer, localRTP *webrtc.TrackLocalStaticRTP, sample media.Sample) error {
 	clockRate := localRTP.Codec().ClockRate
-
-	lastSequenceNumber := startSequence
 
 	// skip packets by the number of previously dropped packets
 	for i := uint16(0); i < sample.PrevDroppedPackets; i++ {
-		lastSequenceNumber = sequencer.NextSequenceNumber()
+		sequencer.NextSequenceNumber()
 	}
 
 	samples := uint32(sample.Duration.Seconds()) * clockRate
@@ -261,13 +250,27 @@ func SendBlackImageFrames(startSequence uint16, localRTP *webrtc.TrackLocalStati
 	packets := p.Packetize(sample.Data, samples)
 
 	writeErrs := []error{}
-	for _, p := range packets {
-		if err := localRTP.WriteRTP(p); err != nil {
-			writeErrs = append(writeErrs, err)
-		}
+
+	framerate := 30
+
+	if localRTP.Kind() == webrtc.RTPCodecTypeAudio {
+		framerate = 50
 	}
 
-	return lastSequenceNumber + uint16(len(packets)), FlattenErrors(writeErrs)
+	frameDuration := time.Duration(1000/framerate) * time.Millisecond
+
+	ticker := time.NewTicker(frameDuration)
+	defer ticker.Stop()
+
+	for _, p := range packets {
+		if err := localRTP.WriteRTP(p); err != nil {
+			log.Println("send packet size: ", len(p.Payload))
+			writeErrs = append(writeErrs, err)
+		}
+		<-ticker.C
+	}
+
+	return FlattenErrors(writeErrs)
 }
 
 func getPayloadType(mimeType string) webrtc.PayloadType {

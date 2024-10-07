@@ -195,7 +195,7 @@ func TestFlush(t *testing.T) {
 	require.Equal(t, len(sortedNumbers), len(sorted), "sorted length should be equal to sortedNumbers length")
 
 	for i, pkt := range sorted {
-		require.Equal(t, pkt.packet.Header().SequenceNumber, sortedNumbers[i], fmt.Sprintf("packet sequence number %d should be equal to sortedNumbers sequence number %d", pkt.packet.Header().SequenceNumber, sortedNumbers[i]))
+		require.Equal(t, pkt.Packet.Header().SequenceNumber, sortedNumbers[i], fmt.Sprintf("packet sequence number %d should be equal to sortedNumbers sequence number %d", pkt.Packet.Header().SequenceNumber, sortedNumbers[i]))
 	}
 }
 
@@ -243,7 +243,7 @@ func TestFlushBetweenAdded(t *testing.T) {
 	require.Equal(t, len(sortedNumbers), len(sorted), "sorted length should be equal to sortedNumbers length")
 
 	for i, pkt := range sorted {
-		require.Equal(t, pkt.packet.Header().SequenceNumber, sortedNumbers[i], fmt.Sprintf("packet sequence number %d should be equal to sortedNumbers sequence number %d", pkt.packet.Header().SequenceNumber, sortedNumbers[i]))
+		require.Equal(t, pkt.Packet.Header().SequenceNumber, sortedNumbers[i], fmt.Sprintf("packet sequence number %d should be equal to sortedNumbers sequence number %d", pkt.Packet.Header().SequenceNumber, sortedNumbers[i]))
 	}
 }
 
@@ -288,7 +288,7 @@ func TestLatency(t *testing.T) {
 				dropped++
 			}
 			for _, pkt := range sorted {
-				resultsSeqs = append(resultsSeqs, pkt.packet.Header().SequenceNumber)
+				resultsSeqs = append(resultsSeqs, pkt.Packet.Header().SequenceNumber)
 			}
 			require.Equal(t, 6, len(sorted), "sorted length should be equal to 6, result ", resultsSeqs, seqs)
 		} else if pkt.Header.SequenceNumber == 0 {
@@ -302,7 +302,7 @@ func TestLatency(t *testing.T) {
 				dropped++
 			}
 			for _, pkt := range sorted {
-				resultsSeqs = append(resultsSeqs, pkt.packet.Header().SequenceNumber)
+				resultsSeqs = append(resultsSeqs, pkt.Packet.Header().SequenceNumber)
 			}
 			// from 15 packets added, 3 packets will be dropped because it's too late
 			require.Equal(t, 13, len(sorted), "sorted length should be equal to 13, result ", resultsSeqs, seqs)
@@ -366,11 +366,11 @@ func BenchmarkPopPool(b *testing.B) {
 		p := packetBuffers.Pop()
 		if p != nil {
 			rtp := pool.GetPacket()
-			rtp.Header = *p.packet.Header()
-			rtp.Payload = p.packet.Payload()
+			rtp.Header = *p.Packet.Header()
+			rtp.Payload = p.Packet.Payload()
 
 			// b.Logf("packet sequence %d", rtpPacket.SequenceNumber)
-			p.packet.Release()
+			p.Packet.Release()
 
 			pool.PutPacket(rtp)
 		}

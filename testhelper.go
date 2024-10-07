@@ -13,7 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/inlivedev/sfu/pkg/interceptors/simulcast"
-	"github.com/pion/ice/v3"
+	"github.com/pion/ice/v4"
 	"github.com/pion/interceptor"
 	"github.com/pion/interceptor/pkg/stats"
 	"github.com/pion/logging"
