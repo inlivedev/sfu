@@ -20,12 +20,26 @@ Voice Active Detector is a Pion Interceptor will allow you to detect any voice a
 
 	i := &interceptor.Registry{}
 
-	vadInterceptorFactory := voiceactivedetector.NewInterceptor(ctx)
+	//"github.com/pion/logging"
+	log:= logging.NewDefaultLoggerFactory().NewLogger("vad")
+
+	// enable voice detector
+	vadInterceptorFactory := voiceactivedetector.NewInterceptor(localCtx, log)
+
+	vads := make(map[uint32]*voiceactivedetector.VoiceDetector)
 
 	// enable voice detector
 	vadInterceptorFactory.OnNew(func(i *voiceactivedetector.Interceptor) {
-		vad = i
+		vadInterceptor = i
+		i.OnNewVAD(func(vad *voiceactivedetector.VoiceDetector) {
+			vad.OnVoiceDetected(func(pkts []voiceactivedetector.VoicePacketData) {
+				// add to vad map
+				vads[vad.SSRC()] = vad
+			})
+		})
 	})
+
+		
 
 	i.Add(vadInterceptorFactory)
 	```
@@ -36,13 +50,25 @@ Voice Active Detector is a Pion Interceptor will allow you to detect any voice a
 	peerConnection, err := webrtc.NewAPI(webrtc.WithMediaEngine(m), webrtc.WithSettingEngine(settingEngine), webrtc.WithInterceptorRegistry(i)).NewPeerConnection(peerConnectionConfig)
 	```
 
-5. Use the voice active detector  to detect voice activity on LocalStaticTrack
+5. Use the voice activity detector  to detect voice activity on remote track
 	```go
-	// Create a new LocalStaticTrack
-	localStaticTrack, _ := webrtc.NewTrackLocalStaticSample(webrtc.RTPCodecCapability{MimeType: "audio/opus"}, "audio", "pion")
-	detector := vad.AddAudioTrack(localStaticTrack)
-	detector.OnVoiceDetected(func(activity voiceactivedetector.VoiceActivity) {
-		// do something like sending it to client over datachanel or websocket
-		
+	peerConnection.OnTrack(func(remoteTrack *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
+		vad, ok := vads[uint32(remoteTrack.SSRC())]
+		if ok {
+			vad.OnVoiceDetected(func(pkts []voiceactivedetector.VoicePacketData) {
+				// voice detected on remote track
+				voiceActivity := voiceactivedetector.VoiceActivity{
+							TrackID:     remoteTrack.ID(),
+							StreamID:    remoteTrack.StreamID(),
+							SSRC:        uint32(remoteTrack.SSRC()),
+							ClockRate:  remoteTrack.Codec().ClockRate,
+							AudioLevels: pkts,
+						}
+				
+				// do something with voice activity
+				// send to datachannel or to user who subscribe to the event
+
+			})
+		}
 	})
 	```
