@@ -49,7 +49,7 @@ func NewPacketManager() *PacketManager {
 
 		AttrPool: &sync.Pool{
 			New: func() interface{} {
-				return &interceptor.Attributes{}
+				return interceptor.Attributes{}
 			},
 		},
 	}
@@ -95,6 +95,11 @@ func (m *PacketManager) NewPacket(header *rtp.Header, payload []byte, attr inter
 		if !ok {
 			return nil, errFailedToCastPayloadPool
 		}
+
+		// copy map
+		for k, v := range attr {
+			p.attr[k] = v
+		}
 	}
 
 	return p, nil
@@ -108,6 +113,11 @@ func (m *PacketManager) releasePacket(header *rtp.Header, payload *[]byte, p *Re
 	}
 
 	if p.attr != nil {
+		// clear map
+		for k := range p.attr {
+			delete(p.attr, k)
+		}
+
 		m.AttrPool.Put(p.attr)
 	}
 
