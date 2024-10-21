@@ -7,6 +7,7 @@ import (
 	"io"
 	"sync"
 
+	"github.com/pion/interceptor"
 	"github.com/pion/rtp"
 )
 
@@ -23,6 +24,7 @@ type PacketManager struct {
 	PacketPool  *sync.Pool
 	HeaderPool  *sync.Pool
 	PayloadPool *sync.Pool
+	AttrPool    *sync.Pool
 }
 
 func NewPacketManager() *PacketManager {
@@ -44,10 +46,16 @@ func NewPacketManager() *PacketManager {
 				return &buf
 			},
 		},
+
+		AttrPool: &sync.Pool{
+			New: func() interface{} {
+				return &interceptor.Attributes{}
+			},
+		},
 	}
 }
 
-func (m *PacketManager) NewPacket(header *rtp.Header, payload []byte) (*RetainablePacket, error) {
+func (m *PacketManager) NewPacket(header *rtp.Header, payload []byte, attr interceptor.Attributes) (*RetainablePacket, error) {
 	if len(payload) > maxPayloadLen {
 		return nil, io.ErrShortBuffer
 	}
@@ -82,6 +90,13 @@ func (m *PacketManager) NewPacket(header *rtp.Header, payload []byte) (*Retainab
 		p.payload = (*p.buffer)[:size]
 	}
 
+	if attr != nil {
+		p.attr, ok = m.AttrPool.Get().(interceptor.Attributes)
+		if !ok {
+			return nil, errFailedToCastPayloadPool
+		}
+	}
+
 	return p, nil
 }
 
@@ -90,6 +105,10 @@ func (m *PacketManager) releasePacket(header *rtp.Header, payload *[]byte, p *Re
 	if payload != nil {
 		copy(*payload, blankPayload)
 		m.PayloadPool.Put(payload)
+	}
+
+	if p.attr != nil {
+		m.AttrPool.Put(p.attr)
 	}
 
 	m.PacketPool.Put(p)
@@ -103,6 +122,7 @@ type RetainablePacket struct {
 	header  *rtp.Header
 	buffer  *[]byte
 	payload []byte
+	attr    interceptor.Attributes
 }
 
 func (p *RetainablePacket) Header() *rtp.Header {
@@ -117,6 +137,13 @@ func (p *RetainablePacket) Payload() []byte {
 	defer p.mu.RUnlock()
 
 	return p.payload
+}
+
+func (p *RetainablePacket) Attributes() interceptor.Attributes {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	return p.attr
 }
 
 func (p *RetainablePacket) Retain() error {

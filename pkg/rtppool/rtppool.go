@@ -3,6 +3,7 @@ package rtppool
 import (
 	"sync"
 
+	"github.com/pion/interceptor"
 	"github.com/pion/rtp"
 )
 
@@ -47,8 +48,8 @@ func (r *RTPPool) PutPayload(localPayload *[]byte) {
 	r.PacketManager.PayloadPool.Put(localPayload)
 }
 
-func (r *RTPPool) NewPacket(header *rtp.Header, payload []byte) *RetainablePacket {
-	pkt, err := r.PacketManager.NewPacket(header, payload)
+func (r *RTPPool) NewPacket(header *rtp.Header, payload []byte, attr interceptor.Attributes) *RetainablePacket {
+	pkt, err := r.PacketManager.NewPacket(header, payload, attr)
 	if err != nil {
 		return nil
 	}
