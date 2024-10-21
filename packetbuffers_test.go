@@ -40,7 +40,7 @@ func TestAdd(t *testing.T) {
 	caches := NewPacketBuffers(ctx, minLatency, maxLatency, false, logging.NewDefaultLoggerFactory().NewLogger("sfu"))
 
 	for i, pkt := range packets {
-		rp := pool.NewPacket(&pkt.Header, pkt.Payload)
+		rp := pool.NewPacket(&pkt.Header, pkt.Payload, nil)
 		err := caches.Add(rp)
 		if i != 2 && i != 3 {
 			require.NoError(t, err)
@@ -84,7 +84,7 @@ func TestAddLost(t *testing.T) {
 			// drop packet 65533
 			continue
 		}
-		rp := pool.NewPacket(&pkt.Header, pkt.Payload)
+		rp := pool.NewPacket(&pkt.Header, pkt.Payload, nil)
 		err := caches.Add(rp)
 
 		if i != 2 && i != 3 {
@@ -133,7 +133,7 @@ func TestDuplicateAdd(t *testing.T) {
 			t.Log("packet sequence ", pkt.Header.SequenceNumber)
 		}
 
-		rp := pool.NewPacket(&pkt.Header, pkt.Payload)
+		rp := pool.NewPacket(&pkt.Header, pkt.Payload, nil)
 		err := caches.Add(rp)
 		if i == 2 || i == 3 {
 			require.EqualError(t, err, ErrPacketTooLate.Error())
@@ -179,7 +179,7 @@ func TestFlush(t *testing.T) {
 	caches := NewPacketBuffers(ctx, minLatency, maxLatency, false, logging.NewDefaultLoggerFactory().NewLogger("sfu"))
 
 	for i, pkt := range packets {
-		rp := pool.NewPacket(&pkt.Header, pkt.Payload)
+		rp := pool.NewPacket(&pkt.Header, pkt.Payload, nil)
 		err := caches.Add(rp)
 		if i != 2 && i != 3 {
 			require.NoError(t, err)
@@ -223,7 +223,7 @@ func TestFlushBetweenAdded(t *testing.T) {
 	sorted := make([]*Packet, 0)
 
 	for i, pkt := range packets {
-		rp := pool.NewPacket(&pkt.Header, pkt.Payload)
+		rp := pool.NewPacket(&pkt.Header, pkt.Payload, nil)
 		err := caches.Add(rp)
 		if i != 2 && i != 3 {
 			require.NoError(t, err)
@@ -280,7 +280,7 @@ func TestLatency(t *testing.T) {
 			// last sort call should return immediately
 			t.Log("packet sequence ", pkt.Header.SequenceNumber)
 			time.Sleep(2 * maxLatency)
-			rp := pool.NewPacket(&pkt.Header, pkt.Payload)
+			rp := pool.NewPacket(&pkt.Header, pkt.Payload, nil)
 			err := caches.Add(rp)
 			sortedPackets := caches.Flush()
 			sorted = append(sorted, sortedPackets...)
@@ -294,7 +294,7 @@ func TestLatency(t *testing.T) {
 		} else if pkt.Header.SequenceNumber == 0 {
 			// last sort call should return immediately
 			time.Sleep(2 * maxLatency)
-			rp := pool.NewPacket(&pkt.Header, pkt.Payload)
+			rp := pool.NewPacket(&pkt.Header, pkt.Payload, nil)
 			err := caches.Add(rp)
 			sortedPackets := caches.Flush()
 			sorted = append(sorted, sortedPackets...)
@@ -307,7 +307,7 @@ func TestLatency(t *testing.T) {
 			// from 15 packets added, 3 packets will be dropped because it's too late
 			require.Equal(t, 13, len(sorted), "sorted length should be equal to 13, result ", resultsSeqs, seqs)
 		} else {
-			rp := pool.NewPacket(&pkt.Header, pkt.Payload)
+			rp := pool.NewPacket(&pkt.Header, pkt.Payload, nil)
 			err := caches.Add(rp)
 			sortedPackets := caches.Flush()
 			sorted = append(sorted, sortedPackets...)
@@ -344,7 +344,7 @@ func BenchmarkPushPool(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		pkt := testPackets[i]
-		rp := pool.NewPacket(&pkt.Header, pkt.Payload)
+		rp := pool.NewPacket(&pkt.Header, pkt.Payload, nil)
 		_ = packetBuffers.Add(rp)
 	}
 
@@ -356,7 +356,7 @@ func BenchmarkPopPool(b *testing.B) {
 	packetBuffers := NewPacketBuffers(ctx, 10*time.Millisecond, 100*time.Millisecond, false, logging.NewDefaultLoggerFactory().NewLogger("sfu"))
 
 	for i := 0; i < b.N; i++ {
-		rp := pool.NewPacket(&rtp.Header{}, make([]byte, 1400))
+		rp := pool.NewPacket(&rtp.Header{}, make([]byte, 1400), nil)
 		packetBuffers.Add(rp)
 	}
 

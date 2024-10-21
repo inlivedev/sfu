@@ -110,7 +110,7 @@ func newTrack(ctx context.Context, client *Client, trackRemote IRemoteTrack, min
 
 		for _, track := range tracks {
 			//nolint:ineffassign,staticcheck // packet is from the pool
-			packet := pool.NewPacket(&p.Header, p.Payload)
+			packet := pool.NewPacket(&p.Header, p.Payload, attrs)
 
 			copyPacket := pool.GetPacket()
 			copyPacket.Header = *packet.Header()
@@ -124,7 +124,7 @@ func newTrack(ctx context.Context, client *Client, trackRemote IRemoteTrack, min
 		}
 
 		//nolint:ineffassign // this is required
-		packet := pool.NewPacket(&p.Header, p.Payload)
+		packet := pool.NewPacket(&p.Header, p.Payload, attrs)
 
 		copyPacket := pool.GetPacket()
 		copyPacket.Header = *packet.Header()
@@ -574,7 +574,7 @@ func (t *SimulcastTrack) AddRemoteTrack(track IRemoteTrack, minWait, maxWait tim
 		tracks := t.base.clientTracks.GetTracks()
 		for _, track := range tracks {
 			//nolint:ineffassign,staticcheck // packet is from the pool
-			packet := t.base.pool.NewPacket(&p.Header, p.Payload)
+			packet := t.base.pool.NewPacket(&p.Header, p.Payload, attrs)
 
 			copyPacket := t.base.pool.GetPacket()
 			copyPacket.Header = *packet.Header()
@@ -588,7 +588,7 @@ func (t *SimulcastTrack) AddRemoteTrack(track IRemoteTrack, minWait, maxWait tim
 		}
 
 		//nolint:ineffassign // this is required
-		packet := t.base.pool.NewPacket(&p.Header, p.Payload)
+		packet := t.base.pool.NewPacket(&p.Header, p.Payload, attrs)
 
 		copyPacket := t.base.pool.GetPacket()
 		copyPacket.Header = *packet.Header()

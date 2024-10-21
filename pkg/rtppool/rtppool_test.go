@@ -29,7 +29,7 @@ func BenchmarkPacketManager(b *testing.B) {
 	var pool = New()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		p, _ := pool.PacketManager.NewPacket(header, payload)
+		p, _ := pool.PacketManager.NewPacket(header, payload, nil)
 
 		p.Release()
 	}

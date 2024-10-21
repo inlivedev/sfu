@@ -141,7 +141,7 @@ func (p *LeakyBucketPacer) getQueue(ssrc uint32) *queue {
 // Write sends a packet with header and payload the a previously registered
 // stream.
 func (p *LeakyBucketPacer) Write(header *rtp.Header, payload []byte, attributes interceptor.Attributes) (int, error) {
-	pkt := p.rtppool.NewPacket(header, payload)
+	pkt := p.rtppool.NewPacket(header, payload, attributes)
 
 	queue := p.getQueue(header.SSRC)
 	if queue == nil {
