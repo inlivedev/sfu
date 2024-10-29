@@ -71,7 +71,7 @@ func createPeerAudio(ctx context.Context, room *Room, iceServers []webrtc.ICESer
 
 	client.OnAllowedRemoteRenegotiation(func() {
 		TestLogger.Info("allowed remote renegotiation")
-		negotiate(pc, client, TestLogger)
+		negotiate(pc, client, TestLogger, true)
 	})
 
 	client.OnIceCandidate(func(ctx context.Context, candidate *webrtc.ICECandidate) {
@@ -108,7 +108,7 @@ func createPeerAudio(ctx context.Context, room *Room, iceServers []webrtc.ICESer
 		return *pc.LocalDescription(), nil
 	})
 
-	negotiate(pc, client, TestLogger)
+	negotiate(pc, client, TestLogger, true)
 
 	pc.OnICECandidate(func(candidate *webrtc.ICECandidate) {
 		if candidate == nil {

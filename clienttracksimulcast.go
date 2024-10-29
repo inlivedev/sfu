@@ -281,9 +281,6 @@ func (t *simulcastClientTrack) onEnded() {
 		return
 	}
 
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
 	for _, callback := range t.onTrackEndedCallbacks {
 		callback()
 	}

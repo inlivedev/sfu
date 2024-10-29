@@ -44,7 +44,7 @@ func TestTracksSubscribe(t *testing.T) {
 	clients := make([]*Client, 0)
 
 	for i := 0; i < peerCount; i++ {
-		pc, client, _, _ := CreatePeerPair(ctx, TestLogger, testRoom, DefaultTestIceServers(), fmt.Sprintf("peer-%d", i), true, false)
+		pc, client, _, _ := CreatePeerPair(ctx, TestLogger, testRoom, DefaultTestIceServers(), fmt.Sprintf("peer-%d", i), true, false, true)
 
 		peers = append(peers, pc)
 		clients = append(clients, client)
@@ -202,7 +202,7 @@ Loop:
 }
 
 func addSimulcastPair(t *testing.T, ctx context.Context, room *Room, peerName string, simulcastTrackChan chan *SimulcastTrack) (*Client, *webrtc.PeerConnection) {
-	pc, client, _, _ := CreatePeerPair(ctx, TestLogger, room, DefaultTestIceServers(), peerName, true, true)
+	pc, client, _, _ := CreatePeerPair(ctx, TestLogger, room, DefaultTestIceServers(), peerName, true, true, true)
 	client.OnTracksAvailable(func(availableTracks []ITrack) {
 		for _, track := range availableTracks {
 			if track.IsSimulcast() {
@@ -256,6 +256,8 @@ func TestClientDataChannel(t *testing.T) {
 
 	defer cancelTimeout()
 
+	defer pc.Close()
+
 	select {
 	case <-timeout.Done():
 		t.Fatal("timeout waiting for data channel")
@@ -263,7 +265,7 @@ func TestClientDataChannel(t *testing.T) {
 		if state == webrtc.PeerConnectionStateConnected {
 			_, _ = pc.CreateDataChannel("test", nil)
 
-			negotiate(pc, client, TestLogger)
+			negotiate(pc, client, TestLogger, true)
 		}
 	case dc := <-dcChan:
 		require.Equal(t, "internal", dc.Label())

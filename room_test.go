@@ -119,9 +119,9 @@ func TestRoomJoinLeftEvent(t *testing.T) {
 		clients[client.ID()] = client
 	})
 
-	pc1, client1, _, _ := CreatePeerPair(ctx, TestLogger, testRoom, DefaultTestIceServers(), "peer1", false, false)
-	pc2, client2, _, _ := CreatePeerPair(ctx, TestLogger, testRoom, DefaultTestIceServers(), "peer1", false, false)
-	pc3, client3, _, _ := CreatePeerPair(ctx, TestLogger, testRoom, DefaultTestIceServers(), "peer1", false, false)
+	pc1, client1, _, _ := CreatePeerPair(ctx, TestLogger, testRoom, DefaultTestIceServers(), "peer1", false, false, true)
+	pc2, client2, _, _ := CreatePeerPair(ctx, TestLogger, testRoom, DefaultTestIceServers(), "peer1", false, false, false)
+	pc3, client3, _, _ := CreatePeerPair(ctx, TestLogger, testRoom, DefaultTestIceServers(), "peer1", false, false, true)
 
 	defer pc1.PeerConnection.Close()
 	defer pc2.PeerConnection.Close()
@@ -204,7 +204,7 @@ func TestRoomStats(t *testing.T) {
 		clients[client.ID()] = client
 	})
 
-	pc1, client1, statsGetter1, done1 := CreatePeerPair(ctx, TestLogger, testRoom, DefaultTestIceServers(), "peer1", false, false)
+	pc1, client1, statsGetter1, done1 := CreatePeerPair(ctx, TestLogger, testRoom, DefaultTestIceServers(), "peer1", false, false, true)
 
 	client1.OnTracksAdded(func(addedTracks []ITrack) {
 		setTracks := make(map[string]TrackType, 0)
@@ -214,7 +214,7 @@ func TestRoomStats(t *testing.T) {
 		client1.SetTracksSourceType(setTracks)
 	})
 
-	pc2, client2, statsGetter2, done2 := CreatePeerPair(ctx, TestLogger, testRoom, DefaultTestIceServers(), "peer2", false, false)
+	pc2, client2, statsGetter2, done2 := CreatePeerPair(ctx, TestLogger, testRoom, DefaultTestIceServers(), "peer2", false, false, true)
 
 	client2.OnTracksAdded(func(addedTracks []ITrack) {
 		setTracks := make(map[string]TrackType, 0)

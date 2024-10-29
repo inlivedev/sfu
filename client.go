@@ -66,6 +66,7 @@ var (
 )
 
 type ClientOptions struct {
+	IceTrickle           bool          `json:"ice_trickle"`
 	IdleTimeout          time.Duration `json:"idle_timeout"`
 	Type                 string        `json:"type"`
 	EnableVoiceDetection bool          `json:"enable_voice_detection"`
@@ -194,6 +195,7 @@ type Client struct {
 
 func DefaultClientOptions() ClientOptions {
 	return ClientOptions{
+		IceTrickle:           true,
 		IdleTimeout:          5 * time.Minute,
 		Type:                 ClientTypePeer,
 		EnableVoiceDetection: true,
@@ -554,8 +556,8 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 
 				track.OnEnded(func() {
 					simulcastTrack := track.(*SimulcastTrack)
-					simulcastTrack.mu.Lock()
-					defer simulcastTrack.mu.Unlock()
+					// simulcastTrack.mu.Lock()
+					// defer simulcastTrack.mu.Unlock()
 					if simulcastTrack.remoteTrackHigh != nil {
 						client.stats.removeReceiverStats(simulcastTrack.remoteTrackHigh.track.ID() + simulcastTrack.remoteTrackHigh.track.RID())
 					}
@@ -730,6 +732,11 @@ func (c *Client) Negotiate(offer webrtc.SessionDescription) (*webrtc.SessionDesc
 	if err != nil {
 		c.log.Errorf("client: error set local description ", err)
 		return nil, err
+	}
+
+	if !c.options.IceTrickle {
+		gatherComplete := webrtc.GatheringCompletePromise(c.peerConnection.PC())
+		<-gatherComplete
 	}
 
 	// allow add candidates once the local description is set

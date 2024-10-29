@@ -17,7 +17,7 @@ type FakeClient struct {
 }
 
 func Create(ctx context.Context, log logging.LeveledLogger, room *sfu.Room, iceServers []webrtc.ICEServer, id string, simulcast bool) *FakeClient {
-	pc, client, stats, _ := sfu.CreatePeerPair(ctx, log, room, iceServers, id, true, simulcast)
+	pc, client, stats, _ := sfu.CreatePeerPair(ctx, log, room, iceServers, id, true, simulcast, true)
 
 	return &FakeClient{
 		ID:             id,

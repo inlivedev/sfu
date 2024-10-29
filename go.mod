@@ -16,7 +16,7 @@ require (
 	github.com/pion/ice/v3 v3.0.16
 	github.com/pion/ice/v4 v4.0.2
 	github.com/pion/turn/v3 v3.0.3
-	github.com/pion/webrtc/v4 v4.0.0-beta.34
+	github.com/pion/webrtc/v4 v4.0.1
 	golang.org/x/exp v0.0.0-20230905200255-921286631fa9
 	golang.org/x/text v0.19.0
 )

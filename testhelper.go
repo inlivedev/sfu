@@ -369,7 +369,7 @@ func GetMediaEngine() *webrtc.MediaEngine {
 	return mediaEngine
 }
 
-func CreatePeerPair(ctx context.Context, log logging.LeveledLogger, room *Room, iceServers []webrtc.ICEServer, peerName string, loop, isSimulcast bool) (*PC, *Client, stats.Getter, chan bool) {
+func CreatePeerPair(ctx context.Context, log logging.LeveledLogger, room *Room, iceServers []webrtc.ICEServer, peerName string, loop, isSimulcast bool, isIceTrickle bool) (*PC, *Client, stats.Getter, chan bool) {
 	clientContext, cancelClient := context.WithCancel(ctx)
 	var (
 		client      *Client
@@ -431,6 +431,10 @@ func CreatePeerPair(ctx context.Context, log logging.LeveledLogger, room *Room, 
 				_ = room.StopClient(client.ID())
 			}
 			cancelClient()
+
+			if state == webrtc.PeerConnectionStateFailed {
+				pc.Close()
+			}
 		}
 	})
 
@@ -510,7 +514,10 @@ func CreatePeerPair(ctx context.Context, log logging.LeveledLogger, room *Room, 
 	// add a new client to room
 	// you can also get the client by using r.GetClient(clientID)
 	id := room.CreateClientID()
-	client, _ = room.AddClient(id, id, DefaultClientOptions())
+	opts := DefaultClientOptions()
+	opts.IceTrickle = isIceTrickle
+
+	client, _ = room.AddClient(id, id, opts)
 
 	client.OnTracksAdded(func(addedTracks []ITrack) {
 		setTracks := make(map[string]TrackType, 0)
@@ -565,30 +572,32 @@ func CreatePeerPair(ctx context.Context, log logging.LeveledLogger, room *Room, 
 
 	client.OnAllowedRemoteRenegotiation(func() {
 		log.Infof("allowed remote renegotiation")
-		negotiate(pc, client, log)
+		negotiate(pc, client, log, isIceTrickle)
 	})
 
-	client.OnIceCandidate(func(ctx context.Context, candidate *webrtc.ICECandidate) {
-		if candidate == nil {
-			return
-		}
+	if isIceTrickle {
+		client.OnIceCandidate(func(ctx context.Context, candidate *webrtc.ICECandidate) {
+			if candidate == nil {
+				return
+			}
 
-		_ = pc.AddICECandidate(candidate.ToJSON())
-	})
+			_ = pc.AddICECandidate(candidate.ToJSON())
+		})
 
-	negotiate(pc, client, log)
+		pc.OnICECandidate(func(candidate *webrtc.ICECandidate) {
+			if candidate == nil {
+				return
+			}
+			err = client.PeerConnection().PC().AddICECandidate(candidate.ToJSON())
+		})
+	}
 
-	pc.OnICECandidate(func(candidate *webrtc.ICECandidate) {
-		if candidate == nil {
-			return
-		}
-		err = client.PeerConnection().PC().AddICECandidate(candidate.ToJSON())
-	})
+	negotiate(pc, client, log, isIceTrickle)
 
 	return peer, client, statsGetter, allDone
 }
 
-func negotiate(pc *webrtc.PeerConnection, client *Client, log logging.LeveledLogger) {
+func negotiate(pc *webrtc.PeerConnection, client *Client, log logging.LeveledLogger, iceTrickle bool) {
 	if pc.SignalingState() != webrtc.SignalingStateStable {
 		log.Infof("test: signaling state is not stable, skip renegotiation")
 		return
@@ -603,7 +612,12 @@ func negotiate(pc *webrtc.PeerConnection, client *Client, log logging.LeveledLog
 
 	_ = pc.SetLocalDescription(offer)
 
-	answer, _ := client.Negotiate(offer)
+	if !iceTrickle {
+		gatheringComplete := webrtc.GatheringCompletePromise(pc)
+		<-gatheringComplete
+	}
+
+	answer, _ := client.Negotiate(*pc.LocalDescription())
 	if answer != nil {
 		_ = pc.SetRemoteDescription(*answer)
 	}
@@ -664,9 +678,19 @@ func CreateDataPair(ctx context.Context, log logging.LeveledLogger, room *Room, 
 			if client != nil {
 				_ = room.StopClient(client.ID())
 			}
+
+			if state == webrtc.PeerConnectionStateFailed {
+				pc.Close()
+			}
 		}
 
-		connChan <- state
+		ctxx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		select {
+		case connChan <- state:
+		case <-ctxx.Done():
+
+		}
 
 	})
 
@@ -677,7 +701,7 @@ func CreateDataPair(ctx context.Context, log logging.LeveledLogger, room *Room, 
 
 	client.OnAllowedRemoteRenegotiation(func() {
 		log.Infof("allowed remote renegotiation")
-		go negotiate(pc, client, log)
+		go negotiate(pc, client, log, true)
 	})
 
 	client.OnIceCandidate(func(ctx context.Context, candidate *webrtc.ICECandidate) {
@@ -702,7 +726,7 @@ func CreateDataPair(ctx context.Context, log logging.LeveledLogger, room *Room, 
 		return *pc.LocalDescription(), nil
 	})
 
-	negotiate(pc, client, log)
+	negotiate(pc, client, log, true)
 
 	pc.OnICECandidate(func(candidate *webrtc.ICECandidate) {
 		if candidate == nil {

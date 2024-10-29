@@ -611,9 +611,7 @@ func (t *SimulcastTrack) AddRemoteTrack(track IRemoteTrack, minWait, maxWait tim
 		t.mu.Unlock()
 
 		remoteTrack.OnEnded(func() {
-			t.mu.Lock()
 			t.remoteTrackHigh = nil
-			t.mu.Unlock()
 			t.cancel()
 			t.onEnded()
 		})
@@ -624,9 +622,7 @@ func (t *SimulcastTrack) AddRemoteTrack(track IRemoteTrack, minWait, maxWait tim
 		t.mu.Unlock()
 
 		remoteTrack.OnEnded(func() {
-			t.mu.Lock()
 			t.remoteTrackMid = nil
-			t.mu.Unlock()
 			t.cancel()
 			t.onEnded()
 		})
@@ -637,9 +633,7 @@ func (t *SimulcastTrack) AddRemoteTrack(track IRemoteTrack, minWait, maxWait tim
 		t.mu.Unlock()
 
 		remoteTrack.OnEnded(func() {
-			t.mu.Lock()
 			t.remoteTrackLow = nil
-			t.mu.Unlock()
 			t.cancel()
 			t.onEnded()
 		})
@@ -931,9 +925,6 @@ func (t *SimulcastTrack) OnEnded(f func()) {
 }
 
 func (t *SimulcastTrack) onEnded() {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-
 	for _, f := range t.onEndedCallbacks {
 		f()
 	}

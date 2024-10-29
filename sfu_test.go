@@ -41,7 +41,7 @@ func TestLeaveRoom(t *testing.T) {
 
 	for i := 0; i < peerCount; i++ {
 		go func(i int) {
-			pc, client, _, _ := CreatePeerPair(ctx, TestLogger, testRoom, DefaultTestIceServers(), fmt.Sprintf("peer-%d", i), true, false)
+			pc, client, _, _ := CreatePeerPair(ctx, TestLogger, testRoom, DefaultTestIceServers(), fmt.Sprintf("peer-%d", i), true, false, true)
 
 			clients = append(clients, client)
 
@@ -153,7 +153,7 @@ func TestRenegotiation(t *testing.T) {
 	pairs := make([]Pair, 0)
 
 	for i := 0; i < peerCount; i++ {
-		pc, client, _, _ := CreatePeerPair(ctx, TestLogger, testRoom, DefaultTestIceServers(), fmt.Sprintf("peer-%d", i), true, false)
+		pc, client, _, _ := CreatePeerPair(ctx, TestLogger, testRoom, DefaultTestIceServers(), fmt.Sprintf("peer-%d", i), true, false, true)
 
 		pairs = append(pairs, Pair{pc.PeerConnection, client})
 
@@ -195,7 +195,7 @@ Loop:
 						newTrack, _ := GetStaticVideoTrack(timeout, iceConnectedCtx, GenerateSecureToken(), GenerateSecureToken(), true, "")
 						_, err := pair.pc.AddTransceiverFromTrack(newTrack)
 						require.NoError(t, err, "error adding track: %v", err)
-						negotiate(pair.pc, pair.client, TestLogger)
+						negotiate(pair.pc, pair.client, TestLogger, true)
 					}
 				}()
 			}
