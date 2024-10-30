@@ -727,6 +727,12 @@ func (c *Client) Negotiate(offer webrtc.SessionDescription) (*webrtc.SessionDesc
 		return nil, err
 	}
 
+	var gatherComplete <-chan struct{}
+
+	if !c.options.IceTrickle {
+		gatherComplete = webrtc.GatheringCompletePromise(c.peerConnection.PC())
+	}
+
 	// Sets the LocalDescription, and starts our UDP listeners
 	err = c.peerConnection.PC().SetLocalDescription(answer)
 	if err != nil {
@@ -735,7 +741,6 @@ func (c *Client) Negotiate(offer webrtc.SessionDescription) (*webrtc.SessionDesc
 	}
 
 	if !c.options.IceTrickle {
-		gatherComplete := webrtc.GatheringCompletePromise(c.peerConnection.PC())
 		<-gatherComplete
 	}
 
