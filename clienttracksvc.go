@@ -313,5 +313,5 @@ func (t *scaleableClientTrack) IsScaleable() bool {
 }
 
 func (t *scaleableClientTrack) RequestPLI() {
-	go t.remoteTrack.sendPLI()
+	go t.remoteTrack.SendPLI()
 }

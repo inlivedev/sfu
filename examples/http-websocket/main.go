@@ -205,6 +205,7 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 	// add a new client to room
 	// you can also get the client by using r.GetClient(clientID)
 	opts := sfu.DefaultClientOptions()
+	opts.EnableOpusDTX = true
 	opts.EnableVoiceDetection = true
 	opts.ReorderPackets = false
 	client, err := r.AddClient(clientID, clientID, opts)

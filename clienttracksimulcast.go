@@ -180,15 +180,15 @@ func (t *simulcastClientTrack) push(p *rtp.Packet, quality QualityLevel) {
 	// check if it's a first packet to send
 	if currentQuality == QualityNone && t.sequenceNumber.Load() == 0 {
 		// we try to send the low quality first	if the track is active and fallback to upper quality if not
-		if t.remoteTrack.getRemoteTrack(QualityLow) != nil && quality == QualityLow {
+		if t.remoteTrack.GetRemoteTrack(QualityLow) != nil && quality == QualityLow {
 			t.lastQuality.Store(uint32(QualityLow))
 			// send PLI to make sure the client will receive the first frame
 			t.remoteTrack.sendPLI()
-		} else if t.remoteTrack.getRemoteTrack(QualityMid) != nil && quality == QualityMid {
+		} else if t.remoteTrack.GetRemoteTrack(QualityMid) != nil && quality == QualityMid {
 			t.lastQuality.Store(uint32(QualityMid))
 			// send PLI to make sure the client will receive the first frame
 			t.remoteTrack.sendPLI()
-		} else if t.remoteTrack.getRemoteTrack(QualityHigh) != nil && quality == QualityHigh {
+		} else if t.remoteTrack.GetRemoteTrack(QualityHigh) != nil && quality == QualityHigh {
 			t.lastQuality.Store(uint32(QualityHigh))
 			// send PLI to make sure the client will receive the first frame
 			t.remoteTrack.sendPLI()

@@ -310,7 +310,7 @@ func (t *Track) subscribe(c *Client) iClientTrack {
 	}
 
 	if t.Kind() == webrtc.RTPCodecTypeVideo {
-		t.remoteTrack.sendPLI()
+		t.remoteTrack.SendPLI()
 	}
 
 	t.base.clientTracks.Add(ct)
@@ -652,7 +652,7 @@ func (t *SimulcastTrack) AddRemoteTrack(track IRemoteTrack, minWait, maxWait tim
 	return remoteTrack
 }
 
-func (t *SimulcastTrack) getRemoteTrack(q QualityLevel) *remoteTrack {
+func (t *SimulcastTrack) GetRemoteTrack(q QualityLevel) *remoteTrack {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -784,19 +784,19 @@ func (t *SimulcastTrack) sendPLI() {
 	defer t.mu.RUnlock()
 
 	if t.remoteTrackHigh != nil {
-		t.remoteTrackHigh.sendPLI()
+		t.remoteTrackHigh.SendPLI()
 	} else {
 		t.base.client.log.Warnf("track: remote track high is nil")
 	}
 
 	if t.remoteTrackMid != nil {
-		t.remoteTrackMid.sendPLI()
+		t.remoteTrackMid.SendPLI()
 	} else {
 		t.base.client.log.Warnf("track: remote track mid is nil")
 	}
 
 	if t.remoteTrackLow != nil {
-		t.remoteTrackLow.sendPLI()
+		t.remoteTrackLow.SendPLI()
 	} else {
 		t.base.client.log.Warnf("track: remote track low is nil")
 	}

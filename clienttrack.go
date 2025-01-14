@@ -188,7 +188,7 @@ func (t *clientTrack) IsScaleable() bool {
 }
 
 func (t *clientTrack) RequestPLI() {
-	t.remoteTrack.sendPLI()
+	t.remoteTrack.SendPLI()
 }
 
 func (t *clientTrack) SetMaxQuality(_ QualityLevel) {

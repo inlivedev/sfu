@@ -179,7 +179,7 @@ func (t *remoteTrack) Track() IRemoteTrack {
 	return t.track
 }
 
-func (t *remoteTrack) sendPLI() {
+func (t *remoteTrack) SendPLI() {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -208,7 +208,7 @@ func (t *remoteTrack) enableIntervalPLI(interval time.Duration) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				t.sendPLI()
+				t.SendPLI()
 			}
 		}
 	}()
