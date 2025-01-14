@@ -123,8 +123,8 @@ func RegisterSimulcastHeaderExtensions(m *webrtc.MediaEngine, codecType webrtc.R
 	}
 }
 
-func IsKeyframe(codec string, packet *rtp.Packet) bool {
-	isIt1, isIt2 := Keyframe(codec, packet)
+func IsKeyframe(codec string, payload []byte) bool {
+	isIt1, isIt2 := Keyframe(codec, payload)
 	return isIt1 && isIt2
 }
 
@@ -135,10 +135,10 @@ func IsKeyframe(codec string, packet *rtp.Packet) bool {
 // It returns (true, true) if that is the case, (false, true) if that is
 // definitely not the case, and (false, false) if the information cannot
 // be determined.
-func Keyframe(codec string, packet *rtp.Packet) (bool, bool) {
+func Keyframe(codec string, payload []byte) (bool, bool) {
 	if strings.EqualFold(codec, "video/vp8") {
 		var vp8 codecs.VP8Packet
-		_, err := vp8.Unmarshal(packet.Payload)
+		_, err := vp8.Unmarshal(payload)
 		if err != nil || len(vp8.Payload) < 1 {
 			return false, false
 		}
@@ -149,7 +149,7 @@ func Keyframe(codec string, packet *rtp.Packet) (bool, bool) {
 		return false, true
 	} else if strings.EqualFold(codec, "video/vp9") {
 		var vp9 codecs.VP9Packet
-		_, err := vp9.Unmarshal(packet.Payload)
+		_, err := vp9.Unmarshal(payload)
 		if err != nil || len(vp9.Payload) < 1 {
 			return false, false
 		}
@@ -167,14 +167,14 @@ func Keyframe(codec string, packet *rtp.Packet) (bool, bool) {
 		}
 		return (vp9.Payload[0] & 0x6) == 0, true
 	} else if strings.EqualFold(codec, "video/av1") {
-		if len(packet.Payload) < 2 {
+		if len(payload) < 2 {
 			return false, true
 		}
 		// Z=0, N=1
-		if (packet.Payload[0] & 0x88) != 0x08 {
+		if (payload[0] & 0x88) != 0x08 {
 			return false, true
 		}
-		w := (packet.Payload[0] & 0x30) >> 4
+		w := (payload[0] & 0x30) >> 4
 
 		getObu := func(data []byte, last bool) ([]byte, int, bool) {
 			if last {
@@ -203,7 +203,7 @@ func Keyframe(codec string, packet *rtp.Packet) (bool, bool) {
 		i := 0
 		for {
 			obu, length, truncated :=
-				getObu(packet.Payload[offset:], int(w) == i+1)
+				getObu(payload[offset:], int(w) == i+1)
 			if len(obu) < 1 {
 				return false, false
 			}
@@ -237,10 +237,10 @@ func Keyframe(codec string, packet *rtp.Packet) (bool, bool) {
 			i++
 		}
 	} else if strings.EqualFold(codec, "video/h264") {
-		if len(packet.Payload) < 1 {
+		if len(payload) < 1 {
 			return false, false
 		}
-		nalu := packet.Payload[0] & 0x1F
+		nalu := payload[0] & 0x1F
 		if nalu == 0 {
 			// reserved
 			return false, false
@@ -254,14 +254,14 @@ func Keyframe(codec string, packet *rtp.Packet) (bool, bool) {
 				// skip DON
 				i += 2
 			}
-			for i < len(packet.Payload) {
-				if i+2 > len(packet.Payload) {
+			for i < len(payload) {
+				if i+2 > len(payload) {
 					return false, false
 				}
-				length := uint16(packet.Payload[i])<<8 |
-					uint16(packet.Payload[i+1])
+				length := uint16(payload[i])<<8 |
+					uint16(payload[i+1])
 				i += 2
-				if i+int(length) > len(packet.Payload) {
+				if i+int(length) > len(payload) {
 					return false, false
 				}
 				offset := 0
@@ -273,7 +273,7 @@ func Keyframe(codec string, packet *rtp.Packet) (bool, bool) {
 				if offset >= int(length) {
 					return false, false
 				}
-				n := packet.Payload[i+offset] & 0x1F
+				n := payload[i+offset] & 0x1F
 				if n == 7 {
 					return true, true
 				} else if n >= 24 {
@@ -282,30 +282,30 @@ func Keyframe(codec string, packet *rtp.Packet) (bool, bool) {
 				}
 				i += int(length)
 			}
-			if i == len(packet.Payload) {
+			if i == len(payload) {
 				return false, true
 			}
 			return false, false
 		} else if nalu == 28 || nalu == 29 {
 			// FU-A or FU-B
-			if len(packet.Payload) < 2 {
+			if len(payload) < 2 {
 				return false, false
 			}
-			if (packet.Payload[1] & 0x80) == 0 {
+			if (payload[1] & 0x80) == 0 {
 				// not a starting fragment
 				return false, true
 			}
-			return (packet.Payload[1]&0x1F == 7), true
+			return (payload[1]&0x1F == 7), true
 		}
 		return false, false
 	}
 	return false, false
 }
 
-func KeyframeDimensions(codec string, packet *rtp.Packet) (uint32, uint32) {
+func KeyframeDimensions(codec string, payload []byte) (uint32, uint32) {
 	if strings.EqualFold(codec, "video/vp8") {
 		var vp8 codecs.VP8Packet
-		_, err := vp8.Unmarshal(packet.Payload)
+		_, err := vp8.Unmarshal(payload)
 		if err != nil {
 			return 0, 0
 		}
@@ -318,11 +318,8 @@ func KeyframeDimensions(codec string, packet *rtp.Packet) (uint32, uint32) {
 		height := (raw >> 16) & 0x3FFF
 		return width, height
 	} else if strings.EqualFold(codec, "video/vp9") {
-		if packet == nil {
-			return 0, 0
-		}
 		var vp9 codecs.VP9Packet
-		_, err := vp9.Unmarshal(packet.Payload)
+		_, err := vp9.Unmarshal(payload)
 		if err != nil {
 			return 0, 0
 		}

@@ -100,7 +100,7 @@ func (t *simulcastClientTrack) Context() context.Context {
 }
 
 func (t *simulcastClientTrack) isFirstKeyframePacket(p *rtp.Packet) bool {
-	isKeyframe := IsKeyframe(t.mimeType, p)
+	isKeyframe := IsKeyframe(t.mimeType, p.Payload)
 
 	return isKeyframe && t.lastTimestamp.Load() != p.Timestamp
 }
@@ -122,7 +122,7 @@ func (t *simulcastClientTrack) writeRTP(p *rtp.Packet) {
 }
 
 func (t *simulcastClientTrack) push(p *rtp.Packet, quality QualityLevel) {
-	isKeyframe := IsKeyframe(t.mimeType, p)
+	isKeyframe := IsKeyframe(t.mimeType, p.Payload)
 
 	currentQuality := t.LastQuality()
 
