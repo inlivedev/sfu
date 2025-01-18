@@ -80,16 +80,6 @@ var (
 			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypeRTX, 90000, 0, "apt=39", nil},
 			PayloadType:        40,
 		},
-
-		{
-			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypeAV1, 90000, 0, "", videoRTCPFeedback},
-			PayloadType:        45,
-		},
-		{
-			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypeRTX, 90000, 0, "apt=45", nil},
-			PayloadType:        46,
-		},
-
 		{
 			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypeVP9, 90000, 0, "profile-id=0", videoRTCPFeedback},
 			PayloadType:        98,
