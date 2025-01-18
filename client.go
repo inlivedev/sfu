@@ -218,6 +218,8 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 	localCtx, cancel := context.WithCancel(s.context)
 	m := &webrtc.MediaEngine{}
 
+	opts.settingEngine.EnableSCTPZeroChecksum(true)
+
 	if err := RegisterCodecs(m, s.codecs); err != nil {
 		panic(err)
 	}
