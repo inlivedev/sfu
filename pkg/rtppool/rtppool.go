@@ -28,7 +28,7 @@ func New() *RTPPool {
 func (r *RTPPool) PutPacket(localPacket *rtp.Packet) {
 
 	localPacket.Header = rtp.Header{}
-	localPacket.Payload = localPacket.Payload[:0]
+	copy(localPacket.Payload, blankPayload)
 
 	r.pool.Put(localPacket)
 }
