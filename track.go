@@ -113,8 +113,12 @@ func newTrack(ctx context.Context, client *Client, trackRemote IRemoteTrack, min
 			packet := pool.NewPacket(&p.Header, p.Payload, attrs)
 
 			copyPacket := pool.GetPacket()
+
 			copyPacket.Header = *packet.Header()
-			copy(copyPacket.Payload, packet.Payload())
+
+			n := copy(copyPacket.Payload, packet.Payload())
+
+			copyPacket.Payload = copyPacket.Payload[:n]
 
 			track.push(copyPacket, QualityHigh)
 
@@ -128,7 +132,8 @@ func newTrack(ctx context.Context, client *Client, trackRemote IRemoteTrack, min
 
 		copyPacket := pool.GetPacket()
 		copyPacket.Header = *packet.Header()
-		copy(copyPacket.Payload, packet.Payload())
+		n := copy(copyPacket.Payload, packet.Payload())
+		copyPacket.Payload = copyPacket.Payload[:n]
 
 		t.onRead(attrs, copyPacket, QualityHigh)
 

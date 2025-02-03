@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/pion/logging"
-	"github.com/pion/webrtc/v4"
 )
 
 var TestLogger logging.LeveledLogger
@@ -34,7 +33,6 @@ func TestMain(m *testing.M) {
 	sfuOpts = DefaultOptions()
 	sfuOpts.IceServers = DefaultTestIceServers()
 
-	sfuOpts.SettingEngine.SetNetworkTypes([]webrtc.NetworkType{webrtc.NetworkTypeUDP4})
 	sfuOpts.SettingEngine.SetIncludeLoopbackCandidate(true)
 
 	result := m.Run()

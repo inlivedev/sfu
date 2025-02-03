@@ -29,7 +29,6 @@ type Options struct {
 func DefaultOptions() Options {
 	settingEngine := &webrtc.SettingEngine{}
 	_ = settingEngine.SetEphemeralUDPPortRange(49152, 65535)
-	settingEngine.SetNetworkTypes([]webrtc.NetworkType{webrtc.NetworkTypeUDP4})
 
 	return Options{
 		EnableBandwidthEstimator: true,
