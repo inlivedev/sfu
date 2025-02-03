@@ -108,7 +108,7 @@ func (m *PacketManager) NewPacket(header *rtp.Header, payload []byte, attr inter
 func (m *PacketManager) releasePacket(header *rtp.Header, payload *[]byte, p *RetainablePacket) {
 	m.HeaderPool.Put(header)
 	if payload != nil {
-		copy(*payload, blankPayload)
+		*payload = (*payload)[:0]
 		m.PayloadPool.Put(payload)
 	}
 
