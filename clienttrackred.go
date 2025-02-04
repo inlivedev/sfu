@@ -31,7 +31,7 @@ func (t *clientTrackRed) push(p *rtp.Packet, _ QualityLevel) {
 	}
 
 	if !t.client.receiveRED {
-		primaryPacket := t.remoteTrack.rtppool.GetPacket()
+		primaryPacket := t.remoteTrack.rtppool.CopyPacket(p)
 		primaryPacket.Payload = t.getPrimaryEncoding(p.Payload[:len(p.Payload)])
 		primaryPacket.Header = p.Header
 		if err := t.localTrack.WriteRTP(primaryPacket); err != nil {

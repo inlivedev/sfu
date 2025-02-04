@@ -110,36 +110,19 @@ func newTrack(ctx context.Context, client *Client, trackRemote IRemoteTrack, min
 
 		for _, track := range tracks {
 			//nolint:ineffassign,staticcheck // packet is from the pool
-			packet := pool.NewPacket(&p.Header, p.Payload, attrs)
+			packet := pool.CopyPacket(p)
 
-			copyPacket := pool.GetPacket()
+			track.push(packet, QualityHigh)
 
-			copyPacket.Header = *packet.Header()
-
-			n := copy(copyPacket.Payload, packet.Payload())
-
-			copyPacket.Payload = copyPacket.Payload[:n]
-
-			track.push(copyPacket, QualityHigh)
-
-			pool.PutPacket(copyPacket)
-
-			packet.Release()
+			pool.PutPacket(packet)
 		}
 
 		//nolint:ineffassign // this is required
-		packet := pool.NewPacket(&p.Header, p.Payload, attrs)
+		packet := pool.CopyPacket(p)
 
-		copyPacket := pool.GetPacket()
-		copyPacket.Header = *packet.Header()
-		n := copy(copyPacket.Payload, packet.Payload())
-		copyPacket.Payload = copyPacket.Payload[:n]
+		t.onRead(attrs, packet, QualityHigh)
 
-		t.onRead(attrs, copyPacket, QualityHigh)
-
-		pool.PutPacket(copyPacket)
-
-		packet.Release()
+		pool.PutPacket(packet)
 	}
 
 	onNetworkConditionChanged := func(condition networkmonitor.NetworkConditionType) {
@@ -357,10 +340,8 @@ func (t *Track) onRead(attrs interceptor.Attributes, p *rtp.Packet, quality Qual
 	t.mu.Unlock()
 
 	for _, callback := range callbacks {
-		copyPacket := t.base.pool.GetPacket()
-		copyPacket.Header = p.Header
-		copyPacket.Payload = p.Payload
-		callback(attrs, p, quality)
+		copyPacket := t.base.pool.CopyPacket(p)
+		callback(attrs, copyPacket, quality)
 		t.base.pool.PutPacket(copyPacket)
 	}
 }
@@ -578,32 +559,19 @@ func (t *SimulcastTrack) AddRemoteTrack(track IRemoteTrack, minWait, maxWait tim
 
 		tracks := t.base.clientTracks.GetTracks()
 		for _, track := range tracks {
-			//nolint:ineffassign,staticcheck // packet is from the pool
-			packet := t.base.pool.NewPacket(&p.Header, p.Payload, attrs)
-
-			copyPacket := t.base.pool.GetPacket()
-			copyPacket.Header = *packet.Header()
-			copyPacket.Payload = packet.Payload()
+			copyPacket := t.base.pool.CopyPacket(p)
 
 			track.push(copyPacket, quality)
 
 			t.base.pool.PutPacket(copyPacket)
 
-			packet.Release()
 		}
 
-		//nolint:ineffassign // this is required
-		packet := t.base.pool.NewPacket(&p.Header, p.Payload, attrs)
-
-		copyPacket := t.base.pool.GetPacket()
-		copyPacket.Header = *packet.Header()
-		copyPacket.Payload = packet.Payload()
+		copyPacket := t.base.pool.CopyPacket(p)
 
 		t.onRead(attrs, copyPacket, quality)
 
 		t.base.pool.PutPacket(copyPacket)
-
-		packet.Release()
 
 	}
 

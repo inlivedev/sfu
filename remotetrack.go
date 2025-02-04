@@ -79,6 +79,7 @@ func (t *remoteTrack) readRTP() {
 
 	defer t.onEnded()
 
+	buffer := make([]byte, 1500)
 	for {
 		select {
 		case <-readCtx.Done():
@@ -88,32 +89,28 @@ func (t *remoteTrack) readRTP() {
 				t.log.Errorf("remotetrack: set read deadline error - %s", err.Error())
 				return
 			}
-			buffer := t.rtppool.GetPayload()
 
-			n, attrs, readErr := t.track.Read(*buffer)
+			n, attrs, readErr := t.track.Read(buffer)
 			if readErr != nil {
 				if readErr == io.EOF {
 					t.log.Infof("remotetrack: track ended %s ", t.track.ID())
-					t.rtppool.PutPayload(buffer)
+
 					return
 				}
 
 				t.log.Tracef("remotetrack: read error: %s", readErr.Error())
-				t.rtppool.PutPayload(buffer)
 				continue
 			}
 
 			// could be read deadline reached
 			if n == 0 {
-				t.rtppool.PutPayload(buffer)
 				continue
 			}
 
 			p := t.rtppool.GetPacket()
 
-			if err := t.unmarshal((*buffer)[:n], p); err != nil {
+			if err := t.unmarshal((buffer)[:n], p); err != nil {
 				t.log.Errorf("remotetrack: unmarshal error: %s", err.Error())
-				t.rtppool.PutPayload(buffer)
 				t.rtppool.PutPacket(p)
 				continue
 			}
@@ -123,8 +120,6 @@ func (t *remoteTrack) readRTP() {
 			}
 
 			t.onRead(attrs, p)
-
-			t.rtppool.PutPayload(buffer)
 			t.rtppool.PutPacket(p)
 		}
 	}

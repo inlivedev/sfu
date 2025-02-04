@@ -12,6 +12,7 @@ var testPacket = &rtp.Packet{
 	Header:  rtp.Header{},
 	Payload: make([]byte, 1400),
 }
+
 var header = &rtp.Header{}
 var payload = make([]byte, 1400)
 
@@ -19,7 +20,11 @@ func BenchmarkSlicePool(b *testing.B) {
 	var pool = New()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		p := pool.GetPacket()
+		p := pool.CopyPacket(testPacket)
+
+		// compare packet
+		// require.Equal(b, testPacket.Header, p.Header)
+		// require.Equal(b, testPacket.Payload, p.Payload)
 
 		pool.PutPacket(p)
 	}
@@ -58,6 +63,9 @@ func BenchmarkPayloadPool(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		p := pool.Get()
+
+		// adjust size from 0 to 8
+		*p = append(*p, make([]byte, 8)...)
 
 		i, err := pipeReader.Read(*p)
 		if err != nil {
