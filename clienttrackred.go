@@ -174,7 +174,7 @@ func ExtractRedPackets(packet *rtp.Packet) (primary *rtp.Packet, redundants []*r
 				CSRC:           packet.CSRC,
 				Marker:         packet.Marker,
 				PayloadType:    packet.PayloadType,
-				SequenceNumber: packet.SequenceNumber,
+				SequenceNumber: packet.SequenceNumber - uint16(i+1),
 				Timestamp:      packet.Timestamp - uint32(timestampOffsets[i]),
 				SSRC:           packet.SSRC,
 			},
