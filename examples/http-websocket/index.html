@@ -405,17 +405,15 @@
 					direction: 'sendonly',
 					streams: [stream],
 					sendEncodings: [{priority: 'high'}],
-				})
-
-
+					})
 
 				if(audioTcvr.setCodecPreferences != undefined && RTCRtpReceiver.getCapabilities != undefined){
 					const audioCodecs = RTCRtpReceiver.getCapabilities('audio').codecs;
-
 					let audioCodecsPref = [];
-					if (red){
+					
+					const useRed = document.querySelector("#red").checked;
+					if (useRed){
 						for(let i = 0; i < audioCodecs.length; i++){
-							// audio/red 48000 111/111
 							if(audioCodecs[i].mimeType == "audio/red"){
 								audioCodecsPref.push(audioCodecs[i]);
 							}
@@ -1058,6 +1056,7 @@
 		<button id="btnToggleCam">Mute Cam</button>
 		<span><input id="simulcast" type="checkbox" value="simulcast">Simulcast</span>
 		<span><input id="svc" type="checkbox" value="svc" checked>SVC</span>
+        <span><input id="red" type="checkbox" value="red" checked>RED Audio</span>
         <button id="btnShareScreen">Share Screen</button>
         <button id="btnStats">Toggle Stats</button>
         <span><label>Quality</label> <select id="selectQuality">

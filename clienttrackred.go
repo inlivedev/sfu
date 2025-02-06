@@ -34,7 +34,7 @@ func (t *clientTrackRed) push(p *rtp.Packet, _ QualityLevel) {
 	if !t.client.receiveRED {
 		primaryPacket := t.remoteTrack.rtppool.CopyPacket(p)
 		primaryPacket.Payload = t.getPrimaryEncoding(p.Payload)
-		primaryPacket.Header = p.Header
+		primaryPacket.Header = p.Header.Clone()
 		if err := t.localTrack.WriteRTP(primaryPacket); err != nil {
 			t.client.log.Tracef("clienttrack: error on write primary rtp %s", err.Error())
 		}
@@ -78,9 +78,13 @@ func ExtractRedPayloads(payload []byte) (primary []byte, redundant [][]byte, err
 	var blockOffsets []int
 
 	// First pass: collect all headers and validate
-	for payload[offset]&0x80 != 0 { // while not at primary
+	for offset < len(payload) && payload[offset]&0x80 != 0 { // while not at primary
 		if len(payload[offset:]) < 4 {
-			return nil, nil, fmt.Errorf("illegal data, truncated RED header")
+			return nil, nil, ErrIncompleteRedHeader
+		}
+
+		if offset+4 > len(payload) {
+			return nil, nil, ErrIncompleteRedHeader
 		}
 
 		blockLength := int(binary.BigEndian.Uint16(payload[offset+2:]) & 0x03FF)
@@ -88,10 +92,15 @@ func ExtractRedPayloads(payload []byte) (primary []byte, redundant [][]byte, err
 		offset += 4
 	}
 
+	// Check if we have at least one byte for primary header
+	if offset >= len(payload) {
+		return nil, nil, ErrIncompleteRedHeader
+	}
+
 	// Skip primary header (1 byte)
 	offset++
 	if offset >= len(payload) {
-		return nil, nil, fmt.Errorf("illegal data, no payload data")
+		return nil, nil, ErrIncompleteRedBlock
 	}
 
 	// Calculate data start position for redundant blocks
@@ -101,7 +110,7 @@ func ExtractRedPayloads(payload []byte) (primary []byte, redundant [][]byte, err
 	currentPos := dataStart
 	for _, length := range blockOffsets {
 		if currentPos+length > len(payload) {
-			return nil, nil, fmt.Errorf("illegal data, payload shorter than indicated length")
+			return nil, nil, ErrIncompleteRedBlock
 		}
 
 		redundant = append(redundant, payload[currentPos:currentPos+length])
@@ -110,6 +119,9 @@ func ExtractRedPayloads(payload []byte) (primary []byte, redundant [][]byte, err
 	}
 
 	// The remaining data is the primary payload
+	if currentPos >= len(payload) {
+		return nil, nil, ErrIncompleteRedBlock
+	}
 	primary = payload[currentPos:]
 
 	return primary, redundant, nil
@@ -134,9 +146,13 @@ func ExtractRedPackets(packet *rtp.Packet) (primary *rtp.Packet, redundants []*r
 	var timestampOffsets []uint16
 
 	// First pass: collect all headers and validate
-	for packet.Payload[offset]&0x80 != 0 { // while not at primary
+	for offset < len(packet.Payload) && packet.Payload[offset]&0x80 != 0 { // while not at primary
 		if len(packet.Payload[offset:]) < 4 {
-			return nil, nil, fmt.Errorf("illegal data, truncated RED header")
+			return nil, nil, ErrIncompleteRedHeader
+		}
+
+		if offset+4 > len(packet.Payload) {
+			return nil, nil, ErrIncompleteRedHeader
 		}
 
 		// Extract timestamp offset (14 bits) and block length (10 bits)
@@ -152,7 +168,7 @@ func ExtractRedPackets(packet *rtp.Packet) (primary *rtp.Packet, redundants []*r
 	// Skip primary header (1 byte)
 	offset++
 	if offset >= len(packet.Payload) {
-		return nil, nil, fmt.Errorf("illegal data, no payload data")
+		return nil, nil, ErrIncompleteRedBlock
 	}
 
 	// Calculate data start position for redundant blocks
@@ -162,7 +178,7 @@ func ExtractRedPackets(packet *rtp.Packet) (primary *rtp.Packet, redundants []*r
 	// Extract redundant blocks and create RTP packets
 	for i, length := range blockOffsets {
 		if currentPos+length > len(packet.Payload) {
-			return nil, nil, fmt.Errorf("illegal data, payload shorter than indicated length")
+			return nil, nil, ErrIncompleteRedBlock
 		}
 
 		// Create new RTP packet for redundant data
@@ -183,6 +199,11 @@ func ExtractRedPackets(packet *rtp.Packet) (primary *rtp.Packet, redundants []*r
 
 		redundantPackets = append(redundantPackets, redundantPacket)
 		currentPos += length
+	}
+
+	// Check if we have enough data for primary payload
+	if currentPos >= len(packet.Payload) {
+		return nil, nil, ErrIncompleteRedBlock
 	}
 
 	// Create primary packet
