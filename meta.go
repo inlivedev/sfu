@@ -84,7 +84,7 @@ func (m *Metadata) onChanged(key string, value interface{}) {
 	defer m.mu.Unlock()
 
 	for _, f := range m.onChangedCallbacks {
-		go f(key, value)
+		f(key, value)
 	}
 }
 

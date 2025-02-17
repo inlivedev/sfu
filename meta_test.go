@@ -1,6 +1,7 @@
 package sfu
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -45,15 +46,26 @@ func TestMetadata(t *testing.T) {
 
 	})
 
+	waitGroup := sync.WaitGroup{}
+
+	multiplier := 100
+
 	// Test Set and Get methods
-	for k, v := range reqData {
-		m.Set(k, v)
-		if value, _ := m.Get(k); value != v {
-			t.Errorf("Get returned %v, expected %v", value, "value1")
+	for i := 0; i < multiplier; i++ {
+		for k, v := range reqData {
+			// test concurrent set and get
+			waitGroup.Add(1)
+			go func() {
+				defer waitGroup.Done()
+				m.Set(k, v)
+				if value, _ := m.Get(k); value != v {
+					t.Errorf("Get returned %v, expected %v", value, "value1")
+				}
+			}()
 		}
 	}
 
-	for i := 0; i < len(reqData); i++ {
+	for i := 0; i < len(reqData)*multiplier; i++ {
 		select {
 		case data := <-chanMeta:
 			receivedMetas[data.key] = data.value
@@ -61,6 +73,8 @@ func TestMetadata(t *testing.T) {
 			t.Error("timeout waiting for meta")
 		}
 	}
+
+	waitGroup.Wait()
 
 	require.Equal(t, len(reqData), len(receivedMetas))
 
