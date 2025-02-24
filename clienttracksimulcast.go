@@ -141,40 +141,13 @@ func (t *simulcastClientTrack) push(p *rtp.Packet, quality QualityLevel) {
 
 	var canSwitch bool
 
-	if isKeyframe && quality == targetQuality && currentQuality != targetQuality {
-		switch quality {
-		case QualityHigh:
-			canSwitch = t.packetmapHigh.Drop(p.SequenceNumber, 0)
-		case QualityMid:
-			canSwitch = t.packetmapMid.Drop(p.SequenceNumber, 0)
-		case QualityLow:
-			canSwitch = t.packetmapLow.Drop(p.SequenceNumber, 0)
-		}
-	}
-
-	var ok bool
-	// var newSeqNo uint16
-
-	if !canSwitch {
-		switch quality {
-		case QualityHigh:
-			ok, _, _ = t.packetmapHigh.Map(p.SequenceNumber, 0)
-			if !ok {
-				return
-			}
-		case QualityMid:
-			ok, _, _ = t.packetmapMid.Map(p.SequenceNumber, 0)
-			if !ok {
-				return
-			}
-		case QualityLow:
-			ok, _, _ = t.packetmapLow.Map(p.SequenceNumber, 0)
-			if !ok {
-				return
-			}
-		}
-
-		// p.SequenceNumber = newSeqNo
+	switch quality {
+	case QualityHigh:
+		canSwitch, _, _ = t.packetmapHigh.Map(p.SequenceNumber, 0)
+	case QualityMid:
+		canSwitch, _, _ = t.packetmapMid.Map(p.SequenceNumber, 0)
+	case QualityLow:
+		canSwitch, _, _ = t.packetmapLow.Map(p.SequenceNumber, 0)
 	}
 
 	// check if it's a first packet to send
@@ -197,13 +170,13 @@ func (t *simulcastClientTrack) push(p *rtp.Packet, quality QualityLevel) {
 		t.remoteTrack.onRemoteTrackAdded(func(remote *remoteTrack) {
 			t.remoteTrack.sendPLI()
 		})
-	} else if isKeyframe && canSwitch && quality == targetQuality && t.lastQuality.Load() != uint32(targetQuality) {
+	} else if isKeyframe && canSwitch && quality == targetQuality && currentQuality != targetQuality {
 		// change quality to target quality if it's a keyframe
 		t.client.log.Tracef("track: %s keyframe %v change quality from %d to %d ", t.id, isKeyframe, t.lastQuality.Load(), targetQuality)
 		currentQuality = targetQuality
 		t.lastQuality.Store(uint32(currentQuality))
 
-	} else if quality == targetQuality && !isKeyframe && t.lastQuality.Load() != uint32(targetQuality) {
+	} else if quality == targetQuality && !isKeyframe && currentQuality != targetQuality {
 		// request PLI to allow us switch quality to target quality
 		t.client.log.Tracef("track: %s keyframe %v send keyframe and sequence number %d and can switch %v ", t.id, isKeyframe, p.SequenceNumber, canSwitch)
 		t.remoteTrack.sendPLI()

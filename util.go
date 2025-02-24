@@ -163,9 +163,9 @@ func Keyframe(codec string, payload []byte) (bool, bool) {
 
 		profile := (vp9.Payload[0] >> 4) & 0x3
 		if profile != 3 {
-			return (vp9.Payload[0] & 0xC) == 0, true
+			return (vp9.Payload[0] & 0xC) == 0, (vp9.Payload[0] & 0xC) == 0
 		}
-		return (vp9.Payload[0] & 0x6) == 0, true
+		return (vp9.Payload[0] & 0x6) == 0, (vp9.Payload[0] & 0x6) == 0
 	} else if strings.EqualFold(codec, "video/av1") {
 		if len(payload) < 2 {
 			return false, true

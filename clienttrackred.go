@@ -32,9 +32,12 @@ func (t *clientTrackRed) push(p *rtp.Packet, _ QualityLevel) {
 	}
 
 	if !t.client.receiveRED {
-		primaryPacket := t.remoteTrack.rtppool.CopyPacket(p)
-		primaryPacket.Payload = t.getPrimaryEncoding(p.Payload)
-		primaryPacket.Header = p.Header.Clone()
+		primaryPacket, _, err := ExtractRedPackets(p)
+		if err != nil {
+			t.client.log.Tracef("clienttrack: error on extract primary rtp %s", err.Error())
+			return
+		}
+
 		if err := t.localTrack.WriteRTP(primaryPacket); err != nil {
 			t.client.log.Tracef("clienttrack: error on write primary rtp %s", err.Error())
 		}
@@ -185,7 +188,7 @@ func ExtractRedPackets(packet *rtp.Packet) (primary *rtp.Packet, redundants []*r
 		redundantPacket := &rtp.Packet{
 			Header: rtp.Header{
 				Version:        packet.Version,
-				Padding:        packet.Padding,
+				Padding:        false,
 				Extension:      packet.Extension,
 				CSRC:           packet.CSRC,
 				Marker:         packet.Marker,

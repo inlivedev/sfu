@@ -109,7 +109,7 @@ func (t *remoteTrack) readRTP() {
 
 			p := t.rtppool.GetPacket()
 
-			if err := t.unmarshal((buffer)[:n], p); err != nil {
+			if err := p.Unmarshal(buffer[:n]); err != nil {
 				t.log.Errorf("remotetrack: unmarshal error: %s", err.Error())
 				t.rtppool.PutPacket(p)
 				continue

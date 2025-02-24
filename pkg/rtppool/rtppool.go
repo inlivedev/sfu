@@ -18,10 +18,7 @@ func New() *RTPPool {
 	return &RTPPool{
 		pool: sync.Pool{
 			New: func() interface{} {
-				return &rtp.Packet{
-					Header:  rtp.Header{},
-					Payload: make([]byte, 0),
-				}
+				return &rtp.Packet{}
 			},
 		},
 
@@ -30,16 +27,13 @@ func New() *RTPPool {
 }
 
 func (r *RTPPool) PutPacket(p *rtp.Packet) {
-	p.Header = rtp.Header{}
-	p.Payload = p.Payload[:0]
-
+	*p = rtp.Packet{}
 	r.pool.Put(p)
 }
 
 func (r *RTPPool) CopyPacket(p *rtp.Packet) *rtp.Packet {
 	newPacket := r.GetPacket()
-	newPacket.Header = p.Header.Clone()
-	newPacket.Payload = append(newPacket.Payload, p.Payload...)
+	*newPacket = *p
 
 	return newPacket
 }

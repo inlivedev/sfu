@@ -110,11 +110,11 @@ func newTrack(ctx context.Context, client *Client, trackRemote IRemoteTrack, min
 
 		for _, track := range tracks {
 			//nolint:ineffassign,staticcheck // packet is from the pool
-			packet := pool.CopyPacket(p)
+			packet := p.Clone()
 
 			track.push(packet, QualityHigh)
 
-			pool.PutPacket(packet)
+			// pool.PutPacket(packet)
 		}
 
 		//nolint:ineffassign // this is required
@@ -584,7 +584,9 @@ func (t *SimulcastTrack) AddRemoteTrack(track IRemoteTrack, minWait, maxWait tim
 		t.mu.Unlock()
 
 		remoteTrack.OnEnded(func() {
+			t.mu.Lock()
 			t.remoteTrackHigh = nil
+			t.mu.Unlock()
 			t.cancel()
 			t.onEnded()
 		})
@@ -595,7 +597,9 @@ func (t *SimulcastTrack) AddRemoteTrack(track IRemoteTrack, minWait, maxWait tim
 		t.mu.Unlock()
 
 		remoteTrack.OnEnded(func() {
+			t.mu.Lock()
 			t.remoteTrackMid = nil
+			t.mu.Unlock()
 			t.cancel()
 			t.onEnded()
 		})
@@ -606,7 +610,9 @@ func (t *SimulcastTrack) AddRemoteTrack(track IRemoteTrack, minWait, maxWait tim
 		t.mu.Unlock()
 
 		remoteTrack.OnEnded(func() {
+			t.mu.Lock()
 			t.remoteTrackLow = nil
+			t.mu.Unlock()
 			t.cancel()
 			t.onEnded()
 		})

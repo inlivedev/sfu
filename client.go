@@ -558,8 +558,9 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 
 				track.OnEnded(func() {
 					simulcastTrack := track.(*SimulcastTrack)
-					// simulcastTrack.mu.Lock()
-					// defer simulcastTrack.mu.Unlock()
+
+					simulcastTrack.mu.Lock()
+
 					if simulcastTrack.remoteTrackHigh != nil {
 						client.stats.removeReceiverStats(simulcastTrack.remoteTrackHigh.track.ID() + simulcastTrack.remoteTrackHigh.track.RID())
 					}
@@ -571,6 +572,8 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 					if simulcastTrack.remoteTrackLow != nil {
 						client.stats.removeReceiverStats(simulcastTrack.remoteTrackLow.track.ID() + simulcastTrack.remoteTrackLow.track.RID())
 					}
+
+					simulcastTrack.mu.Unlock()
 
 					client.tracks.remove([]string{remoteTrack.ID()})
 				})
@@ -1099,8 +1102,10 @@ func (c *Client) enableReportAndStats(rtpSender *webrtc.RTPSender, track iClient
 				for _, p := range rtcpPackets {
 					switch p.(type) {
 					case *rtcp.PictureLossIndication:
+						c.log.Tracef("client: received PLI from %d", ssrc)
 						track.RequestPLI()
 					case *rtcp.FullIntraRequest:
+						c.log.Tracef("client: received PLI from %d", ssrc)
 						track.RequestPLI()
 					}
 				}
