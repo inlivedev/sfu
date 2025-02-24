@@ -239,7 +239,16 @@ func (t *simulcastClientTrack) SetSourceType(sourceType TrackType) {
 }
 
 func (t *simulcastClientTrack) LastQuality() QualityLevel {
-	return Uint32ToQualityLevel(t.lastQuality.Load())
+	quality := Uint32ToQualityLevel(t.lastQuality.Load())
+
+	track := t.remoteTrack
+
+	if quality == QualityHigh && track.isTrackActive(QualityHigh) {
+		return QualityHigh
+	} else if quality == QualityMid && track.isTrackActive(QualityMid) {
+		return QualityMid
+	}
+	return QualityLow
 }
 
 func (t *simulcastClientTrack) OnEnded(callback func()) {
