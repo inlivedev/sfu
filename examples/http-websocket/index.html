@@ -429,7 +429,7 @@
 					audioTcvr.setCodecPreferences(audioCodecsPref);
 				}
 
-
+                
 				setCodecPreferences(peerConnection,stream, codec, "L3T3_KEY")
 			} else {
 				peerConnection.addTransceiver('video', {
@@ -973,6 +973,15 @@
 			let tscvAudio = null;
 			let tscvVideo = null;
 
+            if (typeof videoTrack != "undefined"){
+                tscvVideo=peerConnection.addTransceiver(videoTrack, {
+                    direction: 'sendonly',
+                    streams: [screenStream],
+                    sendEncodings: [{priority: 'high'}],
+                })
+            }
+            
+
 			if (typeof audioTrack != "undefined"){
 				tscvAudio=peerConnection.addTransceiver(audioTrack, {
 					direction: 'sendonly',
@@ -1000,11 +1009,17 @@
 
                 document.querySelector('main').removeChild(container);
 
+                isAllowRenegotiation();
+
+                if (!tscvVideo?.sender.track) return;
+
+                tscvVideo.sender.track.stop();
+
 				peerConnection.removeTrack(tscvVideo.sender);
 
 				peerConnection.removeTrack(tscvAudio.sender);
 
-				isAllowRenegotiation();
+				
             });
 
             isAllowRenegotiation()
