@@ -13,11 +13,11 @@ require (
 
 require (
 	github.com/jaevor/go-nanoid v1.3.0
-	github.com/pion/ice/v4 v4.0.5
+	github.com/pion/ice/v4 v4.0.7
 	github.com/pion/turn/v4 v4.0.0
-	github.com/pion/webrtc/v4 v4.0.8
+	github.com/pion/webrtc/v4 v4.0.13
 	golang.org/x/exp v0.0.0-20230905200255-921286631fa9
-	golang.org/x/text v0.21.0
+	golang.org/x/text v0.22.0
 )
 
 require (
@@ -34,14 +34,14 @@ require (
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/google/uuid v1.6.0
 	github.com/pion/datachannel v1.5.10 // indirect
-	github.com/pion/logging v0.2.2
+	github.com/pion/logging v0.2.3
 	github.com/pion/randutil v0.1.0 // indirect
-	github.com/pion/rtp v1.8.11
-	github.com/pion/sctp v1.8.35 // indirect
+	github.com/pion/rtp v1.8.12
+	github.com/pion/sctp v1.8.37 // indirect
 	github.com/pion/sdp/v3 v3.0.10
 	github.com/pmezard/go-difflib v1.0.0 // indirect
-	golang.org/x/crypto v0.31.0 // indirect
-	golang.org/x/net v0.33.0 // direct
-	golang.org/x/sys v0.28.0
+	golang.org/x/crypto v0.33.0 // indirect
+	golang.org/x/net v0.35.0 // direct
+	golang.org/x/sys v0.30.0
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
