@@ -64,7 +64,7 @@ func (m *PacketManager) NewPacket(header *rtp.Header, payload []byte, attr inter
 	*p.header = header.Clone()
 
 	if payload != nil {
-		p.payload = append(p.payload, payload...)
+		copy(p.payload, payload)
 	}
 
 	// Direct map copy

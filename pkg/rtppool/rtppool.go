@@ -18,7 +18,9 @@ func New() *RTPPool {
 	return &RTPPool{
 		pool: sync.Pool{
 			New: func() interface{} {
-				return &rtp.Packet{}
+				return &rtp.Packet{
+					Payload: make([]byte, 1500),
+				}
 			},
 		},
 
@@ -27,7 +29,7 @@ func New() *RTPPool {
 }
 
 func (r *RTPPool) PutPacket(p *rtp.Packet) {
-	*p = rtp.Packet{}
+	p.Payload = p.Payload[:0]
 	r.pool.Put(p)
 }
 
