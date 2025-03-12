@@ -2,7 +2,6 @@ package sfu
 
 import (
 	"context"
-	"errors"
 	"io"
 	"sync"
 	"time"
@@ -123,26 +122,6 @@ func (t *remoteTrack) readRTP() {
 			t.rtppool.PutPacket(p)
 		}
 	}
-}
-
-func (t *remoteTrack) unmarshal(buf []byte, p *rtp.Packet) error {
-	n, err := p.Header.Unmarshal(buf)
-	if err != nil {
-		return err
-	}
-
-	end := len(buf)
-	if p.Header.Padding {
-		p.PaddingSize = buf[end-1]
-		end -= int(p.PaddingSize)
-	}
-	if end < n {
-		return errors.New("remote track buffer too short")
-	}
-
-	p.Payload = buf[n:end]
-
-	return nil
 }
 
 func (t *remoteTrack) updateStats() {

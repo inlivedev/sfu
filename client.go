@@ -1235,7 +1235,7 @@ func (c *Client) sendPendingLocalCandidates() {
 		c.onIceCandidateCallback(candidate)
 	}
 
-	c.pendingLocalCandidates = nil
+	c.pendingLocalCandidates = c.pendingLocalCandidates[:0]
 }
 
 // OnConnectionStateChanged event is called when the SFU connection state is changed.

@@ -110,11 +110,11 @@ func newTrack(ctx context.Context, client *Client, trackRemote IRemoteTrack, min
 
 		for _, track := range tracks {
 			//nolint:ineffassign,staticcheck // packet is from the pool
-			packet := p.Clone()
+			packet := pool.CopyPacket(p)
 
 			track.push(packet, QualityHigh)
 
-			// pool.PutPacket(packet)
+			pool.PutPacket(packet)
 		}
 
 		//nolint:ineffassign // this is required

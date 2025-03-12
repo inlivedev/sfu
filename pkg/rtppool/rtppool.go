@@ -33,7 +33,10 @@ func (r *RTPPool) PutPacket(p *rtp.Packet) {
 
 func (r *RTPPool) CopyPacket(p *rtp.Packet) *rtp.Packet {
 	newPacket := r.GetPacket()
-	*newPacket = *p
+	newPacket.Header = p.Header.Clone()
+	newPacket.Payload = newPacket.Payload[:len(p.Payload)]
+	copy(newPacket.Payload, p.Payload)
+	newPacket.PaddingSize = p.PaddingSize
 
 	return newPacket
 }
