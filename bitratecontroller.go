@@ -407,7 +407,7 @@ func (bc *bitrateController) loopMonitor() {
 	ctx, cancel := context.WithCancel(bc.client.Context())
 	defer cancel()
 
-	ticker := time.NewTicker(1 * time.Second)
+	ticker := time.NewTicker(3 * time.Second)
 	defer ticker.Stop()
 
 	for {
