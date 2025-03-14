@@ -279,7 +279,8 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		return gcc.NewSendSideBWE(
 			gcc.SendSideBWEInitialBitrate(int(s.bitrateConfigs.InitialBandwidth)),
 			// gcc.SendSideBWEPacer(pacer.NewLeakyBucketPacer(opts.Log, int(s.bitrateConfigs.InitialBandwidth), true)),
-			gcc.SendSideBWEPacer(gcc.NewNoOpPacer()),
+			// gcc.SendSideBWEPacer(gcc.NewNoOpPacer()),
+			gcc.SendSideBWEPacer(gcc.NewLeakyBucketPacer(int(s.bitrateConfigs.InitialBandwidth))),
 		)
 	})
 	if err != nil {
