@@ -17,6 +17,7 @@ import (
 	"github.com/inlivedev/sfu/pkg/networkmonitor"
 	"github.com/pion/interceptor"
 	"github.com/pion/interceptor/pkg/cc"
+	"github.com/pion/interceptor/pkg/flexfec"
 	"github.com/pion/interceptor/pkg/gcc"
 	"github.com/pion/interceptor/pkg/nack"
 	"github.com/pion/interceptor/pkg/stats"
@@ -72,6 +73,7 @@ type ClientOptions struct {
 	EnableVoiceDetection bool          `json:"enable_voice_detection"`
 	EnablePlayoutDelay   bool          `json:"enable_playout_delay"`
 	EnableOpusDTX        bool          `json:"enable_opus_dtx"`
+	EnableFlexFEC        bool          `json:"enable_flexfec"`
 	EnableOpusInbandFEC  bool          `json:"enable_opus_inband_fec"`
 	// Configure the minimum playout delay that will be used by the client
 	// Recommendation:
@@ -264,6 +266,15 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		})
 
 		i.Add(vadInterceptorFactory)
+	}
+
+	if opts.EnableFlexFEC {
+		flexfecInterceptor, err := flexfec.NewFecInterceptor()
+		if err != nil {
+			panic(err)
+		}
+
+		i.Add(flexfecInterceptor)
 	}
 
 	estimatorChan := make(chan cc.BandwidthEstimator, 1)
@@ -1200,6 +1211,10 @@ func (c *Client) End() error {
 }
 
 func (c *Client) AddICECandidate(candidate webrtc.ICECandidateInit) error {
+	if c.peerConnection == nil || c.peerConnection.PC() == nil {
+		return errors.New("client: peer connection is not initialized, make sure to call this after first negotiation done")
+	}
+
 	if c.peerConnection.PC().RemoteDescription() == nil {
 		c.pendingRemoteCandidates = append(c.pendingRemoteCandidates, candidate)
 	} else {
