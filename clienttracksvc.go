@@ -119,10 +119,14 @@ func (t *scaleableClientTrack) isKeyframe(vp9 *codecs.VP9Packet) bool {
 	if len(vp9.Payload) < 1 {
 		return false
 	}
+	// According to VP9 RFC, B bit set to 1 if packet is the beginning of a new VP9 frame
+	// For keyframes, P bit should be 0 (no inter-picture prediction)
 	if !vp9.B {
 		return false
 	}
 
+	// Check for keyframe by examining the VP9 payload
+	// This identifies the frame as an intra-frame (keyframe)
 	if (vp9.Payload[0] & 0xc0) != 0x80 {
 		return false
 	}
@@ -172,31 +176,47 @@ func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 	currentTID := t.tid
 	currentSID := t.sid
 
-	// check if possible to scale up/down temporal layer
+	// Temporal layer switching according to VP9 RFC
+	// U bit indicates a switching up point where we can safely switch to a higher frame rate
 	if t.tid < targetTID {
 		if vp9Packet.U && vp9Packet.B && currentTID < vp9Packet.TID && vp9Packet.TID <= targetTID {
-			// scale temporal up
+			// Scale temporal up - U bit confirms it's safe to switch up
 			t.tid = vp9Packet.TID
 			currentTID = t.tid
 		}
 	} else if t.tid > targetTID {
 		if vp9Packet.E {
-			// scale temporal down
+			// Scale temporal down - safe at the end of a frame
 			t.tid = vp9Packet.TID
 		}
 	}
 
-	// check if possible to scale up spatial layer
-
+	// Spatial layer switching according to VP9 RFC
+	// D bit indicates inter-layer dependency
 	if currentSID < targetSID {
-		if !vp9Packet.P && vp9Packet.B && currentSID < vp9Packet.SID && vp9Packet.SID <= targetSID {
-			// scale spatial up
-			t.sid = vp9Packet.SID
-			currentSID = t.sid
+		// Switching up to higher spatial layer
+		// For scaling up, we should ensure this is the start of a frame (B=1)
+		// and the layer doesn't depend on layers we might have skipped
+		if vp9Packet.B && currentSID < vp9Packet.SID && vp9Packet.SID <= targetSID {
+			// For non-base layers, check the D bit to understand dependencies
+			if vp9Packet.SID > 0 && vp9Packet.D {
+				// This layer depends on the previous spatial layer
+				// Only switch if we have the previous layer
+				if vp9Packet.SID == currentSID+1 {
+					t.sid = vp9Packet.SID
+					currentSID = t.sid
+				}
+			} else {
+				// This layer doesn't depend on previous spatial layer (D=0) or is base layer
+				// Safe to switch to this layer
+				t.sid = vp9Packet.SID
+				currentSID = t.sid
+			}
 		}
 	} else if currentSID > targetSID {
+		// Switching down to lower spatial layer
+		// Safe to switch down at the end of a frame
 		if vp9Packet.E {
-			// scale spatsial down
 			t.sid = vp9Packet.SID
 		}
 	}
@@ -205,16 +225,36 @@ func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 		t.setLastQuality(quality)
 	}
 
+	// Determine if packet should be dropped
+	shouldDrop := false
+
+	// Drop packets higher than our target temporal layer
+	if vp9Packet.TID > currentTID {
+		shouldDrop = true
+	}
+
+	// Drop packets higher than our target spatial layer
+	if vp9Packet.SID > currentSID {
+		shouldDrop = true
+	}
+
+	// Drop packets from non-reference frames for higher spatial layers that we're not using
+	// Similar to Z bit concept in the RFC
 	sidNonReference := (p.Payload[0] & 0x01) != 0
-	if currentTID < vp9Packet.TID || currentSID < vp9Packet.SID || (vp9Packet.SID > currentSID && sidNonReference) {
-		// t.client.log.Infof("scalabletrack: packet ", p.SequenceNumber, " is dropped because of currentTID ", currentTID, "  < vp9Packet.TID", vp9Packet.TID)
+	if vp9Packet.SID > currentSID && sidNonReference {
+		shouldDrop = true
+	}
+
+	if shouldDrop {
 		ok := t.packetmap.Drop(p.SequenceNumber, vp9Packet.PictureID)
 		if ok {
 			return
 		}
 	}
 
-	// mark packet as a last spatial layer packet
+	// Mark packet as a last spatial layer packet
+	// According to RFC: Marker bit (M) MUST be set to 1 for the final packet of the
+	// highest spatial layer frame (the final packet of the picture)
 	if vp9Packet.E && currentSID == vp9Packet.SID && targetSID <= currentSID {
 		p.Marker = true
 	}
@@ -236,9 +276,9 @@ func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 
 	p.SequenceNumber = newseqno
 
-	// if quality is none we need to send blank frame
-	// make sure the player is paused when the quality is none.
-	// quality none only possible when the video is not displayed
+	// If quality is none we need to send blank frame
+	// Make sure the player is paused when the quality is none.
+	// Quality none only possible when the video is not displayed
 	if quality == QualityNone {
 		if ok := t.packetmap.Drop(p.SequenceNumber, vp9Packet.PictureID); ok {
 			return
