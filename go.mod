@@ -6,7 +6,7 @@ go 1.23
 // replace github.com/pion/interceptor => ../../pion/pion-interceptor
 
 require (
-	github.com/pion/interceptor v0.1.37
+	github.com/pion/interceptor v0.1.38-0.20250427015916-96a23bb5f5f8
 	github.com/pion/rtcp v1.2.15
 	github.com/stretchr/testify v1.10.0
 )
