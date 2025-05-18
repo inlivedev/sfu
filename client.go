@@ -373,17 +373,6 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 			return
 		}
 
-		// don't publish track when not all the tracks are received
-		// TODO:
-		// 1. need to handle simulcast track because  it will be counted as single track
-		initialReceiverCount := client.initialReceiverCount.Load()
-		if client.Type() == ClientTypePeer && int(initialReceiverCount) > client.pendingPublishedTracks.Length() {
-			s.log.Infof("sfu: client %s pending published tracks: %d, initial tracks count: %d", id, client.pendingPublishedTracks.Length(), initialReceiverCount)
-			return
-		}
-
-		s.log.Infof("sfu: client %s publish tracks, initial tracks count: %d, pending published tracks: %d", id, initialReceiverCount, client.pendingPublishedTracks.Length())
-
 		addedTracks := client.pendingPublishedTracks.GetTracks()
 
 		if client.onTracksAdded != nil {

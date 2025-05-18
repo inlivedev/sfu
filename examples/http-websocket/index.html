@@ -159,7 +159,7 @@
 
 		let mutedMic = false
 
-		let mutedCam = false
+		let mutedCam = true
 
 		const toggleMic = async (e) => {
 			peerConnection.getSenders().forEach(sender => {
@@ -175,11 +175,21 @@
 			const trackIds = screenStream?screenStream.getTracks().map(track=>track.id):[]
 			peerConnection.getSenders().forEach(async (sender) => {
 				if (sender.track && sender.track.kind === 'video' && !trackIds.includes(sender.track.id)) {
-					if (!mutedCam && sender.track.readyState === 'live') {
+					if (!mutedCam && sender.track.readyState === 'live') { // If camera is on, turn it off
 						sender.track.stop()
 						stream.removeTrack(sender.track)
-					} else {
-						const newStream = await navigator.mediaDevices.getUserMedia({audio:false,video:{
+					} else if (mutedCam) { // If camera is off, turn it on
+						// Remove old video track from local stream
+						const trackIdsToIgnore = screenStream ? screenStream.getTracks().map(t => t.id) : [];
+						const oldLocalVideoTrack = stream.getVideoTracks().find(t => !trackIdsToIgnore.includes(t.id));
+						if (oldLocalVideoTrack) {
+							stream.removeTrack(oldLocalVideoTrack);
+							if (oldLocalVideoTrack.readyState === 'live') { // Stop it if it was live
+								oldLocalVideoTrack.stop();
+							}
+						}
+
+						const newLocalMediaStream = await navigator.mediaDevices.getUserMedia({audio:false,video:{
 						width: {ideal: 1280},
 						height: {ideal: 720},
 						advanced: [{
@@ -191,15 +201,14 @@
 							{height: {max: 720}},
 							{aspectRatio: {exact: 1.77778}}
 						]}})
-						const videoTrack = newStream.getVideoTracks()[0]
-						sender.replaceTrack(videoTrack)
-						stream.addTrack(videoTrack)
-						
+						const videoTrack = newLocalMediaStream.getVideoTracks()[0]
+						if (videoTrack) { // Check if track was successfully obtained
+							sender.replaceTrack(videoTrack)
+							stream.addTrack(videoTrack)
+						}
 					}
-					
 				}
 			})
-
 			mutedCam = !mutedCam
 			e.target.innerText = mutedCam?'Unmute Cam':'Mute Cam'
 		}
@@ -380,6 +389,9 @@
 				const initStream = await navigator.mediaDevices.getUserMedia(constraints)
 				const streamid = initStream.id.replace('{','').replace('}','');
 				initStream.getTracks().forEach(track => {
+					if (track.kind === 'video' && mutedCam) {
+						track.enabled = false;
+					}
 					stream.addTrack(track)
 				})
 				let container = document.getElementById("container-"+streamid);
@@ -1044,6 +1056,7 @@
             document.getElementById("btnStartVP9").onclick = startVP9;
 			document.getElementById("btnToggleMic").onclick = toggleMic;
 			document.getElementById("btnToggleCam").onclick = toggleCam;
+			document.getElementById("btnToggleCam").innerText = "Unmute Cam";
             document.getElementById("btnShareScreen").onclick = shareScreen;
             document.getElementById("btnStats").onclick = toggleStats;
             document.getElementById("selectQuality").onchange = switchQuality;
@@ -1068,7 +1081,7 @@
         <button id="btnStartVP9">Start with VP9</button>
 		<button id="btnViewOnly">View only</button>
 		<button id="btnToggleMic">Mute Mic</button>
-		<button id="btnToggleCam">Mute Cam</button>
+		<button id="btnToggleCam">Unmute Cam</button>
 		<span><input id="simulcast" type="checkbox" value="simulcast">Simulcast</span>
 		<span><input id="svc" type="checkbox" value="svc" checked>SVC</span>
         <span><input id="red" type="checkbox" value="red" checked>RED Audio</span>
