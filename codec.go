@@ -16,8 +16,7 @@ import (
 
 var (
 	videoRTCPFeedback = []webrtc.RTCPFeedback{{"goog-remb", ""}, {"ccm", "fir"}, {"nack", ""}, {"nack", "pli"}}
-
-	videoCodecs = []webrtc.RTPCodecParameters{
+	videoCodecs       = []webrtc.RTPCodecParameters{
 		{
 			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypeVP8, 90000, 0, "", videoRTCPFeedback},
 			PayloadType:        96,
@@ -28,8 +27,12 @@ var (
 		},
 
 		{
-			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypeH264, 90000, 0, "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42001f", videoRTCPFeedback},
-			PayloadType:        102,
+			RTPCodecCapability: webrtc.RTPCodecCapability{
+				webrtc.MimeTypeH264, 90000, 0,
+				"level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42001f",
+				videoRTCPFeedback,
+			},
+			PayloadType: 102,
 		},
 		{
 			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypeRTX, 90000, 0, "apt=102", nil},
@@ -37,8 +40,12 @@ var (
 		},
 
 		{
-			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypeH264, 90000, 0, "level-asymmetry-allowed=1;packetization-mode=0;profile-level-id=42001f", videoRTCPFeedback},
-			PayloadType:        104,
+			RTPCodecCapability: webrtc.RTPCodecCapability{
+				webrtc.MimeTypeH264, 90000, 0,
+				"level-asymmetry-allowed=1;packetization-mode=0;profile-level-id=42001f",
+				videoRTCPFeedback,
+			},
+			PayloadType: 104,
 		},
 		{
 			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypeRTX, 90000, 0, "apt=104", nil},
@@ -46,8 +53,12 @@ var (
 		},
 
 		{
-			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypeH264, 90000, 0, "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f", videoRTCPFeedback},
-			PayloadType:        106,
+			RTPCodecCapability: webrtc.RTPCodecCapability{
+				webrtc.MimeTypeH264, 90000, 0,
+				"level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f",
+				videoRTCPFeedback,
+			},
+			PayloadType: 106,
 		},
 		{
 			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypeRTX, 90000, 0, "apt=106", nil},
@@ -55,8 +66,12 @@ var (
 		},
 
 		{
-			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypeH264, 90000, 0, "level-asymmetry-allowed=1;packetization-mode=0;profile-level-id=42e01f", videoRTCPFeedback},
-			PayloadType:        108,
+			RTPCodecCapability: webrtc.RTPCodecCapability{
+				webrtc.MimeTypeH264, 90000, 0,
+				"level-asymmetry-allowed=1;packetization-mode=0;profile-level-id=42e01f",
+				videoRTCPFeedback,
+			},
+			PayloadType: 108,
 		},
 		{
 			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypeRTX, 90000, 0, "apt=108", nil},
@@ -64,8 +79,12 @@ var (
 		},
 
 		{
-			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypeH264, 90000, 0, "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=4d001f", videoRTCPFeedback},
-			PayloadType:        127,
+			RTPCodecCapability: webrtc.RTPCodecCapability{
+				webrtc.MimeTypeH264, 90000, 0,
+				"level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=4d001f",
+				videoRTCPFeedback,
+			},
+			PayloadType: 127,
 		},
 		{
 			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypeRTX, 90000, 0, "apt=127", nil},
@@ -73,13 +92,39 @@ var (
 		},
 
 		{
-			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypeH264, 90000, 0, "level-asymmetry-allowed=1;packetization-mode=0;profile-level-id=4d001f", videoRTCPFeedback},
-			PayloadType:        39,
+			RTPCodecCapability: webrtc.RTPCodecCapability{
+				webrtc.MimeTypeH264,
+				90000, 0,
+				"level-asymmetry-allowed=1;packetization-mode=0;profile-level-id=4d001f",
+				videoRTCPFeedback,
+			},
+			PayloadType: 39,
 		},
 		{
 			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypeRTX, 90000, 0, "apt=39", nil},
 			PayloadType:        40,
 		},
+		{
+			RTPCodecCapability: webrtc.RTPCodecCapability{
+				MimeType:     webrtc.MimeTypeH265,
+				ClockRate:    90000,
+				RTCPFeedback: videoRTCPFeedback,
+			},
+			PayloadType: 116,
+		},
+		{
+			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypeRTX, 90000, 0, "apt=116", nil},
+			PayloadType:        117,
+		},
+		{
+			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypeAV1, 90000, 0, "", videoRTCPFeedback},
+			PayloadType:        45,
+		},
+		{
+			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypeRTX, 90000, 0, "apt=45", nil},
+			PayloadType:        46,
+		},
+
 		{
 			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypeVP9, 90000, 0, "profile-id=0", videoRTCPFeedback},
 			PayloadType:        98,
@@ -97,10 +142,13 @@ var (
 			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypeRTX, 90000, 0, "apt=100", nil},
 			PayloadType:        101,
 		},
-
 		{
-			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypeH264, 90000, 0, "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=64001f", videoRTCPFeedback},
-			PayloadType:        112,
+			RTPCodecCapability: webrtc.RTPCodecCapability{
+				webrtc.MimeTypeH264, 90000, 0,
+				"level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=64001f",
+				videoRTCPFeedback,
+			},
+			PayloadType: 112,
 		},
 		{
 			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypeRTX, 90000, 0, "apt=112", nil},
@@ -116,6 +164,18 @@ var (
 		{
 			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypeOpus, 48000, 2, "minptime=10;useinbandfec=1", nil},
 			PayloadType:        111,
+		},
+		{
+			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypeG722, 8000, 0, "", nil},
+			PayloadType:        rtp.PayloadTypeG722,
+		},
+		{
+			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypePCMU, 8000, 0, "", nil},
+			PayloadType:        rtp.PayloadTypePCMU,
+		},
+		{
+			RTPCodecCapability: webrtc.RTPCodecCapability{webrtc.MimeTypePCMA, 8000, 0, "", nil},
+			PayloadType:        rtp.PayloadTypePCMA,
 		},
 	}
 
