@@ -31,11 +31,11 @@ func NewPacketManager() *PacketManager {
 
 	m.PacketPool = &sync.Pool{
 		New: func() interface{} {
-			payload := m.PayloadPool.Get()
+			payload := m.PayloadPool.Get() // payload is *[]byte
 			return &RetainablePacket{
 				header:  &rtp.Header{},
-				payload: *payload,
-				attrMap: make(interceptor.Attributes),
+				payload: *payload,                     // dereferences to []byte, copies slice header
+				attrMap: make(interceptor.Attributes), // Revert to make for map type
 				manager: m,
 			}
 		},
@@ -68,8 +68,11 @@ func (m *PacketManager) NewPacket(header *rtp.Header, payload []byte, attr inter
 	}
 
 	// Direct map copy
-	for k, v := range attr {
-		p.attrMap.Set(k, v)
+	if p.attrMap == nil { // Ensure map is initialized, though pool should do it.
+		p.attrMap = make(interceptor.Attributes)
+	}
+	for k, v := range attr { // attr is also map[string]interface{}
+		p.attrMap[k] = v // Correct assignment for a map
 	}
 
 	return p, nil
@@ -124,12 +127,14 @@ func (p *RetainablePacket) Release() {
 
 	if p.count == 0 {
 		// release back to pool
-		*p.header = rtp.Header{}
+		*p.header = rtp.Header{} // Reset header
 
-		p.payload = p.payload[:0]
-		for k := range p.attrMap {
-			delete(p.attrMap, k)
+		p.payload = p.payload[:0] // Reset payload slice length
+
+		// Reset attributes
+		for k := range p.attrMap { // p.attrMap is map[string]interface{}
+			delete(p.attrMap, k) // Correct way to clear a map
 		}
-		p.manager.PacketPool.Put(p)
+		p.manager.PacketPool.Put(p) // Return RetainablePacket to its pool
 	}
 }

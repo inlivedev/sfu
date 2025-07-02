@@ -144,6 +144,7 @@ type Client struct {
 	estimator             cc.BandwidthEstimator
 	initialReceiverCount  atomic.Uint32
 	initialSenderCount    atomic.Uint32
+	trackWaitStartTime    time.Time
 	isInRenegotiation     *atomic.Bool
 	isInRemoteNegotiation *atomic.Bool
 	idleTimeoutContext    context.Context
@@ -373,7 +374,36 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 			return
 		}
 
+		// Wait for all expected tracks before publishing for peer clients
+		initialReceiverCount := client.initialReceiverCount.Load()
+		currentPendingCount := client.pendingPublishedTracks.Length()
+
+		if client.Type() == ClientTypePeer && int(initialReceiverCount) > 0 {
+			// Set wait start time on first track
+			if currentPendingCount == 1 {
+				client.trackWaitStartTime = time.Now()
+			}
+
+			// Check if we should continue waiting
+			waitTimeout := 5 * time.Second // Configurable timeout
+			timeoutReached := !client.trackWaitStartTime.IsZero() && time.Since(client.trackWaitStartTime) > waitTimeout
+
+			if currentPendingCount < int(initialReceiverCount) && !timeoutReached {
+				s.log.Infof("sfu: client %s waiting for more tracks: %d/%d",
+					client.ID(), currentPendingCount, initialReceiverCount)
+				return // Don't notify yet, wait for more tracks
+			}
+
+			if timeoutReached {
+				s.log.Warnf("sfu: client %s track wait timeout reached, publishing %d/%d tracks",
+					client.ID(), currentPendingCount, initialReceiverCount)
+			}
+		}
+
+		// All expected tracks received or not a peer client
 		addedTracks := client.pendingPublishedTracks.GetTracks()
+		s.log.Infof("sfu: client %s publishing %d tracks (expected: %d)",
+			client.ID(), len(addedTracks), initialReceiverCount)
 
 		if client.onTracksAdded != nil {
 			client.onTracksAdded(addedTracks)
@@ -484,6 +514,50 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		if remoteTrackID == "" {
 			client.log.Errorf("client: error remote track id is empty")
 			return
+		}
+
+		// Check if this is a track replacement (same track ID but different SSRC)
+		existingTrack, err := client.tracks.Get(remoteTrackID)
+		if err == nil && existingTrack != nil {
+			// Track exists, check if SSRC changed but stream ID remained the same (indicating track replacement)
+			var existingSSRC webrtc.SSRC
+			existingStreamID := existingTrack.StreamID()
+			newStreamID := remoteTrack.StreamID()
+			
+			if existingTrack.IsSimulcast() {
+				// For simulcast, check if any layer has this SSRC
+				simulcastTrack := existingTrack.(*SimulcastTrack)
+				simulcastTrack.mu.Lock()
+				if simulcastTrack.remoteTrackHigh != nil {
+					existingSSRC = simulcastTrack.remoteTrackHigh.track.SSRC()
+				} else if simulcastTrack.remoteTrackMid != nil {
+					existingSSRC = simulcastTrack.remoteTrackMid.track.SSRC()
+				} else if simulcastTrack.remoteTrackLow != nil {
+					existingSSRC = simulcastTrack.remoteTrackLow.track.SSRC()
+				}
+				simulcastTrack.mu.Unlock()
+			} else {
+				if existingTrack.Kind() == webrtc.RTPCodecTypeAudio {
+					existingSSRC = existingTrack.(*AudioTrack).SSRC()
+				} else {
+					existingSSRC = existingTrack.(*Track).SSRC()
+				}
+			}
+
+			// Track replacement: same stream ID but different SSRC
+			if existingSSRC != 0 && existingSSRC != remoteTrack.SSRC() && existingStreamID == newStreamID {
+				client.log.Infof("client: track replacement detected for %s (stream: %s), old SSRC: %d, new SSRC: %d", 
+					remoteTrackID, newStreamID, existingSSRC, remoteTrack.SSRC())
+				
+				// Remove old track to trigger cleanup and notify other clients
+				client.tracks.remove([]string{remoteTrackID})
+				
+				// Clear from pending published tracks if it exists there
+				client.pendingPublishedTracks.remove([]string{remoteTrackID})
+			} else if existingSSRC != 0 && existingSSRC != remoteTrack.SSRC() && existingStreamID != newStreamID {
+				client.log.Warnf("client: track ID collision detected for %s, existing stream: %s, new stream: %s", 
+					remoteTrackID, existingStreamID, newStreamID)
+			}
 		}
 
 		onPLI := func() {
