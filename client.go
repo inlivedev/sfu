@@ -525,18 +525,26 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 			newStreamID := remoteTrack.StreamID()
 			
 			if existingTrack.IsSimulcast() {
-				// For simulcast, check if any layer has this SSRC
+				// For simulcast, check if the same RID layer is being replaced
 				simulcastTrack := existingTrack.(*SimulcastTrack)
 				simulcastTrack.mu.Lock()
-				if simulcastTrack.remoteTrackHigh != nil {
-					existingSSRC = simulcastTrack.remoteTrackHigh.track.SSRC()
-				} else if simulcastTrack.remoteTrackMid != nil {
-					existingSSRC = simulcastTrack.remoteTrackMid.track.SSRC()
-				} else if simulcastTrack.remoteTrackLow != nil {
-					existingSSRC = simulcastTrack.remoteTrackLow.track.SSRC()
+				switch remoteTrack.RID() {
+				case "high":
+					if simulcastTrack.remoteTrackHigh != nil {
+						existingSSRC = simulcastTrack.remoteTrackHigh.track.SSRC()
+					}
+				case "mid":
+					if simulcastTrack.remoteTrackMid != nil {
+						existingSSRC = simulcastTrack.remoteTrackMid.track.SSRC()
+					}
+				case "low":
+					if simulcastTrack.remoteTrackLow != nil {
+						existingSSRC = simulcastTrack.remoteTrackLow.track.SSRC()
+					}
 				}
 				simulcastTrack.mu.Unlock()
-			} else {
+			} else if remoteTrack.RID() == "" {
+				// Non-simulcast track
 				if existingTrack.Kind() == webrtc.RTPCodecTypeAudio {
 					existingSSRC = existingTrack.(*AudioTrack).SSRC()
 				} else {
@@ -546,14 +554,20 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 
 			// Track replacement: same stream ID but different SSRC
 			if existingSSRC != 0 && existingSSRC != remoteTrack.SSRC() && existingStreamID == newStreamID {
-				client.log.Infof("client: track replacement detected for %s (stream: %s), old SSRC: %d, new SSRC: %d", 
-					remoteTrackID, newStreamID, existingSSRC, remoteTrack.SSRC())
-				
-				// Remove old track to trigger cleanup and notify other clients
-				client.tracks.remove([]string{remoteTrackID})
-				
-				// Clear from pending published tracks if it exists there
-				client.pendingPublishedTracks.remove([]string{remoteTrackID})
+				if existingTrack.IsSimulcast() && remoteTrack.RID() != "" {
+					client.log.Infof("client: simulcast layer %s replacement detected for %s (stream: %s), old SSRC: %d, new SSRC: %d", 
+						remoteTrack.RID(), remoteTrackID, newStreamID, existingSSRC, remoteTrack.SSRC())
+					// For simulcast, we don't remove the entire track, just let AddRemoteTrack handle the layer replacement
+				} else {
+					client.log.Infof("client: track replacement detected for %s (stream: %s), old SSRC: %d, new SSRC: %d", 
+						remoteTrackID, newStreamID, existingSSRC, remoteTrack.SSRC())
+					
+					// Remove old track to trigger cleanup and notify other clients
+					client.tracks.remove([]string{remoteTrackID})
+					
+					// Clear from pending published tracks if it exists there
+					client.pendingPublishedTracks.remove([]string{remoteTrackID})
+				}
 			} else if existingSSRC != 0 && existingSSRC != remoteTrack.SSRC() && existingStreamID != newStreamID {
 				client.log.Warnf("client: track ID collision detected for %s, existing stream: %s, new stream: %s", 
 					remoteTrackID, existingStreamID, newStreamID)

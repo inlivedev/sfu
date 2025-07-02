@@ -103,6 +103,7 @@ type mockRemoteTrack struct {
 	streamID string
 	ssrc     webrtc.SSRC
 	kind     webrtc.RTPCodecType
+	rid      string
 }
 
 func (m *mockRemoteTrack) ID() string {
@@ -122,6 +123,6 @@ func (m *mockRemoteTrack) Kind() webrtc.RTPCodecType {
 }
 
 func (m *mockRemoteTrack) RID() string {
-	return ""
+	return m.rid
 }
 
