@@ -69,9 +69,14 @@ When a client wants to publish a track to the SFU, usually the flow is like this
 See the [client_test.go](./client_test.go) for more details on how to publish and subscribe to tracks.
 
 
-### Renegotiation
-Usually, renegotiation will be needed when a new track is added or removed. The renegotiation can be initiated by the SFU if a new client joins the room and publishes a new track to the room. To broadcast the track to all clients, the SFU must renegotiate with each client to inform them about the new tracks. 
+### Client Renegotiation
+Usually, renegotiation will be needed when a new track is added or removed. The renegotiation can be initiated by the SFU if a new client joins the room and publishes a new track to the room. To broadcast the track to all clients, the SFU must renegotiate with each client to inform them about the new tracks. The renegotiation is can be handled in peerConnection.OnNegotiationNeeded event. This event will be triggered when the client needs to renegotiate with the SFU.
 
+> [!IMPORTANT]
+> When adding a track and using the `OnNegotiationNeeded` event, issues may arise if you previously added a single `recvOnly` transceiver and then add more than one `sendonly` or `sendrecv` transceiver. The `OnNegotiationNeeded` event may be triggered multiple times. To prevent this, follow these rules:
+> - If you add a `recvonly` transceiver and want to add more tracks, use `PeerConnection.AddTrack()` so the send direction of the existing transceiver will be used.
+> - Always balance the number of transceivers by adding the same number of additional tracks as the `recvonly` transceivers previously added. For example, if you added 2 `recvonly` transceivers, you can add 2 tracks with `PeerConnection.AddTrack()`. Adding more than 2 tracks will cause `OnNegotiationNeeded` to be called multiple times. It is common to add `recvonly` transceivers first for audio and video, then add more tracks later when the client wants to share the screen or other media.
+  
 #### Renegotiation from the SFU
 To wait for the renegotiation process from SFU to make sure you receive a new track once published in a room, you can do this:
 1. When creating a new client after calling `currentRoom.addClient()` method, you can listen to the `client.OnRenegotiation` event. The event will be triggered when the SFU is trying to renegotiate with the client.

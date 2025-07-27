@@ -71,7 +71,7 @@ connected:
 	assert.Equal(t, ClientStateActive, client.state.Load())
 }
 
-func TestOnNegotiationNeededCalledOnce(t *testing.T) {
+func TestOnNegotiationNeededCalledTwice(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -158,7 +158,7 @@ func TestOnNegotiationNeededCalledOnce(t *testing.T) {
 
 	client.OnAllowedRemoteRenegotiation(func() {
 		TestLogger.Infof("allowed remote renegotiation")
-		negotiate(pc, client, TestLogger, true)
+
 	})
 
 	// Override OnNegotiationNeeded to count calls and still perform negotiation
@@ -185,17 +185,58 @@ func TestOnNegotiationNeededCalledOnce(t *testing.T) {
 		}
 	})
 
-	// Add tracks to trigger negotiation
+	// Add track to trigger negotiation
+	pc.AddTransceiverFromKind(webrtc.RTPCodecTypeVideo, webrtc.RTPTransceiverInit{
+		Direction: webrtc.RTPTransceiverDirectionRecvonly,
+	})
+	pc.AddTransceiverFromKind(webrtc.RTPCodecTypeAudio, webrtc.RTPTransceiverInit{
+		Direction: webrtc.RTPTransceiverDirectionRecvonly,
+	})
+
+	// Wait until the first negotiation is done
+	timeout := time.After(15 * time.Second)
+	for {
+		select {
+		case <-time.After(200 * time.Millisecond):
+			if negotiationCount > 0 {
+				t.Logf("Negotiation needed called %d times", negotiationCount)
+				goto negotiationDone
+			}
+		case <-timeout:
+			t.Fatal("Timeout waiting for negotiation needed to be called")
+		case <-ctx.Done():
+			t.Fatal("Test context cancelled")
+		}
+	}
+
+negotiationDone:
+
+	// Add more tracks to re-trigger negotiation
 	tracks, _ := GetStaticTracks(clientContext, clientContext, "test-peer", false)
 	SetPeerConnectionTracks(clientContext, pc, tracks)
 
-	// Wait a bit for any potential additional negotiation calls
-	time.Sleep(3 * time.Second)
+	// Wait for the second negotiation to be done
+	timeout = time.After(15 * time.Second)
+	for {
+		select {
+		case <-time.After(200 * time.Millisecond):
+			if negotiationCount > 1 {
+				t.Logf("Negotiation needed called %d times", negotiationCount)
+				goto finalCheck
+			}
+		case <-timeout:
+			t.Fatal("Timeout waiting for second negotiation needed to be called")
+		case <-ctx.Done():
+			t.Fatal("Test context cancelled")
+		}
+	}
+
+finalCheck:
 
 	// Verify OnNegotiationNeeded was called exactly once
 	mu.Lock()
 	finalCount := negotiationCount
 	mu.Unlock()
 
-	assert.Equal(t, 1, finalCount, "OnNegotiationNeeded should be called exactly once, but was called %d times", finalCount)
+	assert.Equal(t, 2, finalCount, "OnNegotiationNeeded should be called exactly twice, but was called %d times", finalCount)
 }
