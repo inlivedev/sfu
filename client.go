@@ -523,7 +523,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 			var existingSSRC webrtc.SSRC
 			existingStreamID := existingTrack.StreamID()
 			newStreamID := remoteTrack.StreamID()
-			
+
 			if existingTrack.IsSimulcast() {
 				// For simulcast, check if the same RID layer is being replaced
 				simulcastTrack := existingTrack.(*SimulcastTrack)
@@ -555,21 +555,21 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 			// Track replacement: same stream ID but different SSRC
 			if existingSSRC != 0 && existingSSRC != remoteTrack.SSRC() && existingStreamID == newStreamID {
 				if existingTrack.IsSimulcast() && remoteTrack.RID() != "" {
-					client.log.Infof("client: simulcast layer %s replacement detected for %s (stream: %s), old SSRC: %d, new SSRC: %d", 
+					client.log.Infof("client: simulcast layer %s replacement detected for %s (stream: %s), old SSRC: %d, new SSRC: %d",
 						remoteTrack.RID(), remoteTrackID, newStreamID, existingSSRC, remoteTrack.SSRC())
 					// For simulcast, we don't remove the entire track, just let AddRemoteTrack handle the layer replacement
 				} else {
-					client.log.Infof("client: track replacement detected for %s (stream: %s), old SSRC: %d, new SSRC: %d", 
+					client.log.Infof("client: track replacement detected for %s (stream: %s), old SSRC: %d, new SSRC: %d",
 						remoteTrackID, newStreamID, existingSSRC, remoteTrack.SSRC())
-					
+
 					// Remove old track to trigger cleanup and notify other clients
 					client.tracks.remove([]string{remoteTrackID})
-					
+
 					// Clear from pending published tracks if it exists there
 					client.pendingPublishedTracks.remove([]string{remoteTrackID})
 				}
 			} else if existingSSRC != 0 && existingSSRC != remoteTrack.SSRC() && existingStreamID != newStreamID {
-				client.log.Warnf("client: track ID collision detected for %s, existing stream: %s, new stream: %s", 
+				client.log.Warnf("client: track ID collision detected for %s, existing stream: %s, new stream: %s",
 					remoteTrackID, existingStreamID, newStreamID)
 			}
 		}
@@ -780,9 +780,6 @@ func (c *Client) Negotiate(offer webrtc.SessionDescription) (*webrtc.SessionDesc
 
 	defer func() {
 		c.isInRemoteNegotiation.Store(false)
-		if c.negotiationNeeded.Load() {
-			c.renegotiate(false)
-		}
 	}()
 
 	currentReceiversCount := 0

@@ -452,21 +452,6 @@ func CreatePeerPair(ctx context.Context, log logging.LeveledLogger, room *Room, 
 		}
 	})
 
-	if isSimulcast {
-		_ = AddSimulcastVideoTracks(ctx, iceConnectedCtx, pc, GenerateSecureToken(), peerName)
-
-		for _, sender := range pc.GetSenders() {
-			parameters := sender.GetParameters()
-			if parameters.Encodings[0].RID != "" {
-				simulcastI.SetSenderParameters(parameters)
-			}
-		}
-
-	} else {
-		tracks, done = GetStaticTracks(clientContext, iceConnectedCtx, peerName, loop)
-		SetPeerConnectionTracks(clientContext, pc, tracks)
-	}
-
 	allDone := make(chan bool)
 
 	pc.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
@@ -518,6 +503,26 @@ func CreatePeerPair(ctx context.Context, log logging.LeveledLogger, room *Room, 
 	opts.IceTrickle = isIceTrickle
 
 	client, _ = room.AddClient(id, id, opts)
+
+	pc.OnNegotiationNeeded(func() {
+		log.Infof("test: negotiation needed %s", peerName)
+		negotiate(pc, client, log, isIceTrickle)
+	})
+
+	if isSimulcast {
+		_ = AddSimulcastVideoTracks(ctx, iceConnectedCtx, pc, GenerateSecureToken(), peerName)
+
+		for _, sender := range pc.GetSenders() {
+			parameters := sender.GetParameters()
+			if parameters.Encodings[0].RID != "" {
+				simulcastI.SetSenderParameters(parameters)
+			}
+		}
+
+	} else {
+		tracks, done = GetStaticTracks(clientContext, iceConnectedCtx, peerName, loop)
+		SetPeerConnectionTracks(clientContext, pc, tracks)
+	}
 
 	client.OnTracksAdded(func(addedTracks []ITrack) {
 		setTracks := make(map[string]TrackType, 0)
@@ -591,8 +596,6 @@ func CreatePeerPair(ctx context.Context, log logging.LeveledLogger, room *Room, 
 			err = client.PeerConnection().PC().AddICECandidate(candidate.ToJSON())
 		})
 	}
-
-	negotiate(pc, client, log, isIceTrickle)
 
 	return peer, client, statsGetter, allDone
 }
