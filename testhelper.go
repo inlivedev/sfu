@@ -506,6 +506,11 @@ func CreatePeerPair(ctx context.Context, log logging.LeveledLogger, room *Room, 
 
 	pc.OnNegotiationNeeded(func() {
 		log.Infof("test: negotiation needed %s", peerName)
+		if client.state.Load() == ClientStateEnded {
+			log.Infof("test: negotiation canceled because client has ended")
+			return
+		}
+
 		negotiate(pc, client, log, isIceTrickle)
 	})
 
