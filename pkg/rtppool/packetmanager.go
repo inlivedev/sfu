@@ -12,10 +12,8 @@ import (
 )
 
 var (
-	errPacketReleased          = errors.New("packet has been released")
-	errFailedToCastPacketPool  = errors.New("failed to cast packet pool")
-	errFailedToCastHeaderPool  = errors.New("failed to cast header pool")
-	errFailedToCastPayloadPool = errors.New("failed to cast payload pool")
+	errPacketReleased         = errors.New("packet has been released")
+	errFailedToCastPacketPool = errors.New("failed to cast packet pool")
 )
 
 const maxPayloadLen = 1460
@@ -31,11 +29,11 @@ func NewPacketManager() *PacketManager {
 
 	m.PacketPool = &sync.Pool{
 		New: func() interface{} {
-			payload := m.PayloadPool.Get() // payload is *[]byte
+			payloadBuffer := m.PayloadPool.Get()
 			return &RetainablePacket{
 				header:  &rtp.Header{},
-				payload: *payload,                     // dereferences to []byte, copies slice header
-				attrMap: make(interceptor.Attributes), // Revert to make for map type
+				payload: *payloadBuffer,
+				attrMap: make(interceptor.Attributes),
 				manager: m,
 			}
 		},
@@ -48,8 +46,6 @@ func (m *PacketManager) NewPacket(header *rtp.Header, payload []byte, attr inter
 	if len(payload) > maxPayloadLen {
 		return nil, io.ErrShortBuffer
 	}
-
-	var ok bool
 
 	p, ok := m.PacketPool.Get().(*RetainablePacket)
 	if !ok {
@@ -64,15 +60,21 @@ func (m *PacketManager) NewPacket(header *rtp.Header, payload []byte, attr inter
 	*p.header = header.Clone()
 
 	if payload != nil {
+		if cap(p.payload) < len(payload) {
+			p.payload = make([]byte, len(payload))
+		} else {
+			p.payload = p.payload[:len(payload)]
+		}
 		copy(p.payload, payload)
+	} else {
+		p.payload = p.payload[:0]
 	}
 
-	// Direct map copy
-	if p.attrMap == nil { // Ensure map is initialized, though pool should do it.
+	if p.attrMap == nil {
 		p.attrMap = make(interceptor.Attributes)
 	}
-	for k, v := range attr { // attr is also map[string]interface{}
-		p.attrMap[k] = v // Correct assignment for a map
+	for k, v := range attr {
+		p.attrMap[k] = v
 	}
 
 	return p, nil
@@ -84,7 +86,7 @@ type RetainablePacket struct {
 	manager *PacketManager
 	header  *rtp.Header
 	payload []byte
-	attrMap interceptor.Attributes // Change type from interceptor.Attributes to underlying type
+	attrMap interceptor.Attributes
 }
 
 func (p *RetainablePacket) Header() *rtp.Header {
@@ -105,7 +107,6 @@ func (p *RetainablePacket) Attributes() interceptor.Attributes {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
 
-	// Return the map directly since interceptor.Attributes is just map[string]interface{}
 	return p.attrMap
 }
 
@@ -113,7 +114,6 @@ func (p *RetainablePacket) Retain() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.count == 0 {
-		// already released
 		return errPacketReleased
 	}
 	p.count++
@@ -126,15 +126,12 @@ func (p *RetainablePacket) Release() {
 	p.count--
 
 	if p.count == 0 {
-		// release back to pool
-		*p.header = rtp.Header{} // Reset header
+		*p.header = rtp.Header{}
+		p.payload = p.payload[:0]
 
-		p.payload = p.payload[:0] // Reset payload slice length
-
-		// Reset attributes
-		for k := range p.attrMap { // p.attrMap is map[string]interface{}
-			delete(p.attrMap, k) // Correct way to clear a map
+		for k := range p.attrMap {
+			delete(p.attrMap, k)
 		}
-		p.manager.PacketPool.Put(p) // Return RetainablePacket to its pool
+		p.manager.PacketPool.Put(p)
 	}
 }

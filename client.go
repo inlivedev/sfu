@@ -15,6 +15,7 @@ import (
 	"github.com/inlivedev/sfu/pkg/interceptors/playoutdelay"
 	"github.com/inlivedev/sfu/pkg/interceptors/voiceactivedetector"
 	"github.com/inlivedev/sfu/pkg/networkmonitor"
+	"github.com/inlivedev/sfu/pkg/pacer"
 	"github.com/pion/interceptor"
 	"github.com/pion/interceptor/pkg/cc"
 	"github.com/pion/interceptor/pkg/flexfec"
@@ -209,7 +210,7 @@ func DefaultClientOptions() ClientOptions {
 		EnablePlayoutDelay:   true,
 		EnableOpusDTX:        true,
 		EnableOpusInbandFEC:  true,
-		PacerType:            PacerTypeLeakyBucket,
+		PacerType:            PacerTypeNoop,
 		MinPlayoutDelay:      150,
 		MaxPlayoutDelay:      300,
 		JitterBufferMinWait:  20 * time.Millisecond,
@@ -293,12 +294,12 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 	congestionController, err := cc.NewInterceptor(func() (cc.BandwidthEstimator, error) {
 		var p gcc.Pacer
 		switch opts.PacerType {
-		case PacerTypeNoop:
-			p = gcc.NewNoOpPacer()
 		case PacerTypeLeakyBucket:
+			p = pacer.NewLeakyBucketPacer(opts.Log, int(s.bitrateConfigs.InitialBandwidth), false)
+		case PacerTypeNoop:
 			fallthrough
 		default:
-			p = gcc.NewLeakyBucketPacer(int(s.bitrateConfigs.InitialBandwidth))
+			p = gcc.NewNoOpPacer()
 		}
 
 		// if bw below 100_000, somehow the estimator will struggle to probe the bandwidth and will stuck there. So we set the min to 100_000

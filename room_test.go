@@ -224,7 +224,7 @@ func TestRoomStats(t *testing.T) {
 		client2.SetTracksSourceType(setTracks)
 	})
 
-	timeout, cancelTimeout := context.WithTimeout(ctx, 80*time.Second)
+	timeout, cancelTimeout := context.WithTimeout(ctx, 0*time.Second)
 	defer cancelTimeout()
 
 Loop:

@@ -34,7 +34,13 @@ func BenchmarkPacketManager(b *testing.B) {
 	var pool = New()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		p, _ := pool.PacketManager.NewPacket(header, payload, nil)
+		p, err := pool.PacketManager.NewPacket(header, payload, nil)
+		if err != nil {
+			b.Fatalf("NewPacket failed on iteration %d: %v", i, err)
+		}
+		if p == nil {
+			b.Fatalf("NewPacket returned nil packet on iteration %d", i)
+		}
 
 		p.Release()
 	}

@@ -208,6 +208,7 @@ func clientHandler(isDebug bool, conn *websocket.Conn, messageChan chan Request,
 	opts.EnableOpusDTX = true
 	opts.EnableVoiceDetection = true
 	opts.ReorderPackets = false
+	opts.PacerType = sfu.PacerTypeLeakyBucket // or sfu.PacerTypeLeakyBucket
 	client, err := r.AddClient(clientID, clientID, opts)
 	if err != nil {
 		log.Panic(err)
