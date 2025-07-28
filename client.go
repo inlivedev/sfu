@@ -39,6 +39,9 @@ const (
 	ClientTypeUpBridge   = "upbridge"
 	ClientTypeDownBridge = "downbridge"
 
+	PacerTypeNoop        = "noop"
+	PacerTypeLeakyBucket = "leaky_bucket"
+
 	QualityAudioRed = 11
 	QualityAudio    = 10
 	QualityHigh     = 9
@@ -75,6 +78,7 @@ type ClientOptions struct {
 	EnableOpusDTX        bool          `json:"enable_opus_dtx"`
 	EnableFlexFEC        bool          `json:"enable_flexfec"`
 	EnableOpusInbandFEC  bool          `json:"enable_opus_inband_fec"`
+	PacerType            string        `json:"pacer_type"`
 	// Configure the minimum playout delay that will be used by the client
 	// Recommendation:
 	// 0 ms: Certain gaming scenarios (likely without audio) where we will want to play the frame as soon as possible. Also, for remote desktop without audio where rendering a frame asap makes sense
@@ -205,6 +209,7 @@ func DefaultClientOptions() ClientOptions {
 		EnablePlayoutDelay:   true,
 		EnableOpusDTX:        true,
 		EnableOpusInbandFEC:  true,
+		PacerType:            PacerTypeLeakyBucket,
 		MinPlayoutDelay:      150,
 		MaxPlayoutDelay:      300,
 		JitterBufferMinWait:  20 * time.Millisecond,
@@ -234,10 +239,10 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		voiceactivedetector.RegisterAudioLevelHeaderExtension(m)
 	}
 
-	// // Create a InterceptorRegistry. This is the user configurable RTP/RTCP Pipeline.
-	// // This provides NACKs, RTCP Reports and other features. If you use `webrtc.NewPeerConnection`
-	// // this is enabled by default. If you are manually managing You MUST create a InterceptorRegistry
-	// // for each PeerConnection.
+	// Create a InterceptorRegistry. This is the user configurable RTP/RTCP Pipeline.
+	// This provides NACKs, RTCP Reports and other features. If you use `webrtc.NewPeerConnection`
+	// this is enabled by default. If you are manually managing You MUST create a InterceptorRegistry
+	// for each PeerConnection.
 	i := &interceptor.Registry{}
 
 	statsInterceptorFactory, err := stats.NewInterceptor()
@@ -286,14 +291,31 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 	// Passing `nil` means we use the default Estimation Algorithm which is Google Congestion Control.
 	// You can use the other ones that Pion provides, or write your own!
 	congestionController, err := cc.NewInterceptor(func() (cc.BandwidthEstimator, error) {
+		var p gcc.Pacer
+		switch opts.PacerType {
+		case PacerTypeNoop:
+			p = gcc.NewNoOpPacer()
+		case PacerTypeLeakyBucket:
+			fallthrough
+		default:
+			p = gcc.NewLeakyBucketPacer(int(s.bitrateConfigs.InitialBandwidth))
+		}
+
 		// if bw below 100_000, somehow the estimator will struggle to probe the bandwidth and will stuck there. So we set the min to 100_000
 		// TODO: we need to use packet loss based bandwidth adjuster when the bandwidth is below 100_000
-		return gcc.NewSendSideBWE(
+		bwe, err := gcc.NewSendSideBWE(
 			gcc.SendSideBWEInitialBitrate(int(s.bitrateConfigs.InitialBandwidth)),
-			// gcc.SendSideBWEPacer(pacer.NewLeakyBucketPacer(opts.Log, int(s.bitrateConfigs.InitialBandwidth), true)),
-			gcc.SendSideBWEPacer(gcc.NewNoOpPacer()),
-			// gcc.SendSideBWEPacer(gcc.NewLeakyBucketPacer(int(s.bitrateConfigs.InitialBandwidth))),
+			gcc.SendSideBWEPacer(p),
 		)
+		if err != nil {
+			return nil, err
+		}
+
+		bwe.OnTargetBitrateChange(func(bitrate int) {
+			p.SetTargetBitrate(bitrate)
+		})
+
+		return bwe, nil
 	})
 	if err != nil {
 		panic(err)
@@ -439,8 +461,6 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 						if track.ClientID() != client.ID() {
 							if err == ErrTrackIsNotExists {
 								availableTracks = append(availableTracks, track)
-							} else {
-								c.log.Errorf("client: track already exists")
 							}
 						}
 					}

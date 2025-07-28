@@ -512,11 +512,10 @@
 
             };
 
-            const offer=await peerConnection.createOffer()
-
-            await peerConnection.setLocalDescription(offer)
-
-            ws.send(JSON.stringify({type:'offer',data:offer.sdp}));
+            peerConnection.onnegotiationneeded = async function() {
+                console.log("onnegotiationneeded");
+                negotiate()
+            };
 			console.log("browser send")
 
             peerConnection.onicecandidate = function(e) {

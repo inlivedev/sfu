@@ -40,8 +40,10 @@ type VoiceDetector struct {
 }
 
 func newVAD(ctx context.Context, config Config, streamInfo *interceptor.StreamInfo) *VoiceDetector {
+	childCtx, cancel := context.WithCancel(ctx)
 	v := &VoiceDetector{
-		context:      ctx,
+		context:      childCtx,
+		cancel:       cancel,
 		config:       config,
 		streamInfo:   streamInfo,
 		channel:      make(chan VoicePacketData, 1024),
@@ -70,15 +72,11 @@ func (v *VoiceDetector) SSRC() uint32 {
 func (v *VoiceDetector) run() {
 	go func() {
 		ticker := time.NewTicker(v.config.TailMargin)
-		ctx, cancel := context.WithCancel(v.context)
-		v.cancel = cancel
-
 		bufferTicker := time.NewTicker(v.config.Interval)
 
 		defer func() {
 			bufferTicker.Stop()
 			ticker.Stop()
-			cancel()
 		}()
 
 		active := false
@@ -89,7 +87,7 @@ func (v *VoiceDetector) run() {
 
 		for {
 			select {
-			case <-ctx.Done():
+			case <-v.context.Done():
 				return
 			case <-bufferTicker.C:
 				if len(buffer) > 0 {
@@ -158,7 +156,11 @@ func (v *VoiceDetector) UpdateTrack(trackID, streamID string) {
 }
 
 func (v *VoiceDetector) Stop() {
-	v.cancel()
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.cancel != nil {
+		v.cancel()
+	}
 }
 
 func (v *VoiceDetector) updateStreamInfo(streamInfo *interceptor.StreamInfo) {

@@ -28,6 +28,11 @@ func (p *PeerConnection) Close() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
+	if p.pc.ConnectionState() == webrtc.PeerConnectionStateClosed ||
+		p.pc.ConnectionState() == webrtc.PeerConnectionStateFailed {
+		return nil
+	}
+
 	return p.pc.Close()
 }
 
