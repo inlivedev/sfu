@@ -241,6 +241,12 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 	// for each PeerConnection.
 	i := &interceptor.Registry{}
 
+	if opts.EnableFlexFEC {
+		if err := webrtc.ConfigureFlexFEC03(126, m, i); err != nil {
+			panic(err)
+		}
+	}
+
 	// Use the default set of Interceptors
 	if err := webrtc.RegisterDefaultInterceptors(m, i); err != nil {
 		panic(err)
@@ -257,12 +263,6 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 	})
 
 	i.Add(statsInterceptorFactory)
-
-	if opts.EnableFlexFEC {
-		if err = webrtc.ConfigureFlexFEC03(49, m, i); err != nil {
-			panic(err)
-		}
-	}
 
 	var vads = make(map[uint32]*voiceactivedetector.VoiceDetector)
 
