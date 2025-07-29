@@ -18,9 +18,7 @@ import (
 	"github.com/inlivedev/sfu/pkg/pacer"
 	"github.com/pion/interceptor"
 	"github.com/pion/interceptor/pkg/cc"
-	"github.com/pion/interceptor/pkg/flexfec"
 	"github.com/pion/interceptor/pkg/gcc"
-	"github.com/pion/interceptor/pkg/nack"
 	"github.com/pion/interceptor/pkg/stats"
 	"github.com/pion/logging"
 	"github.com/pion/rtcp"
@@ -246,6 +244,11 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 	// for each PeerConnection.
 	i := &interceptor.Registry{}
 
+	// Use the default set of Interceptors
+	if err := webrtc.RegisterDefaultInterceptors(m, i); err != nil {
+		panic(err)
+	}
+
 	statsInterceptorFactory, err := stats.NewInterceptor()
 	if err != nil {
 		panic(err)
@@ -257,6 +260,12 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 	})
 
 	i.Add(statsInterceptorFactory)
+
+	if opts.EnableFlexFEC {
+		if err = webrtc.ConfigureFlexFEC03(49, mediaEngine, i); err != nil {
+			panic(err)
+		}
+	}
 
 	var vads = make(map[uint32]*voiceactivedetector.VoiceDetector)
 
@@ -273,15 +282,6 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		})
 
 		i.Add(vadInterceptorFactory)
-	}
-
-	if opts.EnableFlexFEC {
-		flexfecInterceptor, err := flexfec.NewFecInterceptor()
-		if err != nil {
-			panic(err)
-		}
-
-		i.Add(flexfecInterceptor)
 	}
 
 	estimatorChan := make(chan cc.BandwidthEstimator, 1)
@@ -337,11 +337,6 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		playoutDelayInterceptor := playoutdelay.NewInterceptor(opts.Log, opts.MinPlayoutDelay, opts.MaxPlayoutDelay)
 
 		i.Add(playoutDelayInterceptor)
-	}
-
-	// Use the default set of Interceptors
-	if err := registerInterceptors(m, i); err != nil {
-		panic(err)
 	}
 
 	// Create a new RTCPeerConnection
@@ -1984,30 +1979,6 @@ func (c *Client) onVoiceReceiveDetected(activity voiceactivedetector.VoiceActivi
 
 func (c *Client) Tracks() []ITrack {
 	return c.tracks.GetTracks()
-}
-
-func registerInterceptors(m *webrtc.MediaEngine, interceptorRegistry *interceptor.Registry) error {
-	// ConfigureNack will setup everything necessary for handling generating/responding to nack messages.
-	generator, err := nack.NewGeneratorInterceptor()
-	if err != nil {
-		return err
-	}
-
-	responder, err := nack.NewResponderInterceptor()
-	if err != nil {
-		return err
-	}
-
-	m.RegisterFeedback(webrtc.RTCPFeedback{Type: "nack"}, webrtc.RTPCodecTypeVideo)
-	m.RegisterFeedback(webrtc.RTCPFeedback{Type: "nack", Parameter: "pli"}, webrtc.RTPCodecTypeVideo)
-	interceptorRegistry.Add(responder)
-	interceptorRegistry.Add(generator)
-
-	if err := webrtc.ConfigureRTCPReports(interceptorRegistry); err != nil {
-		return err
-	}
-
-	return webrtc.ConfigureTWCCSender(m, interceptorRegistry)
 }
 
 func generateClientReceiverStats(c *Client, track IRemoteTrack, stat stats.Stats) (TrackReceivedStats, error) {

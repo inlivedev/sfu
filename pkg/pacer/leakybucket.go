@@ -174,12 +174,9 @@ Loop:
 			if p.allowDuplicate {
 				queue.InsertAfter(newItem, e)
 
-				break Loop
 			}
 
-			p.log.Warnf("packet cache: packet sequence ", pkt.Header().SequenceNumber, " already exists in the cache, will not adding the packet")
-
-			return 0, ErrDuplicate
+			break Loop
 		}
 
 		if currentCache.packet.Header().SequenceNumber < pkt.Header().SequenceNumber && pkt.Header().SequenceNumber-currentCache.packet.Header().SequenceNumber < uint16SizeHalf {
