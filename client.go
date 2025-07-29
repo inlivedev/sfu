@@ -382,6 +382,9 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		log:                            opts.Log,
 	}
 
+	var trackAddedTimer *time.Timer
+	var trackAddedMutex sync.Mutex
+
 	client.onTrack = func(track ITrack) {
 		if err := client.pendingPublishedTracks.Add(track); err == ErrTrackExists {
 			s.log.Errorf("client: client %s track already added ", track.ID())
@@ -389,40 +392,29 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 			return
 		}
 
-		// Wait for all expected tracks before publishing for peer clients
-		initialReceiverCount := client.initialReceiverCount.Load()
-		currentPendingCount := client.pendingPublishedTracks.Length()
-
-		if client.Type() == ClientTypePeer && int(initialReceiverCount) > 0 {
-			// Set wait start time on first track
-			if currentPendingCount == 1 {
-				client.trackWaitStartTime = time.Now()
-			}
-
-			// Check if we should continue waiting
-			waitTimeout := 5 * time.Second // Configurable timeout
-			timeoutReached := !client.trackWaitStartTime.IsZero() && time.Since(client.trackWaitStartTime) > waitTimeout
-
-			if currentPendingCount < int(initialReceiverCount) && !timeoutReached {
-				s.log.Infof("sfu: client %s waiting for more tracks: %d/%d",
-					client.ID(), currentPendingCount, initialReceiverCount)
-				return // Don't notify yet, wait for more tracks
-			}
-
-			if timeoutReached {
-				s.log.Warnf("sfu: client %s track wait timeout reached, publishing %d/%d tracks",
-					client.ID(), currentPendingCount, initialReceiverCount)
-			}
+		trackAddedMutex.Lock()
+		// Reset the timer if it's already running
+		if trackAddedTimer != nil {
+			trackAddedTimer.Stop()
 		}
 
-		// All expected tracks received or not a peer client
-		addedTracks := client.pendingPublishedTracks.GetTracks()
-		s.log.Infof("sfu: client %s publishing %d tracks (expected: %d)",
-			client.ID(), len(addedTracks), initialReceiverCount)
+		// Start a new timer for 100ms delay
+		trackAddedTimer = time.AfterFunc(100*time.Millisecond, func() {
+			// Don't hold mutex when calling the callback to avoid deadlock
+			addedTracks := client.pendingPublishedTracks.GetTracks()
+			s.log.Infof("sfu: client %s publishing %d tracks",
+				client.ID(), len(addedTracks))
 
-		if client.onTracksAdded != nil {
-			client.onTracksAdded(addedTracks)
-		}
+			if client.onTracksAdded != nil {
+				client.onTracksAdded(addedTracks)
+			}
+
+			// Clear timer reference after callback
+			trackAddedMutex.Lock()
+			trackAddedTimer = nil
+			trackAddedMutex.Unlock()
+		})
+		trackAddedMutex.Unlock()
 	}
 
 	client.peerConnection.PC().OnSignalingStateChange(func(state webrtc.SignalingState) {
@@ -527,64 +519,6 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		if remoteTrackID == "" {
 			client.log.Errorf("client: error remote track id is empty")
 			return
-		}
-
-		// Check if this is a track replacement (same track ID but different SSRC)
-		existingTrack, err := client.tracks.Get(remoteTrackID)
-		if err == nil && existingTrack != nil {
-			// Track exists, check if SSRC changed but stream ID remained the same (indicating track replacement)
-			var existingSSRC webrtc.SSRC
-			existingStreamID := existingTrack.StreamID()
-			newStreamID := remoteTrack.StreamID()
-
-			if existingTrack.IsSimulcast() {
-				// For simulcast, check if the same RID layer is being replaced
-				simulcastTrack := existingTrack.(*SimulcastTrack)
-				simulcastTrack.mu.Lock()
-				switch remoteTrack.RID() {
-				case "high":
-					if simulcastTrack.remoteTrackHigh != nil {
-						existingSSRC = simulcastTrack.remoteTrackHigh.track.SSRC()
-					}
-				case "mid":
-					if simulcastTrack.remoteTrackMid != nil {
-						existingSSRC = simulcastTrack.remoteTrackMid.track.SSRC()
-					}
-				case "low":
-					if simulcastTrack.remoteTrackLow != nil {
-						existingSSRC = simulcastTrack.remoteTrackLow.track.SSRC()
-					}
-				}
-				simulcastTrack.mu.Unlock()
-			} else if remoteTrack.RID() == "" {
-				// Non-simulcast track
-				if existingTrack.Kind() == webrtc.RTPCodecTypeAudio {
-					existingSSRC = existingTrack.(*AudioTrack).SSRC()
-				} else {
-					existingSSRC = existingTrack.(*Track).SSRC()
-				}
-			}
-
-			// Track replacement: same stream ID but different SSRC
-			if existingSSRC != 0 && existingSSRC != remoteTrack.SSRC() && existingStreamID == newStreamID {
-				if existingTrack.IsSimulcast() && remoteTrack.RID() != "" {
-					client.log.Infof("client: simulcast layer %s replacement detected for %s (stream: %s), old SSRC: %d, new SSRC: %d",
-						remoteTrack.RID(), remoteTrackID, newStreamID, existingSSRC, remoteTrack.SSRC())
-					// For simulcast, we don't remove the entire track, just let AddRemoteTrack handle the layer replacement
-				} else {
-					client.log.Infof("client: track replacement detected for %s (stream: %s), old SSRC: %d, new SSRC: %d",
-						remoteTrackID, newStreamID, existingSSRC, remoteTrack.SSRC())
-
-					// Remove old track to trigger cleanup and notify other clients
-					client.tracks.remove([]string{remoteTrackID})
-
-					// Clear from pending published tracks if it exists there
-					client.pendingPublishedTracks.remove([]string{remoteTrackID})
-				}
-			} else if existingSSRC != 0 && existingSSRC != remoteTrack.SSRC() && existingStreamID != newStreamID {
-				client.log.Warnf("client: track ID collision detected for %s, existing stream: %s, new stream: %s",
-					remoteTrackID, existingStreamID, newStreamID)
-			}
 		}
 
 		onPLI := func() {
