@@ -231,9 +231,6 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		panic(err)
 	}
 
-	// let the client knows that we're receiving simulcast tracks
-	RegisterSimulcastHeaderExtensions(m, webrtc.RTPCodecTypeVideo)
-
 	if opts.EnableVoiceDetection {
 		voiceactivedetector.RegisterAudioLevelHeaderExtension(m)
 	}
@@ -262,7 +259,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 	i.Add(statsInterceptorFactory)
 
 	if opts.EnableFlexFEC {
-		if err = webrtc.ConfigureFlexFEC03(49, mediaEngine, i); err != nil {
+		if err = webrtc.ConfigureFlexFEC03(49, m, i); err != nil {
 			panic(err)
 		}
 	}
