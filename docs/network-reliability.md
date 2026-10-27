@@ -8,7 +8,7 @@ Real-world networks are rarely perfect. Packet loss, jitter, and congestion can 
 The most efficient way to handle packet loss. When the receiver detects a missing RTP packet, it sends a NACK feedback message (via RTCP) to the sender, asking for a retransmission.
 
 *   **Best for**: Moderate packet loss and low-latency environments.
-*   **SFU Support**: Enabled by default for all video tracks. The SFU caches recent packets and re-sends them upon request.
+*   **SFU Support**: Enabled by default for all video tracks. The SFU caches recent packets and re-sends them upon request. Retransmissions are rate limited to the congestion controller's target bitrate, so a burst of NACKs on a congested link does not add to the congestion.
 
 ### 2. RED (Redundancy Encoding)
 A method specifically used for audio (Opus). The sender includes a copy of the *previous* audio packet inside the *current* packet. If one packet is lost, the receiver can still recover the audio from the next one.

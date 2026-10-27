@@ -62,6 +62,20 @@ func newClientStats(c *Client) *ClientStats {
 	return cstats
 }
 
+// sentWireBytes returns the RTP bytes sent for a stream, including headers and padding.
+// Since interceptor v0.1.51 BytesSent only counts the payload, and headers plus padding are
+// counted in HeaderBytesSent. Bitrates are compared against the bandwidth estimate, which
+// counts wire bytes, so both must be included.
+func sentWireBytes(s stats.Stats) uint64 {
+	return s.OutboundRTPStreamStats.BytesSent + s.OutboundRTPStreamStats.HeaderBytesSent
+}
+
+// receivedWireBytes returns the RTP bytes received for a stream, including headers and padding.
+// See sentWireBytes.
+func receivedWireBytes(s stats.Stats) uint64 {
+	return s.InboundRTPStreamStats.BytesReceived + s.InboundRTPStreamStats.HeaderBytesReceived
+}
+
 func (c *ClientStats) monitorBitrates(ctx context.Context) {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
@@ -85,15 +99,17 @@ func (c *ClientStats) updateSenderBitrates(lastSenderBytesSent map[string]uint64
 	defer c.senderMu.Unlock()
 
 	for id, stats := range c.senders {
+		bytesSent := sentWireBytes(stats)
+
 		lastBytesSent, ok := lastSenderBytesSent[id]
 		if !ok {
-			lastSenderBytesSent[id] = stats.OutboundRTPStreamStats.BytesSent
+			lastSenderBytesSent[id] = bytesSent
 			continue
 		}
 
-		delta := stats.OutboundRTPStreamStats.BytesSent - lastBytesSent
+		delta := bytesSent - lastBytesSent
 
-		lastSenderBytesSent[id] = stats.OutboundRTPStreamStats.BytesSent
+		lastSenderBytesSent[id] = bytesSent
 
 		c.senderBitrates[id] = uint32(delta) * 8
 	}
@@ -106,15 +122,17 @@ func (c *ClientStats) updateReceiverBitrates(lastReceiverBytesSent map[string]ui
 	defer c.receiverMu.Unlock()
 
 	for id, stats := range c.receivers {
+		bytesReceived := receivedWireBytes(stats)
+
 		lastBytesReceived, ok := lastReceiverBytesSent[id]
 		if !ok {
-			lastReceiverBytesSent[id] = stats.InboundRTPStreamStats.BytesReceived
+			lastReceiverBytesSent[id] = bytesReceived
 			continue
 		}
 
-		delta := stats.InboundRTPStreamStats.BytesReceived - lastBytesReceived
+		delta := bytesReceived - lastBytesReceived
 
-		lastReceiverBytesSent[id] = stats.InboundRTPStreamStats.BytesReceived
+		lastReceiverBytesSent[id] = bytesReceived
 
 		c.receiverBitrates[id] = uint32(delta) * 8
 	}
