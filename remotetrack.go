@@ -79,6 +79,8 @@ func (t *remoteTrack) readRTP() {
 	defer t.onEnded()
 
 	buffer := make([]byte, 1500)
+	duplicates := &duplicateFilter{}
+
 	for {
 		select {
 		case <-readCtx.Done():
@@ -110,6 +112,12 @@ func (t *remoteTrack) readRTP() {
 
 			if err := p.Unmarshal(buffer[:n]); err != nil {
 				t.log.Errorf("remotetrack: unmarshal error: %s", err.Error())
+				t.rtppool.PutPacket(p)
+				continue
+			}
+
+			// drop copies of packets we already forwarded, mostly RTX probe padding
+			if duplicates.isDuplicate(p.SequenceNumber) {
 				t.rtppool.PutPacket(p)
 				continue
 			}

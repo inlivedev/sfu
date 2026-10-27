@@ -134,34 +134,43 @@ func (t *clientTrack) push(p *rtp.Packet, _ QualityLevel) {
 		return
 	}
 
-	ok, newseqno, _ := t.packetmap.Map(p.SequenceNumber, 0)
-	if !ok {
-		return
-	}
-
-	p.SequenceNumber = newseqno
-
 	if t.Kind() == webrtc.RTPCodecTypeAudio {
 		// do something here with audio level
 	}
 
-	// if video quality is none we need to send blank frame
-	// make sure the player is paused when the quality is none.
 	// quality none only possible when the video is not displayed
-	if t.Kind() == webrtc.RTPCodecTypeVideo {
-		quality := t.getQuality()
-		if quality == QualityNone {
-			if ok := t.packetmap.Drop(p.SequenceNumber, 0); ok {
-				return
-			}
+	blank := t.Kind() == webrtc.RTPCodecTypeVideo && t.getQuality() == QualityNone
 
-			p.Payload = p.Payload[:0]
-		}
+	if !t.mapSequence(p, blank) {
+		return
 	}
 
 	if err := t.localTrack.WriteRTP(p); err != nil {
 		t.client.log.Errorf("clienttrack: error on write rtp", err)
 	}
+}
+
+// mapSequence rewrites the sequence number of p and reports whether p should be sent.
+// When blank is set, p is dropped if the packet map can hide the gap from the receiver,
+// otherwise it is sent with an empty payload so the player pauses.
+func (t *clientTrack) mapSequence(p *rtp.Packet, blank bool) bool {
+	// Drop needs the original sequence number, before Map moves past it
+	if blank && t.packetmap.Drop(p.SequenceNumber, 0) {
+		return false
+	}
+
+	ok, newseqno, _ := t.packetmap.Map(p.SequenceNumber, 0)
+	if !ok {
+		return false
+	}
+
+	p.SequenceNumber = newseqno
+
+	if blank {
+		p.Payload = p.Payload[:0]
+	}
+
+	return true
 }
 
 func (t *clientTrack) LocalTrack() *webrtc.TrackLocalStaticRTP {

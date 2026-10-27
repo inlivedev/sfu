@@ -4,6 +4,7 @@ import (
 	"context"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/inlivedev/sfu/pkg/packetmap"
 	"github.com/pion/rtp"
@@ -22,7 +23,8 @@ type simulcastClientTrack struct {
 	remoteTrack             *SimulcastTrack
 	baseTrack               *baseTrack
 	lastBlankSequenceNumber *atomic.Uint32
-	sequenceNumber          *atomic.Uint32
+	writeMu                 sync.Mutex
+	rewriter                *simulcastRewriter
 	lastQuality             *atomic.Uint32
 	paddingTS               *atomic.Uint32
 	maxQuality              *atomic.Uint32
@@ -46,8 +48,6 @@ func newSimulcastClientTrack(c *Client, t *SimulcastTrack) *simulcastClientTrack
 
 	lastQuality := &atomic.Uint32{}
 
-	sequenceNumber := &atomic.Uint32{}
-
 	lastTimestamp := &atomic.Uint32{}
 
 	ctx, cancel := context.WithCancel(t.context)
@@ -63,7 +63,7 @@ func newSimulcastClientTrack(c *Client, t *SimulcastTrack) *simulcastClientTrack
 		localTrack:              track,
 		remoteTrack:             t,
 		baseTrack:               t.base,
-		sequenceNumber:          sequenceNumber,
+		rewriter:                newSimulcastRewriter(t.base.codec.ClockRate),
 		lastQuality:             lastQuality,
 		paddingTS:               &atomic.Uint32{},
 		maxQuality:              &atomic.Uint32{},
@@ -106,11 +106,21 @@ func (t *simulcastClientTrack) isFirstKeyframePacket(p *rtp.Packet) bool {
 }
 
 func (t *simulcastClientTrack) send(p *rtp.Packet, quality QualityLevel) {
+	// each layer is pushed from its own read goroutine, so rewriting and writing
+	// must be serialized to keep the outgoing sequence numbers in order
+	t.writeMu.Lock()
+	defer t.writeMu.Unlock()
+
+	// the quality may have switched since push checked it
+	if t.LastQuality() != quality {
+		return
+	}
+
 	t.lastTimestamp.Store(p.Timestamp)
 
-	t.rewritePacket(p, quality)
-
-	// t.client.log.Infof("track: ", t.id, " send packet with quality ", quality, " and sequence number ", p.SequenceNumber)
+	if !t.rewriter.rewrite(p, quality, time.Now()) {
+		return
+	}
 
 	t.writeRTP(p)
 }
@@ -151,7 +161,7 @@ func (t *simulcastClientTrack) push(p *rtp.Packet, quality QualityLevel) {
 	}
 
 	// check if it's a first packet to send
-	if currentQuality == QualityNone && t.sequenceNumber.Load() == 0 {
+	if currentQuality == QualityNone && !t.rewriter.hasStarted() {
 		// we try to send the low quality first	if the track is active and fallback to upper quality if not
 		if t.remoteTrack.GetRemoteTrack(QualityLow) != nil && quality == QualityLow {
 			t.lastQuality.Store(uint32(QualityLow))
@@ -294,26 +304,85 @@ func (t *simulcastClientTrack) IsScaleable() bool {
 	return false
 }
 
-func (t *simulcastClientTrack) rewritePacket(p *rtp.Packet, quality QualityLevel) {
-	t.remoteTrack.mu.RLock()
-	defer t.remoteTrack.mu.RUnlock()
-	// make sure the timestamp and sequence number is consistent from the previous packet even it is not the same track
-	sequenceDelta := uint16(0)
-	// credit to https://github.com/k0nserv for helping me with this on Pion Slack channel
-	switch quality {
-	case QualityHigh:
-		p.Timestamp = t.remoteTrack.baseTS + ((p.Timestamp - t.remoteTrack.remoteTrackHighBaseTS) - t.remoteTrack.remoteTrackHighBaseTS)
-		sequenceDelta = t.remoteTrack.highSequence - t.remoteTrack.lastHighSequence
-	case QualityMid:
-		p.Timestamp = t.remoteTrack.baseTS + ((p.Timestamp - t.remoteTrack.remoteTrackMidBaseTS) - t.remoteTrack.remoteTrackMidBaseTS)
-		sequenceDelta = t.remoteTrack.midSequence - t.remoteTrack.lastMidSequence
-	case QualityLow:
-		p.Timestamp = t.remoteTrack.baseTS + ((p.Timestamp - t.remoteTrack.remoteTrackLowBaseTS) - t.remoteTrack.remoteTrackLowBaseTS)
-		sequenceDelta = t.remoteTrack.lowSequence - t.remoteTrack.lastLowSequence
+// simulcastRewriter maps packets from the simulcast layers onto one outgoing
+// stream. The sequence number and timestamp offsets are fixed while a layer is
+// forwarded and re-anchored on every layer switch, so the outgoing stream stays
+// contiguous and monotonic. Retransmissions of the current layer keep their
+// place, and packets from before the switch are dropped because their outgoing
+// sequence numbers belong to the previous layer. It is not safe for concurrent use.
+type simulcastRewriter struct {
+	clockRate uint32
+	started   bool
+	layer     QualityLevel
+	anchorSeq uint16
+	seqOffset uint16
+	tsOffset  uint32
+	lastSeq   uint16
+	lastTS    uint32
+	lastTime  time.Time
+}
+
+func newSimulcastRewriter(clockRate uint32) *simulcastRewriter {
+	if clockRate == 0 {
+		clockRate = 90000
 	}
 
-	t.sequenceNumber.Add(uint32(sequenceDelta))
-	p.SequenceNumber = uint16(t.sequenceNumber.Load())
+	return &simulcastRewriter{clockRate: clockRate}
+}
+
+func (r *simulcastRewriter) hasStarted() bool {
+	return r.started
+}
+
+// rewrite sets the outgoing sequence number and timestamp of p, a packet of the
+// given layer. It returns false if the packet must be dropped.
+func (r *simulcastRewriter) rewrite(p *rtp.Packet, layer QualityLevel, now time.Time) bool {
+	if !r.started || layer != r.layer {
+		r.anchor(p, layer, now)
+	} else if int16(p.SequenceNumber-r.anchorSeq) < 0 {
+		// sent before we switched to this layer
+		return false
+	}
+
+	seq := p.SequenceNumber + r.seqOffset
+	ts := p.Timestamp + r.tsOffset
+
+	if int16(seq-r.lastSeq) > 0 {
+		r.lastSeq = seq
+		r.lastTS = ts
+		r.lastTime = now
+	}
+
+	p.SequenceNumber = seq
+	p.Timestamp = ts
+
+	return true
+}
+
+func (r *simulcastRewriter) anchor(p *rtp.Packet, layer QualityLevel, now time.Time) {
+	r.layer = layer
+	r.anchorSeq = p.SequenceNumber
+
+	if !r.started {
+		r.started = true
+		r.seqOffset = 0
+		r.tsOffset = 0
+		r.lastSeq = p.SequenceNumber - 1
+		r.lastTS = p.Timestamp
+		r.lastTime = now
+
+		return
+	}
+
+	// advance the timestamp by the wall clock time since the last packet, so the
+	// new layer's frames continue after the previous layer's frames
+	elapsed := uint32(max(now.Sub(r.lastTime), 0).Milliseconds()) * (r.clockRate / 1000)
+	if elapsed == 0 {
+		elapsed = 1
+	}
+
+	r.seqOffset = r.lastSeq + 1 - p.SequenceNumber
+	r.tsOffset = r.lastTS + elapsed - p.Timestamp
 }
 
 func (t *simulcastClientTrack) RequestPLI() {

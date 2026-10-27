@@ -158,8 +158,14 @@ func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 		return
 	}
 
-	quality := t.getQuality()
+	if t.rewrite(p, vp9Packet, t.getQuality()) {
+		t.send(p)
+	}
+}
 
+// rewrite applies the layer selection for quality to p and maps its sequence number.
+// It reports whether p should be sent.
+func (t *scaleableClientTrack) rewrite(p *rtp.Packet, vp9Packet *codecs.VP9Packet, quality QualityLevel) bool {
 	qualityPreset := qualityLevelToPreset(quality)
 
 	targetSID := qualityPreset.GetSID()
@@ -245,10 +251,16 @@ func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 		shouldDrop = true
 	}
 
+	// Quality none only possible when the video is not displayed
+	if quality == QualityNone {
+		shouldDrop = true
+	}
+
+	// Drop needs the original sequence number, before Map moves past it
 	if shouldDrop {
 		ok := t.packetmap.Drop(p.SequenceNumber, vp9Packet.PictureID)
 		if ok {
-			return
+			return false
 		}
 	}
 
@@ -259,35 +271,20 @@ func (t *scaleableClientTrack) push(p *rtp.Packet, _ QualityLevel) {
 		p.Marker = true
 	}
 
-	ok, newseqno, piddelta := t.packetmap.Map(p.SequenceNumber, vp9Packet.PictureID)
+	ok, newseqno, _ := t.packetmap.Map(p.SequenceNumber, vp9Packet.PictureID)
 	if !ok {
-		return
-	}
-
-	marker := (p.Payload[1] & 0x80) != 0
-	if marker && newseqno == p.SequenceNumber && piddelta == 0 {
-		t.send(p)
-		return
-	}
-
-	if marker {
-		p.Payload[1] |= 0x80
+		return false
 	}
 
 	p.SequenceNumber = newseqno
 
-	// If quality is none we need to send blank frame
-	// Make sure the player is paused when the quality is none.
-	// Quality none only possible when the video is not displayed
+	// The packet couldn't be dropped without leaving a gap, so send it empty
+	// to keep the player paused while the quality is none
 	if quality == QualityNone {
-		if ok := t.packetmap.Drop(p.SequenceNumber, vp9Packet.PictureID); ok {
-			return
-		}
-
 		p.Payload = p.Payload[:0]
 	}
 
-	t.send(p)
+	return true
 }
 
 func (t *scaleableClientTrack) send(p *rtp.Packet) {
