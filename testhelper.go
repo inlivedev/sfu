@@ -358,6 +358,11 @@ func GetMediaEngine() *webrtc.MediaEngine {
 }
 
 func CreatePeerPair(ctx context.Context, log logging.LeveledLogger, room *Room, iceServers []webrtc.ICEServer, peerName string, loop, isSimulcast bool, isIceTrickle bool) (*PC, *Client, stats.Getter, chan bool) {
+	return createPeerPair(ctx, log, room, iceServers, peerName, loop, isSimulcast, isIceTrickle)
+}
+
+// createPeerPair is CreatePeerPair with extra interceptors added to the peer's registry before the default ones.
+func createPeerPair(ctx context.Context, log logging.LeveledLogger, room *Room, iceServers []webrtc.ICEServer, peerName string, loop, isSimulcast bool, isIceTrickle bool, interceptors ...interceptor.Factory) (*PC, *Client, stats.Getter, chan bool) {
 	clientContext, cancelClient := context.WithCancel(ctx)
 	var (
 		client      *Client
@@ -368,6 +373,10 @@ func CreatePeerPair(ctx context.Context, log logging.LeveledLogger, room *Room, 
 
 	i := &interceptor.Registry{}
 	var simulcastI *simulcast.Interceptor
+
+	for _, factory := range interceptors {
+		i.Add(factory)
+	}
 
 	if isSimulcast {
 		simulcastFactory := simulcast.NewInterceptor()

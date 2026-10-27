@@ -46,6 +46,8 @@ type baseTrack struct {
 	isScreen     *atomic.Bool // source of the track, can be media or screen
 	clientTracks *clientTrackList
 	pool         *rtppool.RTPPool
+	// header extensions negotiated with the publisher, nil when unknown
+	headerExtensions []webrtc.RTPHeaderExtensionParameter
 }
 
 type ITrack interface {
@@ -85,19 +87,20 @@ type AudioTrack struct {
 	vadCallbacks []func([]voiceactivedetector.VoicePacketData)
 }
 
-func newTrack(ctx context.Context, client *Client, trackRemote IRemoteTrack, minWait, maxWait, pliInterval time.Duration, onPLI func(), stats stats.Getter, onStatsUpdated func(*stats.Stats)) ITrack {
+func newTrack(ctx context.Context, client *Client, trackRemote IRemoteTrack, headerExtensions []webrtc.RTPHeaderExtensionParameter, minWait, maxWait, pliInterval time.Duration, onPLI func(), stats stats.Getter, onStatsUpdated func(*stats.Stats)) ITrack {
 	ctList := newClientTrackList()
 	pool := rtppool.New()
 	baseTrack := &baseTrack{
-		id:           trackRemote.ID(),
-		isScreen:     &atomic.Bool{},
-		msid:         trackRemote.Msid(),
-		streamid:     trackRemote.StreamID(),
-		client:       client,
-		kind:         trackRemote.Kind(),
-		codec:        trackRemote.Codec(),
-		clientTracks: ctList,
-		pool:         pool,
+		id:               trackRemote.ID(),
+		isScreen:         &atomic.Bool{},
+		msid:             trackRemote.Msid(),
+		streamid:         trackRemote.StreamID(),
+		client:           client,
+		kind:             trackRemote.Kind(),
+		codec:            trackRemote.Codec(),
+		clientTracks:     ctList,
+		pool:             pool,
+		headerExtensions: headerExtensions,
 	}
 
 	t := &Track{
@@ -402,20 +405,21 @@ type SimulcastTrack struct {
 	lastNilTrackWarnTS          atomic.Int64
 }
 
-func newSimulcastTrack(client *Client, track IRemoteTrack, minWait, maxWait, pliInterval time.Duration, onPLI func(), stats stats.Getter, onStatsUpdated func(*stats.Stats)) ITrack {
+func newSimulcastTrack(client *Client, track IRemoteTrack, headerExtensions []webrtc.RTPHeaderExtensionParameter, minWait, maxWait, pliInterval time.Duration, onPLI func(), stats stats.Getter, onStatsUpdated func(*stats.Stats)) ITrack {
 
 	t := &SimulcastTrack{
 		mu: sync.RWMutex{},
 		base: &baseTrack{
-			id:           track.ID(),
-			isScreen:     &atomic.Bool{},
-			msid:         track.Msid(),
-			streamid:     track.StreamID(),
-			client:       client,
-			kind:         track.Kind(),
-			codec:        track.Codec(),
-			clientTracks: newClientTrackList(),
-			pool:         rtppool.New(),
+			id:               track.ID(),
+			isScreen:         &atomic.Bool{},
+			msid:             track.Msid(),
+			streamid:         track.StreamID(),
+			client:           client,
+			kind:             track.Kind(),
+			codec:            track.Codec(),
+			clientTracks:     newClientTrackList(),
+			pool:             rtppool.New(),
+			headerExtensions: headerExtensions,
 		},
 		lastReadHighTS:              &atomic.Int64{},
 		lastReadMidTS:               &atomic.Int64{},

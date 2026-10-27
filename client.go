@@ -163,6 +163,7 @@ type Client struct {
 	// published tracks are the remote tracks from other clients that are published to this client
 	publishedTracks                   *trackList
 	pendingRemoteRenegotiation        *atomic.Bool
+	negotiations                      atomic.Uint64 // completed negotiations, client tracks re-read their mid and extension IDs when it changes
 	receiveRED                        bool
 	state                             *atomic.Value
 	sfu                               *SFU
@@ -433,6 +434,10 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 	}
 
 	client.peerConnection.PC().OnSignalingStateChange(func(state webrtc.SignalingState) {
+		if state == webrtc.SignalingStateStable {
+			client.negotiations.Add(1)
+		}
+
 		if state == webrtc.SignalingStateStable && client.pendingRemoteRenegotiation.Load() {
 			client.pendingRemoteRenegotiation.Store(false)
 			client.allowRemoteRenegotiation()
@@ -556,7 +561,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 			minWait := opts.JitterBufferMinWait
 			maxWait := opts.JitterBufferMaxWait
 
-			track = newTrack(client.context, client, remoteTrack, minWait, maxWait, s.pliInterval, onPLI, client.statsGetter, onStatsUpdated)
+			track = newTrack(client.context, client, remoteTrack, receiver.GetParameters().HeaderExtensions, minWait, maxWait, s.pliInterval, onPLI, client.statsGetter, onStatsUpdated)
 			track.OnEnded(func() {
 				client.stats.removeReceiverStats(remoteTrack.ID() + remoteTrack.RID())
 				client.tracks.remove([]string{remoteTrack.ID()})
@@ -605,7 +610,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 
 			if err != nil {
 				// if track not found, add it
-				track = newSimulcastTrack(client, remoteTrack, opts.JitterBufferMinWait, opts.JitterBufferMaxWait, s.pliInterval, onPLI, client.statsGetter, onStatsUpdated)
+				track = newSimulcastTrack(client, remoteTrack, receiver.GetParameters().HeaderExtensions, opts.JitterBufferMinWait, opts.JitterBufferMaxWait, s.pliInterval, onPLI, client.statsGetter, onStatsUpdated)
 				if err := client.tracks.Add(track); err != nil {
 					client.log.Errorf("client: error add track ", err)
 				}
@@ -1069,6 +1074,8 @@ func (c *Client) setClientTrack(t ITrack) iClientTrack {
 		c.log.Errorf("client: error on adding track ", err)
 		return nil
 	}
+
+	outputTrack.setTransceiver(senderTcv)
 
 	// TODO: change to non goroutine
 

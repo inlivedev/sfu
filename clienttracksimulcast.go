@@ -26,6 +26,7 @@ type simulcastClientTrack struct {
 	lastBlankSequenceNumber *atomic.Uint32
 	writeMu                 sync.Mutex
 	rewriter                *simulcastRewriter
+	headerExtensions        *headerExtensionRewriter
 	lastQuality             *atomic.Uint32
 	paddingTS               *atomic.Uint32
 	maxQuality              *atomic.Uint32
@@ -65,6 +66,7 @@ func newSimulcastClientTrack(c *Client, t *SimulcastTrack) *simulcastClientTrack
 		remoteTrack:             t,
 		baseTrack:               t.base,
 		rewriter:                newSimulcastRewriter(t.base.codec.ClockRate),
+		headerExtensions:        newHeaderExtensionRewriter(c, t.base.headerExtensions),
 		lastQuality:             lastQuality,
 		paddingTS:               &atomic.Uint32{},
 		maxQuality:              &atomic.Uint32{},
@@ -126,7 +128,10 @@ func (t *simulcastClientTrack) send(p *rtp.Packet, quality QualityLevel) {
 	t.writeRTP(p)
 }
 
+// writeRTP must be called with writeMu held, the header extension rewriter is not safe for concurrent use
 func (t *simulcastClientTrack) writeRTP(p *rtp.Packet) {
+	t.headerExtensions.rewrite(&p.Header)
+
 	if err := t.localTrack.WriteRTP(p); err != nil {
 		t.client.log.Errorf("track: error on write rtp", err)
 	}
@@ -235,6 +240,10 @@ func (t *simulcastClientTrack) StreamID() string {
 
 func (t *simulcastClientTrack) Kind() webrtc.RTPCodecType {
 	return t.kind
+}
+
+func (t *simulcastClientTrack) setTransceiver(transceiver *webrtc.RTPTransceiver) {
+	t.headerExtensions.setTransceiver(transceiver)
 }
 
 func (t *simulcastClientTrack) LocalTrack() *webrtc.TrackLocalStaticRTP {

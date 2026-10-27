@@ -444,7 +444,7 @@ func (s *SFU) AddRelayTrack(ctx context.Context, id, streamid, rid string, clien
 
 	if rid == "" {
 		// not simulcast
-		track = newTrack(ctx, client, relayTrack, 0, 0, s.pliInterval, onPLI, nil, nil)
+		track = newTrack(ctx, client, relayTrack, nil, 0, 0, s.pliInterval, onPLI, nil, nil)
 		s.mu.Lock()
 		s.relayTracks[relayTrack.ID()] = track
 		s.mu.Unlock()
@@ -457,7 +457,7 @@ func (s *SFU) AddRelayTrack(ctx context.Context, id, streamid, rid string, clien
 		track, ok := s.relayTracks[relayTrack.ID()]
 		if !ok {
 			// if track not found, add it
-			track = newSimulcastTrack(client, relayTrack, 0, 0, s.pliInterval, onPLI, nil, nil)
+			track = newSimulcastTrack(client, relayTrack, nil, 0, 0, s.pliInterval, onPLI, nil, nil)
 			s.relayTracks[relayTrack.ID()] = track
 
 		} else if simulcast, ok = track.(*SimulcastTrack); ok {
