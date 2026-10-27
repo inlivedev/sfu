@@ -17,7 +17,7 @@ func newClientTrackAudio(c *Client, t ITrack) *clientTrackAudio {
 		return nil
 	}
 
-	if !c.receiveRED {
+	if !c.receiveRED.Load() {
 		localTrack = audioTrack.createOpusLocalTrack()
 	} else {
 		localTrack = audioTrack.createLocalTrack()

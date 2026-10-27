@@ -31,7 +31,7 @@ func (t *clientTrackRed) push(p *rtp.Packet, _ QualityLevel) {
 		return
 	}
 
-	if !t.client.receiveRED {
+	if !t.client.receiveRED.Load() {
 		primaryPacket, _, err := ExtractRedPackets(p)
 		if err != nil {
 			t.client.log.Tracef("clienttrack: error on extract primary rtp %s", err.Error())

@@ -164,7 +164,7 @@ type Client struct {
 	publishedTracks                   *trackList
 	pendingRemoteRenegotiation        *atomic.Bool
 	negotiations                      atomic.Uint64 // completed negotiations, client tracks re-read their mid and extension IDs when it changes
-	receiveRED                        bool
+	receiveRED                        atomic.Bool
 	state                             *atomic.Value
 	sfu                               *SFU
 	muCallback                        sync.Mutex
@@ -199,6 +199,12 @@ type Client struct {
 	vadInterceptor                 *voiceactivedetector.Interceptor
 	vads                           map[uint32]*voiceactivedetector.VoiceDetector
 	log                            logging.LeveledLogger
+
+	// negotiationMu makes the checks and updates of isInRenegotiation, isInRemoteNegotiation
+	// and negotiationNeeded atomic, so the SFU and the remote client can't both start a negotiation.
+	negotiationMu sync.Mutex
+	// remoteNegotiationTimer releases a remote negotiation slot that the remote client never used
+	remoteNegotiationTimer *time.Timer
 }
 
 func DefaultClientOptions() ClientOptions {
@@ -409,28 +415,39 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		}
 
 		trackAddedMutex.Lock()
+		defer trackAddedMutex.Unlock()
+
 		// Reset the timer if it's already running
 		if trackAddedTimer != nil {
 			trackAddedTimer.Stop()
 		}
 
 		// Start a new timer for 100ms delay
-		trackAddedTimer = time.AfterFunc(100*time.Millisecond, func() {
+		var timer *time.Timer
+		timer = time.AfterFunc(100*time.Millisecond, func() {
+			trackAddedMutex.Lock()
+			if trackAddedTimer != timer {
+				// a newer track reset the timer, the newer timer will report this track too
+				trackAddedMutex.Unlock()
+				return
+			}
+			trackAddedTimer = nil
+			trackAddedMutex.Unlock()
+
 			// Don't hold mutex when calling the callback to avoid deadlock
 			addedTracks := client.pendingPublishedTracks.GetTracks()
+			if len(addedTracks) == 0 {
+				return
+			}
+
 			s.log.Infof("sfu: client %s publishing %d tracks",
 				client.ID(), len(addedTracks))
 
 			if client.onTracksAdded != nil {
 				client.onTracksAdded(addedTracks)
 			}
-
-			// Clear timer reference after callback
-			trackAddedMutex.Lock()
-			trackAddedTimer = nil
-			trackAddedMutex.Unlock()
 		})
-		trackAddedMutex.Unlock()
+		trackAddedTimer = timer
 	}
 
 	client.peerConnection.PC().OnSignalingStateChange(func(state webrtc.SignalingState) {
@@ -439,8 +456,11 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		}
 
 		if state == webrtc.SignalingStateStable && client.pendingRemoteRenegotiation.Load() {
-			client.pendingRemoteRenegotiation.Store(false)
 			client.allowRemoteRenegotiation()
+		}
+
+		if state == webrtc.SignalingStateStable {
+			client.retryRenegotiation()
 		}
 	})
 
@@ -483,6 +503,9 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 			}
 
 			client.processPendingTracks()
+
+			// a renegotiation requested before the connection was up is waiting for it
+			client.retryRenegotiation()
 
 		case webrtc.PeerConnectionStateClosed:
 			client.afterClosed()
@@ -658,12 +681,15 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 	peerConnection.OnICECandidate(func(candidate *webrtc.ICECandidate) {
 		// only sending candidate when the local description is set, means expecting the remote peer already has the remote description
 		if candidate != nil {
-			if client.canAddCandidate.Load() {
-				go client.onIceCandidateCallback(candidate)
+			client.mu.Lock()
+			callback := client.onIceCandidate
+			if client.canAddCandidate.Load() && callback != nil {
+				client.mu.Unlock()
+				go callback(client.context, candidate)
 
 				return
 			}
-			client.mu.Lock()
+			// keep it until the local description is set and the OnIceCandidate callback is set
 			client.pendingLocalCandidates = append(client.pendingLocalCandidates, candidate)
 			client.mu.Unlock()
 		}
@@ -741,21 +767,68 @@ func (c *Client) CompleteNegotiation(answer webrtc.SessionDescription) {
 // return false means the negotiation is in process, the requester must have a mechanism to repeat the request once it's done.
 // requesting this must be followed by calling Negotate() to make sure the state is completed. Failed on called Negotiate() will cause the client to be in inconsistent state.
 func (c *Client) IsAllowNegotiation() bool {
+	c.negotiationMu.Lock()
+	defer c.negotiationMu.Unlock()
+
 	if c.isInRenegotiation.Load() {
 		c.pendingRemoteRenegotiation.Store(true)
 		return false
 	}
 
-	c.isInRemoteNegotiation.Store(true)
+	c.reserveRemoteNegotiationLocked()
 
 	return true
 }
 
-func (c *Client) Negotiate(offer webrtc.SessionDescription) (*webrtc.SessionDescription, error) {
+// remoteNegotiationTimeout is how long a remote negotiation slot given by IsAllowNegotiation or
+// OnAllowedRemoteRenegotiation is kept for the remote client before the SFU can renegotiate again.
+const remoteNegotiationTimeout = 5 * time.Second
+
+// reserveRemoteNegotiationLocked blocks the SFU renegotiation until the remote client calls Negotiate().
+// If the remote client never calls it, the slot is released after remoteNegotiationTimeout.
+// The caller must hold c.negotiationMu.
+func (c *Client) reserveRemoteNegotiationLocked() {
 	c.isInRemoteNegotiation.Store(true)
 
-	defer func() {
+	if c.remoteNegotiationTimer != nil {
+		c.remoteNegotiationTimer.Stop()
+	}
+
+	var timer *time.Timer
+	timer = time.AfterFunc(remoteNegotiationTimeout, func() {
+		c.negotiationMu.Lock()
+		if c.remoteNegotiationTimer != timer {
+			c.negotiationMu.Unlock()
+			return
+		}
+		c.remoteNegotiationTimer = nil
 		c.isInRemoteNegotiation.Store(false)
+		c.negotiationMu.Unlock()
+
+		c.log.Infof("client: %s remote negotiation was allowed but not started, resume the SFU renegotiation", c.ID())
+		c.retryRenegotiation()
+	})
+
+	c.remoteNegotiationTimer = timer
+}
+
+func (c *Client) Negotiate(offer webrtc.SessionDescription) (*webrtc.SessionDescription, error) {
+	c.negotiationMu.Lock()
+	c.isInRemoteNegotiation.Store(true)
+	if c.remoteNegotiationTimer != nil {
+		// the remote client is using the slot, don't release it while the negotiation runs
+		c.remoteNegotiationTimer.Stop()
+		c.remoteNegotiationTimer = nil
+	}
+	c.negotiationMu.Unlock()
+
+	defer func() {
+		c.negotiationMu.Lock()
+		c.isInRemoteNegotiation.Store(false)
+		c.negotiationMu.Unlock()
+
+		// run the SFU renegotiation that was requested while the remote client was negotiating
+		c.retryRenegotiation()
 	}()
 
 	currentReceiversCount := 0
@@ -770,19 +843,27 @@ func (c *Client) Negotiate(offer webrtc.SessionDescription) (*webrtc.SessionDesc
 		}
 	}
 
-	if !c.receiveRED {
+	if !c.receiveRED.Load() {
 		match, err := regexp.MatchString(`a=rtpmap:63`, offer.SDP)
 		if err != nil {
 			c.log.Errorf("client: error on check RED support in SDP ", err)
 		} else {
-			c.receiveRED = match
+			c.receiveRED.Store(match)
 		}
 	}
+
+	receivers := c.addReceiversForNewRemoteTracks(offer)
 
 	// Set the remote SessionDescription
 	err := c.peerConnection.PC().SetRemoteDescription(offer)
 	if err != nil {
 		c.log.Errorf("client: error set remote description ", err)
+
+		for _, transceiver := range receivers {
+			if transceiver.Mid() == "" {
+				_ = transceiver.Stop()
+			}
+		}
 
 		return nil, err
 	}
@@ -814,8 +895,13 @@ func (c *Client) Negotiate(offer webrtc.SessionDescription) (*webrtc.SessionDesc
 	// allow add candidates once the local description is set
 	c.canAddCandidate.Store(true)
 
-	// process pending ice
-	for _, iceCandidate := range c.pendingRemoteCandidates {
+	// process pending ice, AddICECandidate adds the candidates directly once the remote description is set
+	c.mu.Lock()
+	pendingRemoteCandidates := c.pendingRemoteCandidates
+	c.pendingRemoteCandidates = nil
+	c.mu.Unlock()
+
+	for _, iceCandidate := range pendingRemoteCandidates {
 		err = c.peerConnection.PC().AddICECandidate(iceCandidate)
 		if err != nil {
 			c.log.Errorf("client: error add ice candidate ", err)
@@ -846,11 +932,60 @@ func (c *Client) Negotiate(offer webrtc.SessionDescription) (*webrtc.SessionDesc
 	// send pending local candidates if any
 	go c.sendPendingLocalCandidates()
 
-	c.pendingRemoteCandidates = nil
-
 	sdp := c.setOpusSDP(*c.peerConnection.PC().LocalDescription())
 
 	return &sdp, nil
+}
+
+// addReceiversForNewRemoteTracks adds a recvonly transceiver for each media section in the offer that
+// has a new mid and that the remote client sends on.
+// Pion matches a new sendrecv media section (a track added with addTrack) to an unnegotiated local
+// transceiver, which can be a sendonly transceiver the SFU just added for a subscribed track.
+// The published track would then never be received. Pion picks recvonly transceivers first.
+func (c *Client) addReceiversForNewRemoteTracks(offer webrtc.SessionDescription) []*webrtc.RTPTransceiver {
+	parsed, err := offer.Unmarshal()
+	if err != nil {
+		return nil
+	}
+
+	mids := make(map[string]bool)
+	for _, transceiver := range c.peerConnection.PC().GetTransceivers() {
+		if mid := transceiver.Mid(); mid != "" {
+			mids[mid] = true
+		}
+	}
+
+	receivers := make([]*webrtc.RTPTransceiver, 0)
+
+	for _, media := range parsed.MediaDescriptions {
+		kind := webrtc.NewRTPCodecType(media.MediaName.Media)
+		if kind == 0 {
+			continue
+		}
+
+		mid, ok := media.Attribute("mid")
+		if !ok || mids[mid] {
+			continue
+		}
+
+		if _, recvOnly := media.Attribute(webrtc.RTPTransceiverDirectionRecvonly.String()); recvOnly {
+			continue
+		}
+
+		if _, inactive := media.Attribute(webrtc.RTPTransceiverDirectionInactive.String()); inactive {
+			continue
+		}
+
+		transceiver, err := c.peerConnection.PC().AddTransceiverFromKind(kind, webrtc.RTPTransceiverInit{Direction: webrtc.RTPTransceiverDirectionRecvonly})
+		if err != nil {
+			c.log.Errorf("client: error add receiver for remote track ", err)
+			continue
+		}
+
+		receivers = append(receivers, transceiver)
+	}
+
+	return receivers
 }
 
 func (c *Client) setOpusSDP(sdp webrtc.SessionDescription) webrtc.SessionDescription {
@@ -919,111 +1054,153 @@ func (c *Client) setOpusSDP(sdp webrtc.SessionDescription) webrtc.SessionDescrip
 // The SDP answer then can be passed back to the SFU using `client.CompleteNegotiation()` method.
 func (c *Client) OnRenegotiation(callback func(context.Context, webrtc.SessionDescription) (webrtc.SessionDescription, error)) {
 	c.muCallback.Lock()
+	c.onRenegotiation = callback
+	c.muCallback.Unlock()
+
+	// run a renegotiation that was requested before the callback was set
+	c.retryRenegotiation()
+}
+
+func (c *Client) getOnRenegotiation() func(context.Context, webrtc.SessionDescription) (webrtc.SessionDescription, error) {
+	c.muCallback.Lock()
 	defer c.muCallback.Unlock()
 
-	c.onRenegotiation = callback
+	return c.onRenegotiation
 }
 
 func (c *Client) renegotiate(offerFlexFec bool) {
 	c.log.Debug("client: renegotiate")
+	// set before taking negotiationMu, a running renegotiation loop checks it under the lock before it stops
 	c.negotiationNeeded.Store(true)
 
-	if c.onRenegotiation == nil {
+	if c.getOnRenegotiation() == nil {
 		c.log.Errorf("client: onRenegotiation is not set, can't do renegotiation")
 
 		return
 	}
 
+	c.negotiationMu.Lock()
+	defer c.negotiationMu.Unlock()
+
 	if c.isInRemoteNegotiation.Load() {
-		c.log.Infof("sfu: renegotiation is delayed because the remote client %s is doing negotiation ", c.ID)
+		// retried when the remote negotiation is done
+		c.log.Infof("sfu: renegotiation is delayed because the remote client %s is doing negotiation ", c.ID())
 
 		return
 	}
 
 	// no need to run another negotiation if it's already in progress, it will rerun because we mark the negotiationneeded to true
 	if c.isInRenegotiation.Load() {
-		c.log.Infof("sfu: renegotiation is delayed because the client %s is doing negotiation ", c.ID)
+		c.log.Infof("sfu: renegotiation is delayed because the client %s is doing negotiation ", c.ID())
 		return
 	}
 
 	// mark negotiation is in progress to make sure no concurrent negotiation
 	c.isInRenegotiation.Store(true)
 
-	go func() {
-		defer func() {
-			c.isInRenegotiation.Store(false)
-			if c.pendingRemoteRenegotiation.Load() {
-				c.allowRemoteRenegotiation()
-			}
-		}()
+	go c.renegotiationLoop(offerFlexFec)
+}
 
-		for c.negotiationNeeded.Load() {
-			timout, cancel := context.WithTimeout(c.context, 100*time.Millisecond)
-			defer cancel()
+// retryRenegotiation runs a renegotiation that was requested but couldn't run yet,
+// because the remote client was negotiating, the signaling state wasn't stable or the client wasn't connected.
+func (c *Client) retryRenegotiation() {
+	if c.negotiationNeeded.Load() && c.state.Load() != ClientStateEnded {
+		c.renegotiate(false)
+	}
+}
 
-			<-timout.Done()
+// canRenegotiateLocked reports whether the SFU can send an offer now. The caller must hold c.negotiationMu.
+func (c *Client) canRenegotiateLocked() bool {
+	return c.state.Load() != ClientStateEnded &&
+		c.getOnRenegotiation() != nil &&
+		!c.isInRemoteNegotiation.Load() &&
+		c.peerConnection.PC().SignalingState() == webrtc.SignalingStateStable &&
+		c.peerConnection.PC().ConnectionState() == webrtc.PeerConnectionStateConnected
+}
 
-			// mark negotiation is not needed after this done, so it will out of the loop
-			c.negotiationNeeded.Store(false)
+func (c *Client) renegotiationLoop(offerFlexFec bool) {
+	defer func() {
+		c.negotiationMu.Lock()
+		c.isInRenegotiation.Store(false)
+		c.negotiationMu.Unlock()
 
-			// only renegotiate when client is connected
-			if c.state.Load() != ClientStateEnded &&
-				c.peerConnection.PC().SignalingState() == webrtc.SignalingStateStable &&
-				c.peerConnection.PC().ConnectionState() == webrtc.PeerConnectionStateConnected {
-
-				if c.onRenegotiation == nil {
-					return
-				}
-
-				offer, err := c.peerConnection.PC().CreateOffer(nil)
-				if err != nil {
-					c.log.Errorf("sfu: error create offer on renegotiation ", err)
-					return
-				}
-
-				if offerFlexFec {
-					// munge the offer to include FlexFEC
-					// get the payload code of video track
-
-				}
-
-				// Sets the LocalDescription, and starts our UDP listeners
-				err = c.peerConnection.PC().SetLocalDescription(offer)
-				if err != nil {
-					c.log.Errorf("sfu: error set local description on renegotiation ", err)
-					_ = c.stop()
-
-					return
-				}
-
-				// this will be blocking until the renegotiation is done
-				sdp := c.setOpusSDP(*c.peerConnection.PC().LocalDescription())
-				answer, err := c.onRenegotiation(c.context, sdp)
-				if err != nil {
-					//TODO: when this happen, we need to close the client and ask the remote client to reconnect
-					c.log.Errorf("sfu: error on renegotiation ", err)
-					_ = c.stop()
-
-					return
-				}
-
-				if answer.Type != webrtc.SDPTypeAnswer {
-					c.log.Errorf("sfu: error on renegotiation, the answer is not an answer type")
-					_ = c.stop()
-
-					return
-				}
-
-				err = c.peerConnection.PC().SetRemoteDescription(answer)
-				if err != nil {
-					_ = c.stop()
-
-					return
-				}
-			}
+		if c.pendingRemoteRenegotiation.Load() {
+			c.allowRemoteRenegotiation()
 		}
 	}()
 
+	for {
+		// wait a bit to batch the renegotiation requests
+		select {
+		case <-c.context.Done():
+			return
+		case <-time.After(100 * time.Millisecond):
+		}
+
+		c.negotiationMu.Lock()
+		if !c.negotiationNeeded.Load() || !c.canRenegotiateLocked() {
+			// keep negotiationNeeded, retryRenegotiation runs it once the client is ready
+			c.isInRenegotiation.Store(false)
+			c.negotiationMu.Unlock()
+
+			return
+		}
+
+		// mark negotiation is not needed, a request after this point will run another iteration
+		c.negotiationNeeded.Store(false)
+		c.negotiationMu.Unlock()
+
+		onRenegotiation := c.getOnRenegotiation()
+		if onRenegotiation == nil {
+			return
+		}
+
+		offer, err := c.peerConnection.PC().CreateOffer(nil)
+		if err != nil {
+			c.log.Errorf("sfu: error create offer on renegotiation ", err)
+			return
+		}
+
+		if offerFlexFec {
+			// munge the offer to include FlexFEC
+			// get the payload code of video track
+
+		}
+
+		// Sets the LocalDescription, and starts our UDP listeners
+		err = c.peerConnection.PC().SetLocalDescription(offer)
+		if err != nil {
+			c.log.Errorf("sfu: error set local description on renegotiation ", err)
+			_ = c.stop()
+
+			return
+		}
+
+		// this will be blocking until the renegotiation is done
+		sdp := c.setOpusSDP(*c.peerConnection.PC().LocalDescription())
+		answer, err := onRenegotiation(c.context, sdp)
+		if err != nil {
+			//TODO: when this happen, we need to close the client and ask the remote client to reconnect
+			c.log.Errorf("sfu: error on renegotiation ", err)
+			_ = c.stop()
+
+			return
+		}
+
+		if answer.Type != webrtc.SDPTypeAnswer {
+			c.log.Errorf("sfu: error on renegotiation, the answer is not an answer type")
+			_ = c.stop()
+
+			return
+		}
+
+		err = c.peerConnection.PC().SetRemoteDescription(answer)
+		if err != nil {
+			_ = c.stop()
+
+			return
+		}
+	}
 }
 
 // OnAllowedRemoteRenegotiation event is called when the SFU is done with the renegotiation
@@ -1037,11 +1214,33 @@ func (c *Client) OnAllowedRemoteRenegotiation(callback func()) {
 }
 
 // inform to remote client that it's allowed to do renegotiation through event
+// The remote client gets the negotiation slot, but if it doesn't call Negotiate() the slot is released
+// after remoteNegotiationTimeout so the SFU renegotiation isn't blocked.
 func (c *Client) allowRemoteRenegotiation() {
-	if c.onAllowedRemoteRenegotiation != nil {
-		c.isInRemoteNegotiation.Store(true)
-		go c.onAllowedRemoteRenegotiation()
+	c.muCallback.Lock()
+	onAllowedRemoteRenegotiation := c.onAllowedRemoteRenegotiation
+	c.muCallback.Unlock()
+
+	if onAllowedRemoteRenegotiation == nil {
+		return
 	}
+
+	c.negotiationMu.Lock()
+	if c.isInRenegotiation.Load() {
+		// the running renegotiation loop allows it when it's done
+		c.negotiationMu.Unlock()
+		return
+	}
+
+	if !c.pendingRemoteRenegotiation.CompareAndSwap(true, false) {
+		c.negotiationMu.Unlock()
+		return
+	}
+
+	c.reserveRemoteNegotiationLocked()
+	c.negotiationMu.Unlock()
+
+	go onAllowedRemoteRenegotiation()
 }
 
 func (c *Client) setClientTrack(t ITrack) iClientTrack {
@@ -1272,9 +1471,12 @@ func (c *Client) AddICECandidate(candidate webrtc.ICECandidateInit) error {
 		return errors.New("client: peer connection is not initialized, make sure to call this after first negotiation done")
 	}
 
+	c.mu.Lock()
 	if c.peerConnection.PC().RemoteDescription() == nil {
 		c.pendingRemoteCandidates = append(c.pendingRemoteCandidates, candidate)
+		c.mu.Unlock()
 	} else {
+		c.mu.Unlock()
 		if err := c.peerConnection.PC().AddICECandidate(candidate); err != nil {
 			c.log.Errorf("client: error add ice candidate ", err)
 			return err
@@ -1288,27 +1490,32 @@ func (c *Client) AddICECandidate(candidate webrtc.ICECandidateInit) error {
 // This event will triggered during negotiation process to exchanges ice candidates between SFU and client.
 // The client can also pass the ice candidate to the SFU using `client.AddICECandidate()` method.
 func (c *Client) OnIceCandidate(callback func(context.Context, *webrtc.ICECandidate)) {
+	c.mu.Lock()
 	c.onIceCandidate = callback
-}
+	c.mu.Unlock()
 
-func (c *Client) onIceCandidateCallback(candidate *webrtc.ICECandidate) {
-	if c.onIceCandidate == nil {
-		c.log.Infof("client: on ice candidate callback is not set")
-		return
+	// send the candidates gathered before the callback was set
+	if c.canAddCandidate.Load() {
+		go c.sendPendingLocalCandidates()
 	}
-
-	c.onIceCandidate(c.context, candidate)
 }
 
 func (c *Client) sendPendingLocalCandidates() {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	for _, candidate := range c.pendingLocalCandidates {
-		c.onIceCandidateCallback(candidate)
+	callback := c.onIceCandidate
+	if callback == nil {
+		c.mu.Unlock()
+		c.log.Infof("client: on ice candidate callback is not set")
+		return
 	}
 
-	c.pendingLocalCandidates = c.pendingLocalCandidates[:0]
+	candidates := c.pendingLocalCandidates
+	c.pendingLocalCandidates = nil
+	c.mu.Unlock()
+
+	for _, candidate := range candidates {
+		callback(c.context, candidate)
+	}
 }
 
 // OnConnectionStateChanged event is called when the SFU connection state is changed.
