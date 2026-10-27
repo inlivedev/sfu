@@ -2,6 +2,7 @@ package sfu
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -430,7 +431,11 @@ func (t *simulcastClientTrack) ReceiveBitrate() uint32 {
 func (t *simulcastClientTrack) SendBitrate() uint32 {
 	bitrate, err := t.client.stats.GetSenderBitrate(t.ID())
 	if err != nil {
-		t.client.log.Errorf("clienttrack: error on get sender", err)
+		// stats are not available until the first stats update after the track is added
+		if !errors.Is(err, ErrCLientStatsNotFound) {
+			t.client.log.Errorf("clienttrack: error on get sender bitrate %s", err.Error())
+		}
+
 		return 0
 	}
 
@@ -470,7 +475,11 @@ func (t *simulcastClientTrack) ReceiveBitrateAtQuality(quality QualityLevel) uin
 
 	bitrate, err := t.baseTrack.client.stats.GetReceiverBitrate(remoteTrack.track.ID(), remoteTrack.track.RID())
 	if err != nil {
-		t.client.log.Errorf("clienttrack: error on get receiver", err)
+		// stats are not available until the first stats update after the track is added
+		if !errors.Is(err, ErrCLientStatsNotFound) {
+			t.client.log.Errorf("clienttrack: error on get receiver bitrate %s", err.Error())
+		}
+
 		return 0
 	}
 

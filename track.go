@@ -20,6 +20,8 @@ import (
 const (
 	TrackTypeMedia  = "media"
 	TrackTypeScreen = "screen"
+
+	nilTrackWarnInterval = 5 * time.Second
 )
 
 var (
@@ -397,6 +399,7 @@ type SimulcastTrack struct {
 	onNetworkConditionChanged   func(networkmonitor.NetworkConditionType)
 	reordered                   bool
 	onEndedCallbacks            []func()
+	lastNilTrackWarnTS          atomic.Int64
 }
 
 func newSimulcastTrack(client *Client, track IRemoteTrack, minWait, maxWait, pliInterval time.Duration, onPLI func(), stats stats.Getter, onStatsUpdated func(*stats.Stats)) ITrack {
@@ -685,7 +688,7 @@ func (t *SimulcastTrack) isTrackActive(quality QualityLevel) bool {
 	switch quality {
 	case QualityHigh:
 		if t.remoteTrackHigh == nil {
-			t.base.client.log.Warnf("track: remote track high is nil")
+			t.warnNilRemoteTrack("high")
 			return false
 		}
 
@@ -699,26 +702,26 @@ func (t *SimulcastTrack) isTrackActive(quality QualityLevel) bool {
 		return true
 	case QualityMid:
 		if t.remoteTrackMid == nil {
-			t.base.client.log.Warnf("track: remote track medium is nil")
+			t.warnNilRemoteTrack("medium")
 			return false
 		}
 
 		delta := time.Since(time.Unix(0, t.lastReadMidTS.Load()))
 		if delta > threshold {
-			t.base.client.log.Warnf("track: remote track %s mid is not active, last read was %d ms ago", delta.Milliseconds())
+			t.base.client.log.Warnf("track: remote track %s mid is not active, last read was %d ms ago", t.base.id, delta.Milliseconds())
 			return false
 		}
 
 		return true
 	case QualityLow:
 		if t.remoteTrackLow == nil {
-			t.base.client.log.Warnf("track: remote track low is nil")
+			t.warnNilRemoteTrack("low")
 			return false
 		}
 
 		delta := time.Since(time.Unix(0, t.lastReadLowTS.Load()))
 		if delta > threshold {
-			t.base.client.log.Warnf("track: remote track %s low is not active, last read was %d ms ago", delta.Milliseconds())
+			t.base.client.log.Warnf("track: remote track %s low is not active, last read was %d ms ago", t.base.id, delta.Milliseconds())
 			return false
 		}
 
@@ -728,6 +731,19 @@ func (t *SimulcastTrack) isTrackActive(quality QualityLevel) bool {
 	return false
 }
 
+// warnNilRemoteTrack logs a missing simulcast layer at most once per nilTrackWarnInterval.
+// Layers are added one by one, so a layer is expected to be nil for a while after the track starts.
+func (t *SimulcastTrack) warnNilRemoteTrack(layer string) {
+	now := time.Now().UnixNano()
+	last := t.lastNilTrackWarnTS.Load()
+
+	if now-last < int64(nilTrackWarnInterval) || !t.lastNilTrackWarnTS.CompareAndSwap(last, now) {
+		return
+	}
+
+	t.base.client.log.Warnf("track: remote track %s %s is nil", t.base.id, layer)
+}
+
 func (t *SimulcastTrack) sendPLI() {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
@@ -735,19 +751,19 @@ func (t *SimulcastTrack) sendPLI() {
 	if t.remoteTrackHigh != nil {
 		t.remoteTrackHigh.SendPLI()
 	} else {
-		t.base.client.log.Warnf("track: remote track high is nil")
+		t.warnNilRemoteTrack("high")
 	}
 
 	if t.remoteTrackMid != nil {
 		t.remoteTrackMid.SendPLI()
 	} else {
-		t.base.client.log.Warnf("track: remote track mid is nil")
+		t.warnNilRemoteTrack("mid")
 	}
 
 	if t.remoteTrackLow != nil {
 		t.remoteTrackLow.SendPLI()
 	} else {
-		t.base.client.log.Warnf("track: remote track low is nil")
+		t.warnNilRemoteTrack("low")
 	}
 }
 

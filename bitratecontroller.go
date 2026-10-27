@@ -3,6 +3,7 @@ package sfu
 import (
 	"context"
 	"errors"
+	"math"
 	"slices"
 	"sync"
 	"time"
@@ -453,11 +454,43 @@ func (bc *bitrateController) loopMonitor() {
 
 }
 
+// bitrateDiff returns newBitrate - oldBitrate as a signed value, so a new bitrate that is lower
+// than the old one gives a negative diff instead of wrapping around the uint32 range.
+func bitrateDiff(oldBitrate, newBitrate uint32) int64 {
+	return int64(newBitrate) - int64(oldBitrate)
+}
+
+// addBitrate adds a signed diff to the total and clamps the result to the uint32 range.
+func addBitrate(total uint32, diff int64) uint32 {
+	result := int64(total) + diff
+	if result < 0 {
+		return 0
+	}
+
+	if result > math.MaxUint32 {
+		return math.MaxUint32
+	}
+
+	return uint32(result)
+}
+
 // TODO: use video size to prioritize the video. Higher resolution video should have higher priority
 func (bc *bitrateController) fitBitratesToBandwidth(bw uint32) {
 	totalSentBitrates := bc.totalSentBitrates()
 
 	claims := bc.Claims()
+
+	// a claim can be adjusted more than once in a single pass. After its quality changed, its
+	// measured send bitrate is stale, so use the bitrate of the new quality level instead.
+	adjustedBitrates := make(map[string]uint32, len(claims))
+	currentBitrate := func(claim *bitrateClaim) uint32 {
+		if bitrate, ok := adjustedBitrates[claim.track.ID()]; ok {
+			return bitrate
+		}
+
+		return claim.SendBitrate()
+	}
+
 	if totalSentBitrates > bw {
 		// reduce bitrates
 		for i := QualityHigh; i > QualityLowLow; i-- {
@@ -466,19 +499,19 @@ func (bc *bitrateController) fitBitratesToBandwidth(bw uint32) {
 				quality := claim.Quality()
 				if claim.IsAdjustable() &&
 					quality == QualityLevel(i) {
-					oldBitrate := claim.SendBitrate()
+					oldBitrate := currentBitrate(claim)
 					if oldBitrate == 0 {
 						continue
 					}
 
 					newQuality := bc.getPrevQuality(quality)
 					newBitrate := claim.QualityLevelToBitrate(newQuality)
-					bitrateGap := oldBitrate - newBitrate
 					bc.log.Tracef("bitratecontroller: reduce bitrate for track %s from %d to %d", claim.track.ID(), claim.Quality(), newQuality)
 					bc.setQuality(claim.track.ID(), newQuality)
+					adjustedBitrates[claim.track.ID()] = newBitrate
 
 					claim.track.RequestPLI()
-					totalSentBitrates = totalSentBitrates - bitrateGap
+					totalSentBitrates = addBitrate(totalSentBitrates, bitrateDiff(oldBitrate, newBitrate))
 
 					bc.log.Infof("bitratecontroller: total sent bitrates %s bandwidth %s", ThousandSeparator(int(totalSentBitrates)), ThousandSeparator(int(bw)))
 
@@ -499,14 +532,13 @@ func (bc *bitrateController) fitBitratesToBandwidth(bw uint32) {
 				if claim.IsAdjustable() &&
 					quality == QualityLevel(i) &&
 					quality < claim.track.MaxQuality() {
-					oldBitrate := claim.SendBitrate()
+					oldBitrate := currentBitrate(claim)
 
 					newQuality := bc.getNextQuality(quality)
 					newBitrate := claim.QualityLevelToBitrate(newQuality)
-					bitrateIncrease := newBitrate - oldBitrate
 
 					// check if the bitrate increase will more than the available bandwidth
-					newSentBitrates := totalSentBitrates + bitrateIncrease
+					newSentBitrates := addBitrate(totalSentBitrates, bitrateDiff(oldBitrate, newBitrate))
 					if newSentBitrates > bw {
 						bc.log.Tracef("bitratecontroller: can't increase, new bitrates %s not fit to bandwidth %s", ThousandSeparator(int(newSentBitrates)), ThousandSeparator(int(bw)))
 						return
@@ -514,8 +546,9 @@ func (bc *bitrateController) fitBitratesToBandwidth(bw uint32) {
 
 					bc.log.Tracef("bitratecontroller: increase bitrate for track %s from %d to %d", claim.track.ID(), claim.Quality(), newQuality)
 					bc.setQuality(claim.track.ID(), newQuality)
+					adjustedBitrates[claim.track.ID()] = newBitrate
 					// update current total bitrates
-					totalSentBitrates = totalSentBitrates + bitrateIncrease
+					totalSentBitrates = newSentBitrates
 					bc.log.Infof("bitratecontroller: total sent bitrates %s bandwidth %s", ThousandSeparator(int(totalSentBitrates)), ThousandSeparator(int(bw)))
 					claim.track.RequestPLI()
 				}
@@ -560,25 +593,40 @@ func (bc *bitrateController) onRemoteViewedSizeChanged(videoSize videoSize) {
 		return
 	}
 
-	bc.log.Debugf("bitrate: track %s video size changed  %dx%d=%d pixels", videoSize.TrackID, videoSize.Width, videoSize.Height, videoSize.Width*videoSize.Height)
-
-	// TODO: check if it is necessary to set max quality to none
-	if videoSize.Width == 0 || videoSize.Height == 0 {
-		bc.log.Debugf("bitrate: track  %s video size is 0, set max quality to none", videoSize.TrackID)
-		claim.track.SetMaxQuality(QualityNone)
+	// only simulcast and scalable tracks can limit their quality
+	if !claim.IsAdjustable() {
 		return
 	}
 
-	if videoSize.Width*videoSize.Height < bc.client.sfu.bitrateConfigs.VideoLowPixels {
-		bc.log.Debugf("bitrate: track %s video size is low, set max quality to low", videoSize.TrackID)
-		claim.track.SetMaxQuality(QualityLow)
-	} else if videoSize.Width*videoSize.Height < bc.client.sfu.bitrateConfigs.VideoMidPixels {
-		bc.log.Infof("bitrate: track %s video size is mid, set max quality to mid", videoSize.TrackID)
-		claim.track.SetMaxQuality(QualityMid)
-	} else {
-		bc.log.Infof("bitrate: track %s video size is high, set max quality to high", videoSize.TrackID)
-		claim.track.SetMaxQuality(QualityHigh)
+	maxQuality := bc.videoSizeToMaxQuality(videoSize)
+
+	// clients report the viewed size periodically, only act when the size bucket changes
+	// or the claim is still above the max quality, e.g. it was claimed after the max quality was set
+	if claim.track.MaxQuality() == maxQuality &&
+		(maxQuality == QualityNone || claim.Quality() <= maxQuality) {
+		return
 	}
+
+	bc.log.Debugf("bitrate: track %s video size changed to %dx%d=%d pixels, set max quality from %d to %d", videoSize.TrackID, videoSize.Width, videoSize.Height, videoSize.Width*videoSize.Height, claim.track.MaxQuality(), maxQuality)
+
+	// TODO: check if it is necessary to set max quality to none
+	claim.track.SetMaxQuality(maxQuality)
+}
+
+func (bc *bitrateController) videoSizeToMaxQuality(videoSize videoSize) QualityLevel {
+	if videoSize.Width == 0 || videoSize.Height == 0 {
+		return QualityNone
+	}
+
+	pixels := videoSize.Width * videoSize.Height
+
+	if pixels < bc.client.sfu.bitrateConfigs.VideoLowPixels {
+		return QualityLow
+	} else if pixels < bc.client.sfu.bitrateConfigs.VideoMidPixels {
+		return QualityMid
+	}
+
+	return QualityHigh
 }
 
 func (bc *bitrateController) isEnoughBandwidthToIncrase(bandwidthLeft uint32, claim *bitrateClaim) bool {
