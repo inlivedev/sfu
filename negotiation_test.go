@@ -407,3 +407,116 @@ func exchangeICECandidates(pc *webrtc.PeerConnection, client *Client) (toPC, toC
 
 	return toPC, toClient
 }
+
+// A remote client that is allowed to negotiate but never calls Negotiate() must not block
+// the SFU renegotiation forever.
+func TestUnusedRemoteNegotiationDoesNotBlockRenegotiation(t *testing.T) {
+	report := CheckRoutines(t)
+	defer report()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	roomManager := NewManager(ctx, "test", sfuOpts)
+	defer roomManager.Close()
+
+	roomOpts := DefaultRoomOptions()
+	roomOpts.Codecs = &[]string{webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
+	testRoom, err := roomManager.NewRoom(roomManager.CreateRoomID(), "test-room", RoomTypeLocal, roomOpts)
+	require.NoError(t, err, "error creating room: %v", err)
+	defer testRoom.Close()
+
+	trackChan := make(chan bool)
+
+	pc0, client0, _, _ := CreatePeerPair(ctx, TestLogger, testRoom, DefaultTestIceServers(), "peer-0", true, false, true)
+	pc0.PeerConnection.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
+		trackChan <- true
+	})
+
+	require.Eventually(t, func() bool {
+		return client0.PeerConnection().PC().ConnectionState() == webrtc.PeerConnectionStateConnected &&
+			!client0.isInRenegotiation.Load()
+	}, 10*time.Second, 10*time.Millisecond)
+
+	// take the remote negotiation slot and never use it
+	require.True(t, client0.IsAllowNegotiation())
+
+	pc1, client1, _, _ := CreatePeerPair(ctx, TestLogger, testRoom, DefaultTestIceServers(), "peer-1", true, false, true)
+
+	timeout, cancelTimeout := context.WithTimeout(ctx, 4*remoteNegotiationTimeout)
+	defer cancelTimeout()
+
+	tracksReceived := 0
+	for tracksReceived < 2 {
+		select {
+		case <-timeout.Done():
+			require.FailNow(t, "peer-0 didn't receive peer-1 tracks", "received %d of 2 tracks", tracksReceived)
+		case <-trackChan:
+			tracksReceived++
+		}
+	}
+
+	require.NoError(t, testRoom.StopClient(client0.ID()))
+	require.NoError(t, testRoom.StopClient(client1.ID()))
+	require.NoError(t, pc0.PeerConnection.Close())
+	require.NoError(t, pc1.PeerConnection.Close())
+}
+
+// A track the remote client adds with addTrack (a new sendrecv media section) must be received even
+// when the SFU has a sendonly transceiver for a subscribed track that isn't negotiated yet.
+func TestNewRemoteTrackWithPendingSubscribedTrack(t *testing.T) {
+	report := CheckRoutines(t)
+	defer report()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	roomManager := NewManager(ctx, "test", sfuOpts)
+	defer roomManager.Close()
+
+	roomOpts := DefaultRoomOptions()
+	roomOpts.Codecs = &[]string{webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
+	testRoom, err := roomManager.NewRoom(roomManager.CreateRoomID(), "test-room", RoomTypeLocal, roomOpts)
+	require.NoError(t, err, "error creating room: %v", err)
+	defer testRoom.Close()
+
+	pc0, client0, _, _ := CreatePeerPair(ctx, TestLogger, testRoom, DefaultTestIceServers(), "peer-0", true, false, true)
+
+	require.Eventually(t, func() bool {
+		return client0.PeerConnection().PC().ConnectionState() == webrtc.PeerConnectionStateConnected &&
+			len(client0.tracks.GetTracks()) == 2 &&
+			!client0.isInRenegotiation.Load()
+	}, 10*time.Second, 10*time.Millisecond)
+
+	// hold the SFU renegotiation, so the tracks peer-0 subscribes to stay unnegotiated
+	require.True(t, client0.IsAllowNegotiation())
+
+	pc1, client1, _, _ := CreatePeerPair(ctx, TestLogger, testRoom, DefaultTestIceServers(), "peer-1", true, false, true)
+
+	require.Eventually(t, func() bool {
+		for _, transceiver := range client0.PeerConnection().PC().GetTransceivers() {
+			if transceiver.Mid() == "" && transceiver.Kind() == webrtc.RTPCodecTypeVideo && transceiver.Direction() == webrtc.RTPTransceiverDirectionSendonly {
+				return true
+			}
+		}
+		return false
+	}, 10*time.Second, 10*time.Millisecond, "peer-0 didn't subscribe to peer-1 video")
+
+	iceConnectedCtx, iceConnectedCtxCancel := context.WithCancel(ctx)
+	defer iceConnectedCtxCancel()
+	newTrack, _ := GetStaticVideoTrack(ctx, iceConnectedCtx, GenerateSecureToken(), GenerateSecureToken(), true, "")
+	iceConnectedCtxCancel()
+
+	// AddTrack creates a sendrecv media section, the peer's negotiation needed handler sends the offer
+	_, err = pc0.PeerConnection.AddTrack(newTrack)
+	require.NoError(t, err)
+
+	require.Eventually(t, func() bool {
+		return len(client0.tracks.GetTracks()) == 3
+	}, remoteNegotiationTimeout, 10*time.Millisecond, "the SFU didn't receive the new peer-0 track")
+
+	require.NoError(t, testRoom.StopClient(client0.ID()))
+	require.NoError(t, testRoom.StopClient(client1.ID()))
+	require.NoError(t, pc0.PeerConnection.Close())
+	require.NoError(t, pc1.PeerConnection.Close())
+}

@@ -230,7 +230,7 @@ func (t *AudioTrack) subscribe(c *Client) iClientTrack {
 	cta := newClientTrackAudio(c, t)
 
 	if t.PayloadType() == 63 {
-		t.base.client.log.Tracef("track: red enabled %v", c.receiveRED)
+		t.base.client.log.Tracef("track: red enabled %v", c.receiveRED.Load())
 
 		// TODO: detect if client supports RED and it's audio then send RED encoded packets
 		ct = newClientTrackRed(cta)
