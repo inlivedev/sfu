@@ -476,9 +476,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 				}
 			}
 
-			if len(client.pendingReceivedTracks) > 0 {
-				client.processPendingTracks()
-			}
+			client.processPendingTracks()
 
 		case webrtc.PeerConnectionStateClosed:
 			client.afterClosed()
@@ -1184,13 +1182,18 @@ func (c *Client) enableReportAndStats(rtpSender *webrtc.RTPSender, track iClient
 }
 
 func (c *Client) processPendingTracks() {
-	if len(c.pendingReceivedTracks) > 0 {
-		err := c.SubscribeTracks(c.pendingReceivedTracks)
+	// SubscribeTracks appends to the pending list under c.mu while the client
+	// is still connecting, so take it under the same lock.
+	c.mu.Lock()
+	pending := c.pendingReceivedTracks
+	c.pendingReceivedTracks = make([]SubscribeTrackRequest, 0)
+	c.mu.Unlock()
+
+	if len(pending) > 0 {
+		err := c.SubscribeTracks(pending)
 		if err != nil {
 			c.log.Errorf("client: error subscribe tracks %s ", err.Error())
 		}
-
-		c.pendingReceivedTracks = make([]SubscribeTrackRequest, 0)
 	}
 }
 
