@@ -334,7 +334,7 @@ func (r *Room) Stats() RoomStats {
 
 	for _, cstats := range r.stats {
 		for _, stat := range cstats.receivers {
-			bytesReceived += stat.BytesReceived
+			bytesReceived += receivedWireBytes(stat)
 		}
 
 		for _, stat := range cstats.receiverBitrates {
@@ -346,7 +346,7 @@ func (r *Room) Stats() RoomStats {
 		}
 
 		for _, stat := range cstats.senders {
-			bytesSent += stat.OutboundRTPStreamStats.BytesSent
+			bytesSent += sentWireBytes(stat)
 		}
 
 	}

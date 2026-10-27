@@ -17,7 +17,7 @@ import (
 	"github.com/pion/rtp"
 	"github.com/pion/rtp/codecs"
 	"github.com/pion/sdp/v3"
-	"github.com/pion/turn/v4"
+	"github.com/pion/turn/v5"
 	"github.com/pion/webrtc/v4"
 	"golang.org/x/text/language"
 	"golang.org/x/text/message"
@@ -410,11 +410,11 @@ func StartTurnServer(ctx context.Context, publicIP string) *turn.Server {
 		// Set AuthHandler callback
 		// This is called every time a user tries to authenticate with the TURN server
 		// Return the key for that user, or false when no user is found
-		AuthHandler: func(username string, realm string, srcAddr net.Addr) ([]byte, bool) {
-			if key, ok := usersMap[username]; ok {
-				return key, true
+		AuthHandler: func(ra *turn.RequestAttributes) (string, []byte, bool) {
+			if key, ok := usersMap[ra.Username]; ok {
+				return ra.Username, key, true
 			}
-			return nil, false
+			return "", nil, false
 		},
 		// PacketConnConfigs is a list of UDP Listeners and the configuration around them
 		PacketConnConfigs: packetConnConfigs,

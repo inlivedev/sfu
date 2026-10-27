@@ -257,19 +257,19 @@ Loop:
 			currentClientEgressBytes := uint64(0)
 
 			for _, stat := range pc1ReceiverStats {
-				currentClientIngressBytes += stat.InboundRTPStreamStats.BytesReceived
+				currentClientIngressBytes += receivedWireBytes(stat)
 			}
 
 			for _, stat := range pc2ReceiverStats {
-				currentClientIngressBytes += stat.InboundRTPStreamStats.BytesReceived
+				currentClientIngressBytes += receivedWireBytes(stat)
 			}
 
 			for _, stat := range pc1SenderStats {
-				currentClientEgressBytes += stat.OutboundRTPStreamStats.BytesSent
+				currentClientEgressBytes += sentWireBytes(stat)
 			}
 
 			for _, stat := range pc2SenderStats {
-				currentClientEgressBytes += stat.OutboundRTPStreamStats.BytesSent
+				currentClientEgressBytes += sentWireBytes(stat)
 			}
 
 			totalClientIngressBytes = currentClientIngressBytes

@@ -74,7 +74,7 @@ func filterRoutines(routines []string) []string {
 			strings.Contains(stack, "testing.(*T).Parallel(") || // Parallel test
 			strings.Contains(stack, "github.com/pion/") || // Any pion background routine
 			strings.Contains(stack, "context.(*cancelCtx).propagateCancel") || // Context propagation
-			strings.Contains(stack, "turn/v4.NewServer") || // turn server
+			strings.Contains(stack, "turn/v5.NewServer") || // turn server
 			strings.Contains(stack, "sfu.StartTurnServer") || // stun server
 			strings.Contains(stack, "sfu.StartStunServer") || // stun server
 			strings.Contains(stack, "sfu.SetPeerConnectionTracks") || // Test helper

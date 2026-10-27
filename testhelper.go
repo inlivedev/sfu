@@ -379,21 +379,16 @@ func CreatePeerPair(ctx context.Context, log logging.LeveledLogger, room *Room, 
 		})
 	}
 
-	statsInterceptorFactory, err := stats.NewInterceptor()
-	if err != nil {
-		panic(err)
-	}
-
 	var statsGetter stats.Getter
 
-	statsInterceptorFactory.OnNewPeerConnection(func(_ string, g stats.Getter) {
-		statsGetter = g
-	})
+	captureStatsGetter := func(si *stats.Interceptor) error {
+		statsGetter = si
 
-	i.Add(statsInterceptorFactory)
+		return nil
+	}
 
-	// Use the default set of Interceptors
-	if err := webrtc.RegisterDefaultInterceptors(mediaEngine, i); err != nil {
+	// Use the default set of Interceptors, sharing the default stats interceptor with the test
+	if err := webrtc.RegisterDefaultInterceptorsWithOptions(mediaEngine, i, webrtc.WithStatsInterceptorOptions(captureStatsGetter)); err != nil {
 		panic(err)
 	}
 
@@ -628,21 +623,16 @@ func CreateDataPair(ctx context.Context, log logging.LeveledLogger, room *Room, 
 
 	i := &interceptor.Registry{}
 
-	statsInterceptorFactory, err := stats.NewInterceptor()
-	if err != nil {
-		panic(err)
-	}
-
 	var statsGetter stats.Getter
 
-	statsInterceptorFactory.OnNewPeerConnection(func(_ string, g stats.Getter) {
-		statsGetter = g
-	})
+	captureStatsGetter := func(si *stats.Interceptor) error {
+		statsGetter = si
 
-	i.Add(statsInterceptorFactory)
+		return nil
+	}
 
-	// Use the default set of Interceptors
-	if err := webrtc.RegisterDefaultInterceptors(mediaEngine, i); err != nil {
+	// Use the default set of Interceptors, sharing the default stats interceptor with the test
+	if err := webrtc.RegisterDefaultInterceptorsWithOptions(mediaEngine, i, webrtc.WithStatsInterceptorOptions(captureStatsGetter)); err != nil {
 		panic(err)
 	}
 
@@ -656,6 +646,9 @@ func CreateDataPair(ctx context.Context, log logging.LeveledLogger, room *Room, 
 	pc, err := webrtcAPI.NewPeerConnection(webrtc.Configuration{
 		ICEServers: iceServers,
 	})
+	if err != nil {
+		panic(err)
+	}
 
 	pc.OnDataChannel(onDataChannel)
 

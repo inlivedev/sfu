@@ -247,40 +247,6 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		}
 	}
 
-	// Use the default set of Interceptors
-	if err := webrtc.RegisterDefaultInterceptors(m, i); err != nil {
-		panic(err)
-	}
-
-	statsInterceptorFactory, err := stats.NewInterceptor()
-	if err != nil {
-		panic(err)
-	}
-
-	var statsGetter stats.Getter
-	statsInterceptorFactory.OnNewPeerConnection(func(_ string, g stats.Getter) {
-		statsGetter = g
-	})
-
-	i.Add(statsInterceptorFactory)
-
-	var vads = make(map[uint32]*voiceactivedetector.VoiceDetector)
-
-	if opts.EnableVoiceDetection {
-		opts.Log.Infof("client: voice detection is enabled")
-		vadInterceptorFactory := voiceactivedetector.NewInterceptor(localCtx, opts.Log)
-
-		// enable voice detector
-		vadInterceptorFactory.OnNew(func(i *voiceactivedetector.Interceptor) {
-			vadInterceptor = i
-			i.OnNewVAD(func(vad *voiceactivedetector.VoiceDetector) {
-				vads[vad.SSRC()] = vad
-			})
-		})
-
-		i.Add(vadInterceptorFactory)
-	}
-
 	estimatorChan := make(chan cc.BandwidthEstimator, 1)
 
 	// Create a Congestion Controller. This analyzes inbound and outbound data and provides
@@ -323,10 +289,48 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		estimatorChan <- estimator
 	})
 
+	// The congestion controller must be registered before the NACK responder from the
+	// default interceptors. RTCP readers run in registration order, and cc stores the
+	// current target bitrate in the RTCP attributes, which the NACK responder uses to
+	// rate limit retransmissions. Registering cc and the TWCC header extension before
+	// the NACK responder also makes retransmissions go through the pacer and get their
+	// own transport-wide sequence number, so the estimator accounts for them.
 	i.Add(congestionController)
 
 	if err = webrtc.ConfigureTWCCHeaderExtensionSender(m, i); err != nil {
 		panic(err)
+	}
+
+	// Use the default set of Interceptors. The default stats interceptor is shared with the
+	// SFU through statsGetter, so packets are only recorded once and pc.GetStats() keeps
+	// reporting inbound RTP stats.
+	var statsGetter stats.Getter
+
+	captureStatsGetter := func(si *stats.Interceptor) error {
+		statsGetter = si
+
+		return nil
+	}
+
+	if err = webrtc.RegisterDefaultInterceptorsWithOptions(m, i, webrtc.WithStatsInterceptorOptions(captureStatsGetter)); err != nil {
+		panic(err)
+	}
+
+	var vads = make(map[uint32]*voiceactivedetector.VoiceDetector)
+
+	if opts.EnableVoiceDetection {
+		opts.Log.Infof("client: voice detection is enabled")
+		vadInterceptorFactory := voiceactivedetector.NewInterceptor(localCtx, opts.Log)
+
+		// enable voice detector
+		vadInterceptorFactory.OnNew(func(i *voiceactivedetector.Interceptor) {
+			vadInterceptor = i
+			i.OnNewVAD(func(vad *voiceactivedetector.VoiceDetector) {
+				vads[vad.SSRC()] = vad
+			})
+		})
+
+		i.Add(vadInterceptorFactory)
 	}
 
 	if opts.EnablePlayoutDelay {
@@ -1742,7 +1746,7 @@ func (c *Client) Stats() ClientTrackStats {
 			PacketsLost:    stat.RemoteInboundRTPStreamStats.PacketsLost,
 			PacketSent:     stat.OutboundRTPStreamStats.PacketsSent,
 			FractionLost:   stat.RemoteInboundRTPStreamStats.FractionLost,
-			BytesSent:      stat.OutboundRTPStreamStats.BytesSent,
+			BytesSent:      sentWireBytes(stat),
 			CurrentBitrate: track.SendBitrate(),
 			Source:         source,
 			Quality:        track.Quality(),
@@ -1921,7 +1925,7 @@ func generateClientReceiverStats(c *Client, track IRemoteTrack, stat stats.Stats
 		StreamID:        track.StreamID(),
 		Kind:            track.Kind(),
 		Codec:           track.Codec().MimeType,
-		BytesReceived:   int64(stat.InboundRTPStreamStats.BytesReceived),
+		BytesReceived:   int64(receivedWireBytes(stat)),
 		CurrentBitrate:  bitrate,
 		PacketsLost:     stat.InboundRTPStreamStats.PacketsLost,
 		PacketsReceived: stat.InboundRTPStreamStats.PacketsReceived,
