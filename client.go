@@ -249,6 +249,10 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 
 	estimatorChan := make(chan cc.BandwidthEstimator, 1)
 
+	// leakyBucket is set when the cc interceptor below creates its pacer, so the
+	// stream info interceptor can tell the pacer which streams are audio or RTX.
+	var leakyBucket atomic.Pointer[pacer.LeakyBucketPacer]
+
 	// Create a Congestion Controller. This analyzes inbound and outbound data and provides
 	// suggestions on how much we should be sending.
 	//
@@ -258,7 +262,9 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		var p gcc.Pacer
 		switch opts.PacerType {
 		case PacerTypeLeakyBucket:
-			p = pacer.NewLeakyBucketPacer(opts.Log, int(s.bitrateConfigs.InitialBandwidth), false)
+			lb := pacer.NewLeakyBucketPacer(opts.Log, int(s.bitrateConfigs.InitialBandwidth), false)
+			leakyBucket.Store(lb)
+			p = lb
 		case PacerTypeNoop:
 			fallthrough
 		default:
@@ -296,6 +302,10 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 	// the NACK responder also makes retransmissions go through the pacer and get their
 	// own transport-wide sequence number, so the estimator accounts for them.
 	i.Add(congestionController)
+
+	if opts.PacerType == PacerTypeLeakyBucket {
+		i.Add(pacer.NewStreamInfoInterceptorFactory(leakyBucket.Load))
+	}
 
 	if err = webrtc.ConfigureTWCCHeaderExtensionSender(m, i); err != nil {
 		panic(err)
