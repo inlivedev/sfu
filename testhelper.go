@@ -406,6 +406,9 @@ func CreatePeerPair(ctx context.Context, log logging.LeveledLogger, room *Room, 
 	pc, err := webrtcAPI.NewPeerConnection(webrtc.Configuration{
 		ICEServers: iceServers,
 	})
+	if err != nil {
+		panic(err)
+	}
 
 	pc.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
 		fmt.Printf("test: %s connection state changed %s\n", peerName, state)
@@ -544,13 +547,13 @@ func CreatePeerPair(ctx context.Context, log logging.LeveledLogger, room *Room, 
 
 		log.Infof("test: got renegotiation %s", peerName)
 		defer log.Infof("test: renegotiation done %s", peerName)
-		if err = pc.SetRemoteDescription(offer); err != nil {
+		if err := pc.SetRemoteDescription(offer); err != nil {
 			return webrtc.SessionDescription{}, err
 		}
 
 		answer, _ = pc.CreateAnswer(nil)
 
-		if err = pc.SetLocalDescription(answer); err != nil {
+		if err := pc.SetLocalDescription(answer); err != nil {
 			return webrtc.SessionDescription{}, err
 		}
 
@@ -582,7 +585,7 @@ func CreatePeerPair(ctx context.Context, log logging.LeveledLogger, room *Room, 
 			if candidate == nil {
 				return
 			}
-			err = client.PeerConnection().PC().AddICECandidate(candidate.ToJSON())
+			_ = client.PeerConnection().PC().AddICECandidate(candidate.ToJSON())
 		})
 	}
 
@@ -722,7 +725,7 @@ func CreateDataPair(ctx context.Context, log logging.LeveledLogger, room *Room, 
 		if candidate == nil {
 			return
 		}
-		err = client.PeerConnection().PC().AddICECandidate(candidate.ToJSON())
+		_ = client.PeerConnection().PC().AddICECandidate(candidate.ToJSON())
 	})
 
 	return pc, client, statsGetter, connChan

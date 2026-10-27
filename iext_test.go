@@ -153,13 +153,18 @@ func TestExtension(t *testing.T) {
 		}
 	})
 
-	client1.OnIceCandidate(func(ctx context.Context, candidate *webrtc.ICECandidate) {
-		if candidate == nil {
-			return
-		}
+	// The SFU can trickle candidates before peer1 has the answer, so queue them until then.
+	client1Candidates := &pendingICECandidates{
+		hasRemote: func() bool { return peer1.RemoteDescription() != nil },
+		add: func(candidate webrtc.ICECandidateInit) error {
+			err := peer1.AddICECandidate(candidate)
+			require.NoErrorf(t, err, "error adding ice candidate: %v", err)
+			return err
+		},
+	}
 
-		err = peer1.AddICECandidate(candidate.ToJSON())
-		require.NoErrorf(t, err, "error adding ice candidate: %v", err)
+	client1.OnIceCandidate(func(ctx context.Context, candidate *webrtc.ICECandidate) {
+		client1Candidates.addOrQueue(candidate)
 	})
 
 	require.NoErrorf(t, err, "error creating peer connection: %v", err)
@@ -172,11 +177,12 @@ func TestExtension(t *testing.T) {
 	require.NoErrorf(t, err, "error negotiating offer: %v", err)
 	err = peer1.SetRemoteDescription(*answer)
 	require.NoErrorf(t, err, "error setting remote description: %v", err)
+	client1Candidates.flush()
 	peer1.OnICECandidate(func(candidate *webrtc.ICECandidate) {
 		if candidate == nil {
 			return
 		}
-		err = client1.PeerConnection().PC().AddICECandidate(candidate.ToJSON())
+		err := client1.PeerConnection().PC().AddICECandidate(candidate.ToJSON())
 		require.NoErrorf(t, err, "error adding ice candidate: %v", err)
 
 	})
