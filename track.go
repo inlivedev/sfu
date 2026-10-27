@@ -381,20 +381,10 @@ type SimulcastTrack struct {
 	cancel                      context.CancelFunc
 	mu                          sync.RWMutex
 	base                        *baseTrack
-	baseTS                      uint32
 	onTrackCompleteCallbacks    []func()
 	remoteTrackHigh             *remoteTrack
-	remoteTrackHighBaseTS       uint32
-	highSequence                uint16
-	lastHighSequence            uint16
 	remoteTrackMid              *remoteTrack
-	remoteTrackMidBaseTS        uint32
-	midSequence                 uint16
-	lastMidSequence             uint16
 	remoteTrackLow              *remoteTrack
-	remoteTrackLowBaseTS        uint32
-	lowSequence                 uint16
-	lastLowSequence             uint16
 	lastReadHighTS              *atomic.Int64
 	lastReadMidTS               *atomic.Int64
 	lastReadLowTS               *atomic.Int64
@@ -526,35 +516,15 @@ func (t *SimulcastTrack) AddRemoteTrack(track IRemoteTrack, minWait, maxWait tim
 	quality := RIDToQuality(track.RID())
 
 	onRead := func(attrs interceptor.Attributes, p *rtp.Packet) {
-
-		// set the base timestamp for the track if it is not set yet
-		if t.baseTS == 0 {
-			t.baseTS = p.Timestamp
-		}
-
-		if quality == QualityHigh && t.remoteTrackHighBaseTS == 0 {
-			t.remoteTrackHighBaseTS = p.Timestamp
-		} else if quality == QualityMid && t.remoteTrackMidBaseTS == 0 {
-			t.remoteTrackMidBaseTS = p.Timestamp
-		} else if quality == QualityLow && t.remoteTrackLowBaseTS == 0 {
-			t.remoteTrackLowBaseTS = p.Timestamp
-		}
-
 		readTime := time.Now().UnixNano()
 
 		switch quality {
 		case QualityHigh:
 			t.lastReadHighTS.Store(readTime)
-			t.lastHighSequence = t.highSequence
-			t.highSequence = p.SequenceNumber
 		case QualityMid:
 			t.lastReadMidTS.Store(readTime)
-			t.lastMidSequence = t.midSequence
-			t.midSequence = p.SequenceNumber
 		case QualityLow:
 			t.lastReadLowTS.Store(readTime)
-			t.lastLowSequence = t.lowSequence
-			t.lowSequence = p.SequenceNumber
 		}
 
 		tracks := t.base.clientTracks.GetTracks()
