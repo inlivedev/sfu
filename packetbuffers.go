@@ -367,10 +367,14 @@ func (p *PacketBuffers) Clear() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	for e := p.buffers.Front(); e != nil; e = e.Next() {
+	// Remove clears the element's links, so read the next element first or only the
+	// first packet would be released.
+	for e := p.buffers.Front(); e != nil; {
+		next := e.Next()
 		packet := e.Value.(*Packet)
 		packet.Packet.Release()
 		p.buffers.Remove(e)
+		e = next
 	}
 
 	p.buffers.Init()

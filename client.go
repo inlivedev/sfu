@@ -141,6 +141,7 @@ type Client struct {
 	canAddCandidate       *atomic.Bool
 	clientTracks          map[string]iClientTrack
 	muTracks              sync.Mutex
+	muSimulcastTrack      sync.Mutex
 	internalDataChannel   *webrtc.DataChannel
 	dataChannels          *DataChannelList
 	dataChannelsInitiated bool
@@ -595,7 +596,12 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 
 			id := remoteTrack.ID()
 
-			track, err = client.tracks.Get(id) // not found because the track is not added yet due to race condition
+			// The layers of a simulcast track arrive in separate OnTrack calls that can run
+			// concurrently. Look up or create the track under one lock so only one
+			// SimulcastTrack is created and only one call reports it as a new track.
+			client.muSimulcastTrack.Lock()
+
+			track, err := client.tracks.Get(id)
 
 			if err != nil {
 				// if track not found, add it
@@ -630,9 +636,15 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 				simulcast.AddRemoteTrack(remoteTrack, opts.JitterBufferMinWait, opts.JitterBufferMaxWait, client.statsGetter, onStatsUpdated, onPLI)
 			}
 
-			if !track.IsProcessed() {
-				client.onTrack(track)
+			isNewTrack := !track.IsProcessed()
+			if isNewTrack {
 				track.SetAsProcessed()
+			}
+
+			client.muSimulcastTrack.Unlock()
+
+			if isNewTrack {
+				client.onTrack(track)
 			}
 
 		}

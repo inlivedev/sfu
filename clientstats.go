@@ -140,6 +140,32 @@ func (c *ClientStats) updateReceiverBitrates(lastReceiverBytesSent map[string]ui
 	return lastReceiverBytesSent
 }
 
+// totalBytesSent returns the RTP wire bytes sent on all sender streams.
+func (c *ClientStats) totalBytesSent() uint64 {
+	c.senderMu.RLock()
+	defer c.senderMu.RUnlock()
+
+	var total uint64
+	for _, stat := range c.senders {
+		total += sentWireBytes(stat)
+	}
+
+	return total
+}
+
+// totalBytesReceived returns the RTP wire bytes received on all receiver streams.
+func (c *ClientStats) totalBytesReceived() uint64 {
+	c.receiverMu.RLock()
+	defer c.receiverMu.RUnlock()
+
+	var total uint64
+	for _, stat := range c.receivers {
+		total += receivedWireBytes(stat)
+	}
+
+	return total
+}
+
 func (c *ClientStats) removeSenderStats(trackId string) {
 	c.senderMu.Lock()
 	defer c.senderMu.Unlock()
