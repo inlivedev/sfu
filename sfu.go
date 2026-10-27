@@ -279,13 +279,21 @@ func (s *SFU) onAfterClientStopped(client *Client) {
 }
 
 func (s *SFU) onClientAdded(client *Client) {
-	for _, callback := range s.onClientAddedCallbacks {
+	s.mu.Lock()
+	callbacks := s.onClientAddedCallbacks
+	s.mu.Unlock()
+
+	for _, callback := range callbacks {
 		callback(client)
 	}
 }
 
 func (s *SFU) onClientRemoved(client *Client) {
-	for _, callback := range s.onClientRemovedCallbacks {
+	s.mu.Lock()
+	callbacks := s.onClientRemovedCallbacks
+	s.mu.Unlock()
+
+	for _, callback := range callbacks {
 		callback(client)
 	}
 }
@@ -298,7 +306,11 @@ func (s *SFU) onTracksAvailable(clientId string, tracks []ITrack) {
 		}
 	}
 
-	for _, callback := range s.onTrackAvailableCallbacks {
+	s.mu.Lock()
+	callbacks := s.onTrackAvailableCallbacks
+	s.mu.Unlock()
+
+	for _, callback := range callbacks {
 		if callback != nil {
 			callback(tracks)
 		}

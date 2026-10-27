@@ -3,6 +3,7 @@ package sfu
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -152,7 +153,7 @@ func TestSimulcastTrack(t *testing.T) {
 	defer cancelTimeout()
 
 	trackCount := 0
-	simulcastCount := 0
+	var simulcastCount atomic.Int32
 Loop:
 	for {
 		select {
@@ -177,11 +178,8 @@ Loop:
 						return
 					case <-ticker.C:
 
-						if simulcastTrack.remoteTrackHigh != nil &&
-							simulcastTrack.remoteTrackMid != nil &&
-							simulcastTrack.remoteTrackLow != nil {
-							simulcastCount++
-							t.Log("simulcast track complete ", simulcastCount)
+						if simulcastTrack.IsTrackComplete() {
+							t.Log("simulcast track complete ", simulcastCount.Add(1))
 							return
 						}
 
@@ -190,7 +188,7 @@ Loop:
 			}()
 
 		default:
-			if trackCount == 2 && simulcastCount == 2 {
+			if trackCount == 2 && simulcastCount.Load() == 2 {
 				break Loop
 			}
 
@@ -198,7 +196,7 @@ Loop:
 	}
 
 	require.Equal(t, 2, trackCount)
-	require.Equal(t, 2, simulcastCount)
+	require.Equal(t, int32(2), simulcastCount.Load())
 }
 
 func addSimulcastPair(t *testing.T, ctx context.Context, room *Room, peerName string, simulcastTrackChan chan *SimulcastTrack) (*Client, *webrtc.PeerConnection) {

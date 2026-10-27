@@ -3,6 +3,8 @@ package sfu
 import (
 	"context"
 	"fmt"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -37,13 +39,21 @@ func TestLeaveRoom(t *testing.T) {
 
 	trackChan := make(chan bool)
 
+	var clientsMu sync.Mutex
 	clients := make([]*Client, 0)
+	getClients := func() []*Client {
+		clientsMu.Lock()
+		defer clientsMu.Unlock()
+		return append([]*Client(nil), clients...)
+	}
 
 	for i := 0; i < peerCount; i++ {
 		go func(i int) {
 			pc, client, _, _ := CreatePeerPair(ctx, TestLogger, testRoom, DefaultTestIceServers(), fmt.Sprintf("peer-%d", i), true, false, true)
 
+			clientsMu.Lock()
 			clients = append(clients, client)
+			clientsMu.Unlock()
 
 			pc.PeerConnection.OnTrack(func(track *webrtc.TrackRemote, receiver *webrtc.RTPReceiver) {
 				trackChan <- true
@@ -60,7 +70,7 @@ func TestLeaveRoom(t *testing.T) {
 	leftClientsCounts := peerCount - peerToClose
 	expectedActiveTracks := (leftClientsCounts * 2) * (leftClientsCounts - 1)
 	checkReceiverChan := make(chan bool)
-	activeTracks := 0
+	var activeTracks atomic.Int32
 
 Loop:
 	for {
@@ -76,8 +86,9 @@ Loop:
 				go func() {
 					// when all tracks received, make two peers leave the room
 					t.Logf("all tracks received, make two peers leave the room")
+					clients := getClients()
 					for i := 0; i < 2; i++ {
-						err = testRoom.StopClient(clients[i].ID())
+						err := testRoom.StopClient(clients[i].ID())
 						require.NoError(t, err, "error stopping client: %v", err)
 					}
 					checkReceiverChan <- true
@@ -95,16 +106,18 @@ Loop:
 					case <-ctxx.Done():
 						return
 					case <-ticker.C:
-						activeTracks = 0
-						for _, client := range clients {
+						count := 0
+						for _, client := range getClients() {
 							for _, sender := range client.peerConnection.PC().GetSenders() {
 								if sender.Track() != nil {
-									activeTracks++
+									count++
 								}
 							}
 						}
 
-						if activeTracks == expectedActiveTracks {
+						activeTracks.Store(int32(count))
+
+						if count == expectedActiveTracks {
 							cancelTimeout()
 						}
 					}
@@ -115,7 +128,7 @@ Loop:
 	}
 
 	require.Equal(t, expectedTracks, trackReceived)
-	require.Equal(t, activeTracks, expectedActiveTracks)
+	require.Equal(t, expectedActiveTracks, int(activeTracks.Load()))
 }
 
 func TestRenegotiation(t *testing.T) {

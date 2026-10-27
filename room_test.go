@@ -2,6 +2,8 @@ package sfu
 
 import (
 	"context"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -32,9 +34,9 @@ func TestRoomCreateAndClose(t *testing.T) {
 	testRoom, err := roomManager.NewRoom(roomID, roomName, RoomTypeLocal, roomOpts)
 	require.NoErrorf(t, err, "error creating new room: %v", err)
 
-	clientsLeft := 0
+	var clientsLeft atomic.Int32
 	testRoom.OnClientLeft(func(client *Client) {
-		clientsLeft++
+		clientsLeft.Add(1)
 	})
 
 	// add a new client to room
@@ -64,7 +66,7 @@ Loop:
 			t.Fatal("timeout waiting for client left event")
 			break Loop
 		default:
-			if clientsLeft == 2 {
+			if clientsLeft.Load() == 2 {
 				break Loop
 			}
 
@@ -72,7 +74,7 @@ Loop:
 		}
 	}
 
-	require.Equal(t, 2, clientsLeft)
+	require.Equal(t, int32(2), clientsLeft.Load())
 
 	err = testRoom.Close()
 	require.NoErrorf(t, err, "error closing room: %v", err)
@@ -93,6 +95,7 @@ func TestRoomJoinLeftEvent(t *testing.T) {
 	roomID := roomManager.CreateRoomID()
 	roomName := "test-room"
 
+	var clientsMu sync.Mutex
 	clients := make(map[string]*Client)
 
 	// create new room
@@ -110,13 +113,17 @@ func TestRoomJoinLeftEvent(t *testing.T) {
 	testRoom.OnClientLeft(func(client *Client) {
 		leftChan <- true
 		t.Log("client left", client.ID())
+		clientsMu.Lock()
 		delete(clients, client.ID())
+		clientsMu.Unlock()
 	})
 
 	testRoom.OnClientJoined(func(client *Client) {
 		joinChan <- client.ID()
 		t.Log("client join", client.ID())
+		clientsMu.Lock()
 		clients[client.ID()] = client
+		clientsMu.Unlock()
 	})
 
 	pc1, client1, _, _ := CreatePeerPair(ctx, TestLogger, testRoom, DefaultTestIceServers(), "peer1", false, false, true)
@@ -165,7 +172,7 @@ func TestRoomJoinLeftEvent(t *testing.T) {
 		time.Sleep(3 * time.Second)
 	}
 
-	require.Equal(t, 0, len(testRoom.sfu.clients.clients))
+	require.Equal(t, 0, len(testRoom.sfu.GetClients()))
 	require.Equal(t, 3, peerCount)
 }
 
@@ -191,6 +198,7 @@ func TestRoomStats(t *testing.T) {
 	roomID := roomManager.CreateRoomID()
 	roomName := "test-room"
 
+	var clientsMu sync.Mutex
 	clients := make(map[string]*Client)
 
 	// create new room
@@ -201,7 +209,9 @@ func TestRoomStats(t *testing.T) {
 	peerCount := 0
 
 	testRoom.OnClientJoined(func(client *Client) {
+		clientsMu.Lock()
 		clients[client.ID()] = client
+		clientsMu.Unlock()
 	})
 
 	pc1, client1, statsGetter1, done1 := CreatePeerPair(ctx, TestLogger, testRoom, DefaultTestIceServers(), "peer1", false, false, true)

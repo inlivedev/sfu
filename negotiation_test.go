@@ -120,49 +120,30 @@ func TestFlexFECSDP(t *testing.T) {
 	require.NoError(t, err)
 
 	// Setup ICE candidate handling
-	clientPendingCandidates := make([]*webrtc.ICECandidate, 0, 10)
-	pendingCandidates := make([]*webrtc.ICECandidate, 0, 10)
+	clientPendingCandidates, pendingCandidates := exchangeICECandidates(pc, client)
 
-	client.OnIceCandidate(func(ctx context.Context, candidate *webrtc.ICECandidate) {
-		if candidate == nil {
-			return
-		}
-		if pc.RemoteDescription() == nil {
-			clientPendingCandidates = append(clientPendingCandidates, candidate)
-			return
-		}
-		_ = pc.AddICECandidate(candidate.ToJSON())
-	})
-
-	pc.OnICECandidate(func(candidate *webrtc.ICECandidate) {
-		if candidate == nil {
-			return
-		}
-		if client.PeerConnection().pc.RemoteDescription() == nil {
-			pendingCandidates = append(pendingCandidates, candidate)
-			return
-		}
-		err = client.PeerConnection().PC().AddICECandidate(candidate.ToJSON())
-	})
-
-	// Variables to store SDP for verification
-	var receivedOffer webrtc.SessionDescription
-	var receivedAnswer webrtc.SessionDescription
+	// Variables to store SDP for verification, written by the renegotiation callback
+	var (
+		sdpMu          sync.Mutex
+		receivedOffer  webrtc.SessionDescription
+		receivedAnswer webrtc.SessionDescription
+	)
 
 	client.onRenegotiation = func(ctx context.Context, offer webrtc.SessionDescription) (answer webrtc.SessionDescription, e error) {
 		t.Log("Renegotiation triggered - inspecting SDP")
-		receivedOffer = offer
 
-		err = pc.SetRemoteDescription(offer)
-		if err != nil {
+		if err := pc.SetRemoteDescription(offer); err != nil {
 			return webrtc.SessionDescription{}, err
 		}
 
 		answer, _ = pc.CreateAnswer(nil)
-		receivedAnswer = answer
 
-		err = pc.SetLocalDescription(answer)
-		if err != nil {
+		sdpMu.Lock()
+		receivedOffer = offer
+		receivedAnswer = answer
+		sdpMu.Unlock()
+
+		if err := pc.SetLocalDescription(answer); err != nil {
 			return webrtc.SessionDescription{}, err
 		}
 
@@ -180,18 +161,8 @@ func TestFlexFECSDP(t *testing.T) {
 		negotiate(pc, client, TestLogger, true)
 
 		// Add pending candidates
-		if len(clientPendingCandidates) > 0 {
-			for _, candidate := range clientPendingCandidates {
-				_ = pc.AddICECandidate(candidate.ToJSON())
-			}
-			clientPendingCandidates = nil
-		}
-		if len(pendingCandidates) > 0 {
-			for _, candidate := range pendingCandidates {
-				_ = client.PeerConnection().PC().AddICECandidate(candidate.ToJSON())
-			}
-			pendingCandidates = nil
-		}
+		clientPendingCandidates.flush()
+		pendingCandidates.flush()
 	})
 
 	// Wait for negotiation to complete
@@ -199,7 +170,11 @@ func TestFlexFECSDP(t *testing.T) {
 	for {
 		select {
 		case <-time.After(200 * time.Millisecond):
-			if receivedOffer.SDP != "" && receivedAnswer.SDP != "" {
+			sdpMu.Lock()
+			received := receivedOffer.SDP != "" && receivedAnswer.SDP != ""
+			sdpMu.Unlock()
+
+			if received {
 				goto sdpReceived
 			}
 		case <-timeout:
@@ -210,18 +185,22 @@ func TestFlexFECSDP(t *testing.T) {
 	}
 
 sdpReceived:
+	sdpMu.Lock()
+	offerSDP, answerSDP := receivedOffer, receivedAnswer
+	sdpMu.Unlock()
+
 	// Verify the client offers FlexFEC (since we configured it to support FlexFEC)
-	t.Logf("Client Offer SDP FlexFEC lines:\n%s", extractFlexFECLines(receivedOffer.SDP))
+	t.Logf("Client Offer SDP FlexFEC lines:\n%s", extractFlexFECLines(offerSDP.SDP))
 
 	// The main test: Verify FlexFEC is present in the SFU's answer SDP
 	// When a client offers FlexFEC and the SFU has EnableFlexFEC=true,
 	// the SFU should accept and include FlexFEC in its answer
-	assert.Contains(t, receivedAnswer.SDP, "a=rtpmap:126 flexfec-03", "Answer SDP should contain FlexFEC RTP map")
-	assert.Contains(t, receivedAnswer.SDP, "a=fmtp:126", "Answer SDP should contain FlexFEC format parameters")
+	assert.Contains(t, answerSDP.SDP, "a=rtpmap:126 flexfec-03", "Answer SDP should contain FlexFEC RTP map")
+	assert.Contains(t, answerSDP.SDP, "a=fmtp:126", "Answer SDP should contain FlexFEC format parameters")
 	t.Logf("FlexFEC successfully found in SFU answer SDP")
 
 	// Log SDP content for verification
-	t.Logf("SFU Answer SDP contains FlexFEC lines:\n%s", extractFlexFECLines(receivedAnswer.SDP))
+	t.Logf("SFU Answer SDP contains FlexFEC lines:\n%s", extractFlexFECLines(answerSDP.SDP))
 }
 
 // extractFlexFECLines extracts FlexFEC-related lines from SDP for debugging
@@ -275,46 +254,23 @@ func TestOnNegotiationNeededCalledTwice(t *testing.T) {
 	// Counter for OnNegotiationNeeded calls
 	negotiationCount := 0
 	var mu sync.Mutex
+	getNegotiationCount := func() int {
+		mu.Lock()
+		defer mu.Unlock()
+		return negotiationCount
+	}
 
-	clientPendingCandidates := make([]*webrtc.ICECandidate, 0, 10)
-	pendingCandidates := make([]*webrtc.ICECandidate, 0, 10)
-	client.OnIceCandidate(func(ctx context.Context, candidate *webrtc.ICECandidate) {
-		if candidate == nil {
-			return
-		}
-
-		if pc.RemoteDescription() == nil {
-			clientPendingCandidates = append(clientPendingCandidates, candidate)
-			return
-		}
-
-		_ = pc.AddICECandidate(candidate.ToJSON())
-	})
-
-	pc.OnICECandidate(func(candidate *webrtc.ICECandidate) {
-		if candidate == nil {
-			return
-		}
-
-		if client.PeerConnection().pc.RemoteDescription() == nil {
-			pendingCandidates = append(pendingCandidates, candidate)
-			return
-		}
-
-		err = client.PeerConnection().PC().AddICECandidate(candidate.ToJSON())
-	})
+	clientPendingCandidates, pendingCandidates := exchangeICECandidates(pc, client)
 
 	client.onRenegotiation = func(ctx context.Context, offer webrtc.SessionDescription) (answer webrtc.SessionDescription, e error) {
 		t.Log("Renegotiation triggered")
 
-		err = pc.SetRemoteDescription(offer)
-		if err != nil {
+		if err := pc.SetRemoteDescription(offer); err != nil {
 			return webrtc.SessionDescription{}, err
 		}
 
 		answer, _ = pc.CreateAnswer(nil)
-		err = pc.SetLocalDescription(answer)
-		if err != nil {
+		if err := pc.SetLocalDescription(answer); err != nil {
 			return webrtc.SessionDescription{}, err
 		}
 
@@ -336,18 +292,8 @@ func TestOnNegotiationNeededCalledTwice(t *testing.T) {
 
 		// Still need to call negotiate to perform the actual negotiation
 		negotiate(pc, client, TestLogger, true)
-		if len(clientPendingCandidates) > 0 {
-			for _, candidate := range clientPendingCandidates {
-				_ = pc.AddICECandidate(candidate.ToJSON())
-			}
-			clientPendingCandidates = nil
-		}
-		if len(pendingCandidates) > 0 {
-			for _, candidate := range pendingCandidates {
-				_ = client.PeerConnection().PC().AddICECandidate(candidate.ToJSON())
-			}
-			pendingCandidates = nil
-		}
+		clientPendingCandidates.flush()
+		pendingCandidates.flush()
 	})
 
 	// Add track to trigger negotiation
@@ -363,8 +309,8 @@ func TestOnNegotiationNeededCalledTwice(t *testing.T) {
 	for {
 		select {
 		case <-time.After(200 * time.Millisecond):
-			if negotiationCount > 0 {
-				t.Logf("Negotiation needed called %d times", negotiationCount)
+			if count := getNegotiationCount(); count > 0 {
+				t.Logf("Negotiation needed called %d times", count)
 				goto negotiationDone
 			}
 		case <-timeout:
@@ -385,8 +331,8 @@ negotiationDone:
 	for {
 		select {
 		case <-time.After(200 * time.Millisecond):
-			if negotiationCount > 1 {
-				t.Logf("Negotiation needed called %d times", negotiationCount)
+			if count := getNegotiationCount(); count > 1 {
+				t.Logf("Negotiation needed called %d times", count)
 				goto finalCheck
 			}
 		case <-timeout:
@@ -399,9 +345,65 @@ negotiationDone:
 finalCheck:
 
 	// Verify OnNegotiationNeeded was called exactly once
-	mu.Lock()
-	finalCount := negotiationCount
-	mu.Unlock()
+	finalCount := getNegotiationCount()
 
 	assert.GreaterOrEqual(t, finalCount, 2, "OnNegotiationNeeded should be called at least twice, but was called %d times", finalCount)
+}
+
+// pendingICECandidates queues ICE candidates for a peer until it has a remote description.
+// The candidate callbacks and the negotiation callback run on different goroutines.
+type pendingICECandidates struct {
+	mu         sync.Mutex
+	candidates []webrtc.ICECandidateInit
+	hasRemote  func() bool
+	add        func(webrtc.ICECandidateInit) error
+}
+
+func (p *pendingICECandidates) addOrQueue(candidate *webrtc.ICECandidate) {
+	if candidate == nil {
+		return
+	}
+
+	p.mu.Lock()
+	if !p.hasRemote() {
+		p.candidates = append(p.candidates, candidate.ToJSON())
+		p.mu.Unlock()
+		return
+	}
+	p.mu.Unlock()
+
+	_ = p.add(candidate.ToJSON())
+}
+
+// flush adds the queued candidates. Call it after the remote description is set.
+func (p *pendingICECandidates) flush() {
+	p.mu.Lock()
+	candidates := p.candidates
+	p.candidates = nil
+	p.mu.Unlock()
+
+	for _, candidate := range candidates {
+		_ = p.add(candidate)
+	}
+}
+
+// exchangeICECandidates trickles the candidates of pc and client to each other. It returns the
+// queues for the client's candidates (added to pc) and pc's candidates (added to the client).
+func exchangeICECandidates(pc *webrtc.PeerConnection, client *Client) (toPC, toClient *pendingICECandidates) {
+	toPC = &pendingICECandidates{
+		hasRemote: func() bool { return pc.RemoteDescription() != nil },
+		add:       pc.AddICECandidate,
+	}
+	toClient = &pendingICECandidates{
+		hasRemote: func() bool { return client.PeerConnection().PC().RemoteDescription() != nil },
+		add:       func(c webrtc.ICECandidateInit) error { return client.PeerConnection().PC().AddICECandidate(c) },
+	}
+
+	client.OnIceCandidate(func(ctx context.Context, candidate *webrtc.ICECandidate) {
+		toPC.addOrQueue(candidate)
+	})
+
+	pc.OnICECandidate(toClient.addOrQueue)
+
+	return toPC, toClient
 }

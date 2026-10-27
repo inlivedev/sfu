@@ -54,7 +54,6 @@ func TestAdd(t *testing.T) {
 		packet := e.Value.(*Packet)
 		require.Equal(t, packet.Packet.Header().SequenceNumber, sortedNumbers[i], fmt.Sprintf("packet sequence number %d should be equal to sortedNumbers sequence number %d", packet.Packet.Header().SequenceNumber, sortedNumbers[i]))
 		i++
-		packet.Packet.Release()
 	}
 }
 
@@ -103,7 +102,6 @@ func TestAddLost(t *testing.T) {
 
 		require.Equal(t, packet.Packet.Header().SequenceNumber, sortedNumbers[i], fmt.Sprintf("packet sequence number %d should be equal to sortedNumbers sequence number %d", packet.Packet.Header().SequenceNumber, sortedNumbers[i]))
 		i++
-		packet.Packet.Release()
 	}
 }
 

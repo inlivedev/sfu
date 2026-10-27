@@ -52,10 +52,10 @@ func (m *PacketManager) NewPacket(header *rtp.Header, payload []byte, attr inter
 		return nil, errFailedToCastPacketPool
 	}
 
-	p.count = 1
-
 	p.mu.Lock()
 	defer p.mu.Unlock()
+
+	p.count = 1
 
 	*p.header = header.Clone()
 
