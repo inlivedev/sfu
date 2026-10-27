@@ -2,6 +2,7 @@ package pacer
 
 import (
 	"errors"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -52,10 +53,18 @@ func (r *recorder) bytes() int {
 	return total
 }
 
+// newTestPacer returns a pacer without the queue time limit, so tests can
+// queue far more than it would let wait and measure the plain pacing rate.
 func newTestPacer(t *testing.T, bitrate int) *LeakyBucketPacer {
 	t.Helper()
 
-	p := NewLeakyBucketPacer(logging.NewDefaultLoggerFactory().NewLogger("pacer"), bitrate, false)
+	return newTestPacerWithQueueTime(t, bitrate, 0)
+}
+
+func newTestPacerWithQueueTime(t *testing.T, bitrate int, maxQueueTime time.Duration) *LeakyBucketPacer {
+	t.Helper()
+
+	p := newLeakyBucketPacer(logging.NewDefaultLoggerFactory().NewLogger("pacer"), bitrate, false, maxQueueTime)
 	t.Cleanup(func() { _ = p.Close() })
 
 	return p
@@ -90,7 +99,8 @@ func TestLeakyBucketPacerRespectsTargetBitrate(t *testing.T) {
 	time.Sleep(window)
 	got := rec.bytes() - start
 
-	want := int(float64(bitrate) * window.Seconds() / 8)
+	// The initial bitrate gets the same pacing factor as later targets.
+	want := int(DefaultPacingFactor * float64(bitrate) * window.Seconds() / 8)
 	require.InDelta(t, want, got, float64(want)*0.25, "paced %d bytes in %v, want ~%d", got, window, want)
 }
 
@@ -99,8 +109,9 @@ func TestLeakyBucketPacerSetTargetBitrate(t *testing.T) {
 	p := newTestPacer(t, 100_000)
 	p.AddStream(1, rec.writer())
 
-	// SetTargetBitrate allows p.f (1.5x) headroom over the requested rate.
-	p.SetTargetBitrate(2_000_000)
+	// SetTargetBitrate allows DefaultPacingFactor headroom over the
+	// requested rate.
+	p.SetTargetBitrate(1_000_000)
 	writePackets(t, p, 1, 1000, 1000)
 
 	const window = 400 * time.Millisecond
@@ -109,7 +120,7 @@ func TestLeakyBucketPacerSetTargetBitrate(t *testing.T) {
 	time.Sleep(window)
 	got := rec.bytes() - start
 
-	want := int(1.5 * 2_000_000 * window.Seconds() / 8)
+	want := int(DefaultPacingFactor * 1_000_000 * window.Seconds() / 8)
 	require.InDelta(t, want, got, float64(want)*0.25, "paced %d bytes in %v, want ~%d", got, window, want)
 }
 
@@ -179,10 +190,11 @@ func TestLeakyBucketPacerUnknownSSRC(t *testing.T) {
 }
 
 func TestLeakyBucketPacerPacketLargerThanBudgetDoesNotStall(t *testing.T) {
-	// 8 kbps is 5 bytes per tick, far below one packet. The pacer must still
-	// send, then pay the debt off before sending the next packet.
+	// 4 kbps (10 kbps paced) is 6 bytes per tick, far below one packet. The
+	// pacer must still send, then pay the debt off before sending the next
+	// packet.
 	rec := &recorder{}
-	p := newTestPacer(t, 8_000)
+	p := newTestPacer(t, 4_000)
 	p.AddStream(1, rec.writer())
 
 	writePackets(t, p, 1, 2, 1400)
@@ -201,12 +213,13 @@ func TestLeakyBucketPacerIdleDoesNotBankBudget(t *testing.T) {
 	p := newTestPacer(t, bitrate)
 	p.AddStream(1, rec.writer())
 
-	// Stay idle for a while; without a burst cap this would bank ~60 KB.
+	// Stay idle for a while; without a burst cap this would bank ~150 KB.
+	// 20 ms at the paced rate is ~6 KB.
 	time.Sleep(500 * time.Millisecond)
 	writePackets(t, p, 1, 200, 1000)
 	time.Sleep(20 * time.Millisecond)
 
-	require.Less(t, rec.bytes(), 10_000, "pacer burst out budget banked while idle")
+	require.Less(t, rec.bytes(), 20_000, "pacer burst out budget banked while idle")
 }
 
 type fakeResend struct {
@@ -279,4 +292,145 @@ func TestLeakyBucketPacerCloseFlushes(t *testing.T) {
 
 	_, err := p.Write(&rtp.Header{SSRC: 1}, make([]byte, 100), nil)
 	require.ErrorIs(t, err, ErrNoQueueFound)
+}
+
+func TestLeakyBucketPacerQueueTimeLimitDrainsBacklog(t *testing.T) {
+	const maxQueueTime = 200 * time.Millisecond
+
+	// 100 kbps paces ~31 KB/s, so 200 KB would take over 6 s at the target
+	// rate. The queue time limit has to raise the rate to drain it in time.
+	rec := &recorder{}
+	p := newTestPacerWithQueueTime(t, 100_000, maxQueueTime)
+	p.AddStream(1, rec.writer())
+
+	start := time.Now()
+	writePackets(t, p, 1, 200, 1000)
+
+	// Still paced: not everything goes out on the first ticks.
+	time.Sleep(20 * time.Millisecond)
+	require.Less(t, len(rec.snapshot()), 100, "pacer flushed the backlog at once")
+
+	require.Eventually(t, func() bool { return len(rec.snapshot()) == 200 },
+		2*maxQueueTime, 5*time.Millisecond, "backlog not drained within the queue time limit")
+
+	sent := rec.snapshot()
+	require.Less(t, sent[len(sent)-1].at.Sub(start), maxQueueTime+50*time.Millisecond)
+}
+
+func TestLeakyBucketPacerQueueTimeLimitBoundsDelayUnderOverload(t *testing.T) {
+	const maxQueueTime = 150 * time.Millisecond
+
+	// Write ~8 Mbps for half a second into a pacer whose target is 250 kbps.
+	// Without the limit the queue, and so the delay, would keep growing.
+	rec := &recorder{}
+	p := newTestPacerWithQueueTime(t, 100_000, maxQueueTime)
+	p.AddStream(1, rec.writer())
+
+	var mu sync.Mutex
+	queuedAt := map[uint16]time.Time{}
+	payload := make([]byte, 1000)
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for seq := uint16(0); time.Now().Before(deadline); seq++ {
+		mu.Lock()
+		queuedAt[seq] = time.Now()
+		mu.Unlock()
+
+		_, err := p.Write(&rtp.Header{Version: 2, SSRC: 1, SequenceNumber: seq}, payload, nil)
+		require.NoError(t, err)
+		time.Sleep(time.Millisecond)
+	}
+
+	mu.Lock()
+	written := len(queuedAt)
+	mu.Unlock()
+	require.Eventually(t, func() bool { return len(rec.snapshot()) == written },
+		2*maxQueueTime, 5*time.Millisecond)
+
+	var worst time.Duration
+	for _, s := range rec.snapshot() {
+		worst = max(worst, s.at.Sub(queuedAt[s.seq]))
+	}
+	require.Less(t, worst, maxQueueTime+50*time.Millisecond, "packet waited %v in the pacer", worst)
+}
+
+func TestLeakyBucketPacerQueueTimeLimitKeepsTargetRateForShortQueues(t *testing.T) {
+	const bitrate = 1_000_000
+
+	// 50 KB drains in ~160 ms at the paced rate, inside the default limit,
+	// so the limit must not speed the pacer up.
+	rec := &recorder{}
+	p := newTestPacerWithQueueTime(t, bitrate, DefaultMaxQueueTime)
+	p.AddStream(1, rec.writer())
+
+	writePackets(t, p, 1, 50, 1000)
+
+	const window = 80 * time.Millisecond
+	time.Sleep(window)
+
+	want := int(DefaultPacingFactor * bitrate * window.Seconds() / 8)
+	require.InDelta(t, want, rec.bytes(), float64(want)*0.35)
+}
+
+func TestLeakyBucketPacerAudioIsNotPaced(t *testing.T) {
+	rec := &recorder{}
+	p := newTestPacer(t, 100_000)
+	p.AddStream(1, rec.writer())
+	p.AddStream(2, rec.writer())
+	// The info may arrive after AddStream; for SSRC 3 it arrives before.
+	p.SetStreamInfo(&interceptor.StreamInfo{SSRC: 2, MimeType: "audio/opus"})
+	p.SetStreamInfo(&interceptor.StreamInfo{SSRC: 3, MimeType: "audio/red"})
+	p.AddStream(3, rec.writer())
+
+	// Seconds of video backlog.
+	writePackets(t, p, 1, 200, 1000)
+	time.Sleep(20 * time.Millisecond)
+
+	writePackets(t, p, 2, 5, 100)
+	writePackets(t, p, 3, 5, 100)
+
+	require.Eventually(t, func() bool {
+		audio := 0
+		for _, s := range rec.snapshot() {
+			if s.ssrc != 1 {
+				audio++
+			}
+		}
+
+		return audio == 10
+	}, 30*time.Millisecond, time.Millisecond, "audio waited behind video")
+}
+
+func TestLeakyBucketPacerRetransmissionsFirst(t *testing.T) {
+	const (
+		mediaSSRC = 1
+		rtxSSRC   = 11
+	)
+
+	rec := &recorder{}
+	p := newTestPacer(t, 100_000)
+	p.AddStream(mediaSSRC, rec.writer())
+	p.AddStream(2, rec.writer())
+	p.SetStreamInfo(&interceptor.StreamInfo{SSRC: mediaSSRC, SSRCRetransmission: rtxSSRC, MimeType: "video/VP8"})
+
+	writePackets(t, p, mediaSSRC, 100, 1000)
+	writePackets(t, p, 2, 100, 1000)
+	time.Sleep(20 * time.Millisecond)
+
+	resend := &fakeResend{}
+	_, err := p.Write(&rtp.Header{Version: 2, SSRC: rtxSSRC, SequenceNumber: 500}, make([]byte, 1000),
+		interceptor.Attributes{fakeResendKey{}: resend})
+	require.NoError(t, err, "pacer rejected a packet on the RTX SSRC")
+	before := len(rec.snapshot())
+
+	require.Eventually(t, func() bool {
+		_, released := resend.state()
+		return len(released) == 1 && released[0]
+	}, time.Second, time.Millisecond)
+
+	// At 250 kbps a 1 KB packet takes ~32 ms, so the retransmission should
+	// be no more than a packet or two behind.
+	sent := rec.snapshot()
+	idx := slices.IndexFunc(sent, func(s sentPacket) bool { return s.ssrc == rtxSSRC })
+	require.GreaterOrEqual(t, idx, 0)
+	require.LessOrEqual(t, idx-before, 2, "retransmission waited behind queued video")
 }
