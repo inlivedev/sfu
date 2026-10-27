@@ -38,11 +38,15 @@ func (t *clientTrackRed) push(p *rtp.Packet, _ QualityLevel) {
 			return
 		}
 
+		t.headerExtensions.rewrite(&primaryPacket.Header)
+
 		if err := t.localTrack.WriteRTP(primaryPacket); err != nil {
 			t.client.log.Tracef("clienttrack: error on write primary rtp %s", err.Error())
 		}
 		t.remoteTrack.rtppool.PutPacket(primaryPacket)
 	} else {
+		t.headerExtensions.rewrite(&p.Header)
+
 		if err := t.localTrack.WriteRTP(p); err != nil {
 			t.client.log.Tracef("clienttrack: error on write rtp %s", err.Error())
 		}

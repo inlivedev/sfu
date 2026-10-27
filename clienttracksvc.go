@@ -292,6 +292,8 @@ func (t *scaleableClientTrack) send(p *rtp.Packet) {
 	t.lastTimestamp = p.Timestamp
 	t.mu.Unlock()
 
+	t.headerExtensions.rewrite(&p.Header)
+
 	if err := t.localTrack.WriteRTP(p); err != nil {
 		t.client.log.Errorf("scaleabletrack: error on write rtp", err)
 	}

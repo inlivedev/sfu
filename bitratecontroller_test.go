@@ -39,6 +39,7 @@ func (t *fakeScaleableTrack) ReceiveBitrate() uint32                  { return t
 func (t *fakeScaleableTrack) SendBitrate() uint32                     { return t.sendBitrate }
 func (t *fakeScaleableTrack) Quality() QualityLevel                   { return QualityHigh }
 func (t *fakeScaleableTrack) OnEnded(func())                          {}
+func (t *fakeScaleableTrack) setTransceiver(*webrtc.RTPTransceiver)   {}
 
 func newTestBitrateController(track iClientTrack, quality QualityLevel) *bitrateController {
 	bc := &bitrateController{

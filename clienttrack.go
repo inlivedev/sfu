@@ -30,6 +30,7 @@ type iClientTrack interface {
 	SendBitrate() uint32
 	Quality() QualityLevel
 	OnEnded(func())
+	setTransceiver(*webrtc.RTPTransceiver)
 }
 
 type clientTrack struct {
@@ -46,6 +47,7 @@ type clientTrack struct {
 	packetmap             *packetmap.Map
 	isScreen              bool
 	ssrc                  webrtc.SSRC
+	headerExtensions      *headerExtensionRewriter
 	onTrackEndedCallbacks []func()
 }
 
@@ -70,6 +72,7 @@ func newClientTrack(c *Client, t ITrack, isScreen bool, localTrack *webrtc.Track
 		baseTrack:             track.base,
 		isScreen:              isScreen,
 		ssrc:                  track.remoteTrack.track.SSRC(),
+		headerExtensions:      newHeaderExtensionRewriter(c, track.base.headerExtensions),
 		onTrackEndedCallbacks: make([]func(), 0),
 		packetmap:             &packetmap.Map{},
 	}
@@ -145,9 +148,20 @@ func (t *clientTrack) push(p *rtp.Packet, _ QualityLevel) {
 		return
 	}
 
+	t.writeRTP(p)
+}
+
+// writeRTP sends p to the subscriber with the header extensions rewritten for it.
+func (t *clientTrack) writeRTP(p *rtp.Packet) {
+	t.headerExtensions.rewrite(&p.Header)
+
 	if err := t.localTrack.WriteRTP(p); err != nil {
 		t.client.log.Errorf("clienttrack: error on write rtp", err)
 	}
+}
+
+func (t *clientTrack) setTransceiver(transceiver *webrtc.RTPTransceiver) {
+	t.headerExtensions.setTransceiver(transceiver)
 }
 
 // mapSequence rewrites the sequence number of p and reports whether p should be sent.
