@@ -197,7 +197,7 @@ type Client struct {
 	ingressQualityLimitationReason *atomic.Value
 	isDebug                        bool
 	vadInterceptor                 *voiceactivedetector.Interceptor
-	vads                           map[uint32]*voiceactivedetector.VoiceDetector
+	vads                           *voiceDetectors
 	log                            logging.LeveledLogger
 
 	// negotiationMu makes the checks and updates of isInRenegotiation, isInRemoteNegotiation
@@ -205,6 +205,35 @@ type Client struct {
 	negotiationMu sync.Mutex
 	// remoteNegotiationTimer releases a remote negotiation slot that the remote client never used
 	remoteNegotiationTimer *time.Timer
+}
+
+// voiceDetectors holds the VAD interceptor's detectors by SSRC. The interceptor adds them while binding a remote
+// stream, during SetLocalDescription or SetRemoteDescription, and OnTrack looks them up on another goroutine.
+type voiceDetectors struct {
+	mu   sync.RWMutex
+	vads map[uint32]*voiceactivedetector.VoiceDetector
+}
+
+func newVoiceDetectors() *voiceDetectors {
+	return &voiceDetectors{
+		vads: make(map[uint32]*voiceactivedetector.VoiceDetector),
+	}
+}
+
+func (v *voiceDetectors) set(vad *voiceactivedetector.VoiceDetector) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+
+	v.vads[vad.SSRC()] = vad
+}
+
+func (v *voiceDetectors) get(ssrc uint32) (*voiceactivedetector.VoiceDetector, bool) {
+	v.mu.RLock()
+	defer v.mu.RUnlock()
+
+	vad, ok := v.vads[ssrc]
+
+	return vad, ok
 }
 
 func DefaultClientOptions() ClientOptions {
@@ -334,7 +363,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		panic(err)
 	}
 
-	var vads = make(map[uint32]*voiceactivedetector.VoiceDetector)
+	vads := newVoiceDetectors()
 
 	if opts.EnableVoiceDetection {
 		opts.Log.Infof("client: voice detection is enabled")
@@ -344,7 +373,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 		vadInterceptorFactory.OnNew(func(i *voiceactivedetector.Interceptor) {
 			vadInterceptor = i
 			i.OnNewVAD(func(vad *voiceactivedetector.VoiceDetector) {
-				vads[vad.SSRC()] = vad
+				vads.set(vad)
 			})
 		})
 
@@ -591,7 +620,7 @@ func NewClient(s *SFU, id string, name string, peerConnectionConfig webrtc.Confi
 			})
 
 			if opts.EnableVoiceDetection && remoteTrack.Kind() == webrtc.RTPCodecTypeAudio {
-				vad, ok := vads[uint32(remoteTrack.SSRC())]
+				vad, ok := vads.get(uint32(remoteTrack.SSRC()))
 				if ok {
 					audioTrack := track.(*AudioTrack)
 					audioTrack.SetVAD(vad)
