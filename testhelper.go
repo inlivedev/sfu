@@ -410,7 +410,7 @@ func createPeerPair(ctx context.Context, log logging.LeveledLogger, room *Room, 
 	settingEngine.SetIncludeLoopbackCandidate(true)
 	settingEngine.SetICEMulticastDNSMode(ice.MulticastDNSModeDisabled)
 
-	webrtcAPI := webrtc.NewAPI(webrtc.WithMediaEngine(mediaEngine), webrtc.WithInterceptorRegistry(i))
+	webrtcAPI := webrtc.NewAPI(webrtc.WithMediaEngine(mediaEngine), webrtc.WithInterceptorRegistry(i), webrtc.WithSettingEngine(*settingEngine))
 
 	pc, err := webrtcAPI.NewPeerConnection(webrtc.Configuration{
 		ICEServers: iceServers,
@@ -457,6 +457,33 @@ func createPeerPair(ctx context.Context, log logging.LeveledLogger, room *Room, 
 	opts.IceTrickle = isIceTrickle
 
 	client, _ = room.AddClient(id, id, opts)
+
+	// exchange the candidates before adding the tracks, adding a track starts the negotiation and the gathering
+	if isIceTrickle {
+		client.OnIceCandidate(func(ctx context.Context, candidate *webrtc.ICECandidate) {
+			if candidate == nil {
+				return
+			}
+
+			// the SFU sends its candidates before pc has the SFU's description, pc rejects them until then
+			for pc.RemoteDescription() == nil {
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(10 * time.Millisecond):
+				}
+			}
+
+			_ = pc.AddICECandidate(candidate.ToJSON())
+		})
+
+		pc.OnICECandidate(func(candidate *webrtc.ICECandidate) {
+			if candidate == nil {
+				return
+			}
+			_ = client.AddICECandidate(candidate.ToJSON())
+		})
+	}
 
 	pc.OnNegotiationNeeded(func() {
 		log.Infof("test: negotiation needed %s", peerName)
@@ -580,23 +607,6 @@ func createPeerPair(ctx context.Context, log logging.LeveledLogger, room *Room, 
 		log.Infof("allowed remote renegotiation")
 		negotiate(pc, client, log, isIceTrickle)
 	})
-
-	if isIceTrickle {
-		client.OnIceCandidate(func(ctx context.Context, candidate *webrtc.ICECandidate) {
-			if candidate == nil {
-				return
-			}
-
-			_ = pc.AddICECandidate(candidate.ToJSON())
-		})
-
-		pc.OnICECandidate(func(candidate *webrtc.ICECandidate) {
-			if candidate == nil {
-				return
-			}
-			_ = client.PeerConnection().PC().AddICECandidate(candidate.ToJSON())
-		})
-	}
 
 	return peer, client, statsGetter, allDone
 }
