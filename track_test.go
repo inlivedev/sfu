@@ -3,15 +3,124 @@ package sfu
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
+	"time"
 
+	"github.com/inlivedev/sfu/pkg/interceptors/voiceactivedetector"
 	"github.com/pion/interceptor"
 	"github.com/pion/rtp"
 	"github.com/pion/webrtc/v4"
+	"github.com/stretchr/testify/require"
 )
 
+// TestVoiceActivityDetection publishes two audio tracks from one peer and checks each gets its voice detector.
+// The VAD interceptor registers a detector per stream while OnTrack looks them up, so run it with -race too.
 func TestVoiceActivityDetection(t *testing.T) {
+	report := CheckRoutines(t)
+	defer report()
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	roomManager := NewManager(ctx, "test", sfuOpts)
+	defer roomManager.Close()
+
+	roomOpts := DefaultRoomOptions()
+	roomOpts.Codecs = &[]string{webrtc.MimeTypeH264, webrtc.MimeTypeOpus}
+	testRoom, err := roomManager.NewRoom(roomManager.CreateRoomID(), "test-room", RoomTypeLocal, roomOpts)
+	require.NoError(t, err, "error creating room: %v", err)
+
+	defer testRoom.Close()
+
+	pc, client, _, _ := CreatePeerPair(ctx, TestLogger, testRoom, DefaultTestIceServers(), "peer-vad", true, false, true)
+	require.True(t, client.IsVADEnabled())
+
+	audioTracks := func() []*AudioTrack {
+		tracks := make([]*AudioTrack, 0)
+		for _, track := range client.Tracks() {
+			if audioTrack, ok := track.(*AudioTrack); ok {
+				tracks = append(tracks, audioTrack)
+			}
+		}
+
+		return tracks
+	}
+
+	require.Eventually(t, func() bool {
+		return len(audioTracks()) == 1
+	}, 30*time.Second, 100*time.Millisecond, "publisher's first audio track was not added")
+
+	// a second audio track on the same peer, bound by the SFU in a renegotiation
+	secondAudio, _ := GetStaticAudioTrack(ctx, ctx, GenerateSecureToken(), "peer-vad", true)
+	SetPeerConnectionTracks(ctx, pc.PeerConnection, []*webrtc.TrackLocalStaticSample{secondAudio})
+
+	require.Eventually(t, func() bool {
+		return len(audioTracks()) == 2
+	}, 30*time.Second, 100*time.Millisecond, "publisher's audio tracks were not added")
+
+	for _, audioTrack := range audioTracks() {
+		audioTrack.mu.Lock()
+		vad := audioTrack.vad
+		audioTrack.mu.Unlock()
+
+		require.NotNil(t, vad, "audio track %s has no voice detector", audioTrack.ID())
+		require.Equal(t, uint32(audioTrack.SSRC()), vad.SSRC())
+	}
+
+	require.NoError(t, testRoom.StopClient(client.ID()))
+	require.NoError(t, pc.PeerConnection.Close())
+}
+
+// TestVoiceDetectorsConcurrentBind binds audio streams on the VAD interceptor, as Pion does during a negotiation,
+// while another goroutine looks the detectors up, as OnTrack does for a stream bound earlier.
+func TestVoiceDetectorsConcurrentBind(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	vads := newVoiceDetectors()
+
+	factory := voiceactivedetector.NewInterceptor(ctx, TestLogger)
+	factory.OnNew(func(i *voiceactivedetector.Interceptor) {
+		i.OnNewVAD(vads.set)
+	})
+
+	vadInterceptor, err := factory.NewInterceptor("")
+	require.NoError(t, err)
+
+	const streams = 50
+
+	reader := interceptor.RTPReaderFunc(func(b []byte, a interceptor.Attributes) (int, interceptor.Attributes, error) {
+		return 0, a, nil
+	})
+
+	var wg sync.WaitGroup
+
+	wg.Add(2)
+
+	go func() {
+		defer wg.Done()
+
+		for ssrc := uint32(1); ssrc <= streams; ssrc++ {
+			vadInterceptor.BindRemoteStream(&interceptor.StreamInfo{SSRC: ssrc, MimeType: webrtc.MimeTypeOpus, ClockRate: 48000}, reader)
+		}
+	}()
+
+	go func() {
+		defer wg.Done()
+
+		for ssrc := uint32(1); ssrc <= streams; ssrc++ {
+			_, _ = vads.get(ssrc)
+		}
+	}()
+
+	wg.Wait()
+
+	for ssrc := uint32(1); ssrc <= streams; ssrc++ {
+		vad, ok := vads.get(ssrc)
+		require.True(t, ok, "no voice detector for SSRC %d", ssrc)
+		require.Equal(t, ssrc, vad.SSRC())
+	}
 }
 
 func createPeerAudio(ctx context.Context, room *Room, iceServers []webrtc.ICEServer, peerName string) (*webrtc.PeerConnection, *Client, chan *webrtc.TrackRemote) {
